@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { premortemBrand } from '@/lib/premortem-os/branding';
 import { AuditRun, Finding, TraceStep, SeverityType } from '@/lib/premortem-os/types';
 import { AuditsInvestigationsPanel } from './audits-investigations-panel';
 import { ProviderIcon } from './ProviderIcon';
@@ -407,7 +408,7 @@ export function AuditsView({
               <div className="p-4 bg-zinc-50 border border-zinc-200 rounded text-xs space-y-1">
                 <h4 className="font-bold text-[#1E2522]">Summary Checklist Findings</h4>
                 <p className="text-[#5C6560]">
-                  Listed below are the targeted vulnerabilities analyzed by Premortem Engine v2.4.0. Implement patches below or flag false positives.
+                  Listed below are the targeted vulnerabilities analyzed by Premortem Engine {premortemBrand.engineVersion}. Implement patches below or flag false positives.
                 </p>
               </div>
 

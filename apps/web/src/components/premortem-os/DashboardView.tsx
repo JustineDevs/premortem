@@ -1,4 +1,5 @@
 import React from 'react';
+import { premortemBrand } from '@/lib/premortem-os/branding';
 import { 
   Project, 
   AuditRun, 
@@ -334,7 +335,7 @@ export function DashboardView({
 
             <div className="z-10 border-t border-emerald-900 pt-4 mt-6 flex justify-between items-center text-[10px] font-mono text-[#A6BCB4]">
               <span>PREMORTEM INTELLIGENCE</span>
-              <span className="text-white">v2.4.0</span>
+              <span className="text-white">{premortemBrand.engineVersion}</span>
             </div>
             
             {/* Background elements */}

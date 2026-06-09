@@ -6,7 +6,8 @@ export const authLinks = {
   signup: '/signup',
   login: '/login',
   callback: '/auth/callback',
-  defaultNext: '/app'
+  defaultNext: '/app',
+  logout: '/api/auth/logout'
 } as const;
 
 export function authProviderHref(

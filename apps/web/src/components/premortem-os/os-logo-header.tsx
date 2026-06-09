@@ -1,5 +1,7 @@
 import Link from 'next/link';
 
+import { premortemBrand } from '@/lib/premortem-os/branding';
+
 import { osAssets } from './os-assets';
 
 type OsLogoHeaderProps = {
@@ -20,7 +22,7 @@ export function OsLogoHeader({ showEngineBadge = true }: OsLogoHeaderProps) {
       </Link>
       {showEngineBadge ? (
         <div className="mt-3 flex max-w-[208px] items-center gap-2 text-[10px] leading-none text-[#717A75] font-mono">
-          <span className="shrink-0 tracking-wide">ENGINE v2.4.0</span>
+          <span className="shrink-0 tracking-wide">ENGINE {premortemBrand.engineVersion}</span>
           <span className="inline-flex shrink-0 items-center px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 font-bold leading-none">
             STABLE
           </span>

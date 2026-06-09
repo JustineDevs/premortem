@@ -4,6 +4,7 @@ export const premortemBrand = {
   supportEmail: 'support@premortem.dev',
   workspaceName: 'Premortem Workspace',
   consoleTitle: 'Reviewer Console',
+  engineVersion: 'v0.1.0',
   loadingTitle: 'Loading Premortem',
   loadingDescription:
     'Connecting to your Premortem workspace, loading repository inventory, and preparing continuous audit telemetry.',

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { premortemBrand } from '@/lib/premortem-os/branding';
+import { authLinks } from '@/lib/auth-links';
 import {
   GitBranch, 
   Settings, 
@@ -33,7 +34,8 @@ import {
   RefreshCcw,
   RotateCw,
   Map,
-  PlusCircle
+  PlusCircle,
+  LogOut
 } from 'lucide-react';
 import { ProviderIcon } from './ProviderIcon';
 import { OsIconButton } from './os-icon-button';
@@ -262,7 +264,7 @@ export function SettingsView() {
                   </div>
                 </div>
 
-                <form onSubmit={(e) => { e.preventDefault(); showToast('Profile settings updated successfully.'); }} className="space-y-4 text-xs">
+                <form id="profile-settings-form" onSubmit={(e) => { e.preventDefault(); showToast('Profile settings updated successfully.'); }} className="space-y-4 text-xs">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">Full Display Name</label>
@@ -282,13 +284,22 @@ export function SettingsView() {
                       />
                     </div>
                   </div>
-
-                  <div className="pt-2">
-                    <button type="submit" className="py-2 px-4 bg-emerald-950 font-bold text-white rounded hover:bg-emerald-900 transition-all cursor-pointer">
-                      Save Profile Updates
-                    </button>
-                  </div>
                 </form>
+
+                <div className="pt-2 flex flex-wrap items-center gap-3">
+                  <button type="submit" form="profile-settings-form" className="py-2 px-4 bg-emerald-950 font-bold text-white rounded hover:bg-emerald-900 transition-all cursor-pointer">
+                    Save Profile Updates
+                  </button>
+                  <form action={authLinks.logout} method="POST">
+                    <button
+                      type="submit"
+                      className="inline-flex items-center gap-2 py-2 px-4 bg-white border border-[#EAE6DF] font-bold text-[#1E2522] rounded hover:bg-zinc-50 transition-all cursor-pointer"
+                    >
+                      <LogOut size={14} aria-hidden="true" />
+                      Log Out
+                    </button>
+                  </form>
+                </div>
               </div>
 
               {/* Security Logs list */}
