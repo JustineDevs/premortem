@@ -1,0 +1,27 @@
+version: 1
+name: severity-policy
+severity_rules:
+  critical:
+    blast_radius:
+      - organization
+      - production
+      - multi_service
+    confidence_min: 0.85
+  high:
+    blast_radius:
+      - service
+      - pipeline
+      - security_boundary
+    confidence_min: 0.75
+  medium:
+    blast_radius:
+      - component
+      - developer_workflow
+    confidence_min: 0.55
+  low:
+    confidence_min: 0.30
+priority_mapping:
+  critical: p1
+  high: p1
+  medium: p2
+  low: p3

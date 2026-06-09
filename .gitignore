@@ -1,0 +1,54 @@
+node_modules
+.env
+.env.*
+!.env.example
+mcp.local.json
+.wrangler
+.cursor/hooks/state/
+.turbo
+.next
+coverage
+dist
+pnpm-lock.yaml
+*.log
+
+# Internal / private design and strategy
+/internal/
+/.internal/
+/docs/internal/
+/private/
+/secrets/
+
+# Artifacts and generated outputs
+/artifacts/
+*.zip
+*.tar.gz
+*.tgz
+*.sqlite
+*.db
+*.csv
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.mp4
+*.mov
+*.manifest.json
+
+# Dependency and vendor drops
+/dependencies/vendor/
+/dependencies/private/
+/vendor/
+
+# Keys and credentials
+*.pem
+*.key
+*.p12
+*.crt
+*.ovpn
+
+# Local IDE / OS noise
+.DS_Store
+.idea/
+.vscode/*.code-workspace

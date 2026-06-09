@@ -1,0 +1,73 @@
+{
+  "mcpServers": {
+    "GitLab": {
+      "type": "http",
+      "url": "https://gitlab.com/api/v4/mcp",
+      "headers": {
+        "X-Gitlab-Mcp-Server-Tool-Name-Prefix": "premortem_"
+      }
+    },
+    "Toolbox Postgres": {
+      "command": "bash",
+      "args": [
+        "./scripts/mcp/run-toolbox-postgres.sh"
+      ]
+    },
+    "Cloudflare API": {
+      "url": "https://mcp.cloudflare.com/mcp"
+    },
+    "Cloudflare Docs": {
+      "url": "https://docs.mcp.cloudflare.com/mcp"
+    },
+    "Cloudflare Observability": {
+      "url": "https://observability.mcp.cloudflare.com/mcp"
+    },
+    "Cloudflare DNS Analytics": {
+      "url": "https://dns-analytics.mcp.cloudflare.com/mcp"
+    },
+    "Cloudflare GraphQL Analytics": {
+      "url": "https://graphql.mcp.cloudflare.com/mcp"
+    },
+    "Cloudflare Agents Docs": {
+      "url": "https://agents.cloudflare.com/mcp"
+    },
+    "Cloudflare MCP Portal": {
+      "url": "https://mcp.cloudflare.com/mcp?codemode=search_and_execute"
+    },
+    "react-bits-mcp-docs": {
+      "url": "https://gitmcp.io/DavidHDev/react-bits"
+    },
+    "kokonutui-docs": {
+      "url": "https://gitmcp.io/kokonut-labs/kokonutui"
+    },
+    "untitled-ui-docs": {
+      "url": "https://gitmcp.io/untitleduico/react"
+    },
+    "cult-ui": {
+      "url": "https://gitmcp.io/nolly-studio/cult-ui"
+    },
+    "cursify Docs": {
+      "url": "https://gitmcp.io/ui-layouts/cursify"
+    },
+    "sileo Docs": {
+      "url": "https://gitmcp.io/hiaaryan/sileo"
+    },
+    "mantine Docs": {
+      "url": "https://gitmcp.io/mantinedev/mantine"
+    },
+    "ui-layouts-mcp": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "./scripts/mcp/run-ui-layouts-mcp.sh"
+      ]
+    },
+    "shadcn": {
+      "command": "npx",
+      "args": [
+        "shadcn@latest",
+        "mcp"
+      ]
+    }
+  }
+}

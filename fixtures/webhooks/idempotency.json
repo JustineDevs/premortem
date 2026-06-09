@@ -1,0 +1,4 @@
+{
+  "event": "gitlab_push",
+  "idempotencyKey": "gitlab:push:project-1:sha-abc123"
+}

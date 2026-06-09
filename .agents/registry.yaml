@@ -1,0 +1,248 @@
+version: 1
+project: premortem
+canonical_schemas:
+  finding: .agents/schemas/canonical-finding.schema.json
+  issue_candidate: .agents/schemas/issue-candidate.schema.json
+  dedupe_cluster: .agents/schemas/dedupe-cluster.schema.json
+policies:
+  global: .agents/policies/global-policy.yaml
+  validation: .agents/policies/issue-validation.yaml
+  dedupe: .agents/policies/dedupe-policy.yaml
+  severity: .agents/policies/severity-policy.yaml
+runtime:
+  orchestrator: services/orchestrator
+  graph_builder: services/graph-builder
+  publisher: services/gitlab-sync
+  default_model: gemini-2.5-pro
+  review_required_before_publish: true
+  min_evidence_refs: 2
+  min_trigger_conditions: 2
+agents:
+  - name: repo_topology_agent
+    description: Maps code topology, dependency hotspots, centrality, and brittle boundaries.
+    prompt: .agents/prompts/repo-topology.md
+    run_mode: always
+    enabled_if:
+      - repo.has_files == true
+    input:
+      requires:
+        - repo_tree
+        - module_graph
+        - ownership_hints
+      optional:
+        - git_history
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - topology
+      - blast_radius
+    merge_owner_priority: 70
+
+  - name: release_safety_agent
+    description: Detects rollback gaps, rollout hazards, migration risks, and unsafe deploy sequences.
+    prompt: .agents/prompts/release-safety.md
+    run_mode: always
+    enabled_if:
+      - repo.has_ci == true
+    input:
+      requires:
+        - ci_config
+        - deploy_jobs
+      optional:
+        - migrations
+        - release_docs
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - release_safety
+    merge_owner_priority: 100
+
+  - name: integration_boundary_agent
+    description: Finds contract drift, schema mismatch, hidden coupling, and boundary assumptions.
+    prompt: .agents/prompts/integration-boundary.md
+    run_mode: always
+    enabled_if:
+      - repo.has_source_code == true
+    input:
+      requires:
+        - api_clients
+        - schemas
+        - typed_interfaces
+      optional:
+        - event_contracts
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - integration_boundary
+    merge_owner_priority: 90
+
+  - name: artifact_integrity_agent
+    description: Detects stale generated artifacts and codegen/source-of-truth drift.
+    prompt: .agents/prompts/artifact-integrity.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_generated_artifacts == true
+    input:
+      requires:
+        - generated_files
+        - source_of_truth_refs
+      optional:
+        - codegen_scripts
+        - ci_checks
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - artifact_integrity
+    merge_owner_priority: 85
+
+  - name: trust_boundary_agent
+    description: Detects unsafe secret handling, token scope problems, and trust-boundary failures.
+    prompt: .agents/prompts/trust-boundary.md
+    run_mode: always
+    enabled_if:
+      - repo.has_auth_or_ci == true
+    input:
+      requires:
+        - ci_variables_usage
+        - auth_config
+      optional:
+        - deploy_scripts
+        - env_examples
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - trust_boundary
+      - secrets
+    merge_owner_priority: 95
+
+  - name: onboarding_operability_agent
+    description: Detects broken local setup, undocumented prerequisites, and fragile contributor workflows.
+    prompt: .agents/prompts/onboarding-operability.md
+    run_mode: always
+    enabled_if:
+      - repo.has_docs == true
+    input:
+      requires:
+        - readme
+        - setup_scripts
+      optional:
+        - docker_compose
+        - env_examples
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - onboarding_operability
+    merge_owner_priority: 75
+
+  - name: test_adequacy_agent
+    description: Evaluates whether critical failure paths are actually covered by tests.
+    prompt: .agents/prompts/test-adequacy.md
+    run_mode: always
+    enabled_if:
+      - repo.has_tests == true
+    input:
+      requires:
+        - critical_paths
+        - test_layout
+      optional:
+        - ci_test_jobs
+        - changed_modules
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - test_adequacy
+    merge_owner_priority: 80
+
+  - name: observability_recovery_agent
+    description: Detects missing health signals, silent failure modes, and weak recovery paths.
+    prompt: .agents/prompts/observability-recovery.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_observability == true
+    input:
+      requires:
+        - health_checks
+        - logs_or_alerts
+      optional:
+        - runbooks
+        - dashboards
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - observability_recovery
+    merge_owner_priority: 78
+
+  - name: dependency_supply_chain_agent
+    description: Detects dependency chokepoints, unsafe upgrades, and supply-chain fragility.
+    prompt: .agents/prompts/dependency-supply-chain.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_manifest == true
+    input:
+      requires:
+        - manifests
+        - lockfiles
+      optional:
+        - dependency_graph
+        - ci_security_reports
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - dependency_supply_chain
+    merge_owner_priority: 77
+
+  - name: ownership_change_risk_agent
+    description: Finds no-owner hotspots, churn-heavy critical paths, and unstable boundaries.
+    prompt: .agents/prompts/ownership-change-risk.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_git_history == true
+    input:
+      requires:
+        - git_history
+        - ownership_hints
+      optional:
+        - issue_history
+        - centrality_metrics
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - ownership_change_risk
+    merge_owner_priority: 72
+
+  - name: issue_memory_agent
+    description: Links past incidents and prior findings to current risks.
+    prompt: .agents/prompts/issue-memory.md
+    run_mode: conditional
+    enabled_if:
+      - project.has_prior_issues == true
+    input:
+      requires:
+        - issue_history
+      optional:
+        - prior_findings
+        - incident_notes
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - issue_memory
+    merge_owner_priority: 50
+
+  - name: finding_synthesizer_agent
+    description: Clusters specialist findings into high-signal issue candidates.
+    prompt: .agents/prompts/finding-synthesizer.md
+    run_mode: always
+    enabled_if:
+      - audit.has_findings == true
+    input:
+      requires:
+        - canonical_findings
+        - dedupe_clusters
+    output_schema: .agents/schemas/issue-candidate.schema.json
+    owns_categories:
+      - synthesis
+    merge_owner_priority: 999
+
+  - name: issue_validator_agent
+    description: Rejects weak, generic, under-evidenced, or non-actionable issue candidates.
+    prompt: .agents/prompts/issue-validator.md
+    run_mode: always
+    enabled_if:
+      - audit.has_issue_candidates == true
+    input:
+      requires:
+        - issue_candidates
+        - validation_policy
+    output_schema: .agents/schemas/issue-candidate.schema.json
+    owns_categories:
+      - validation
+    merge_owner_priority: 1000

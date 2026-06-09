@@ -1,0 +1,31 @@
+version: 1
+name: issue-validation
+rules:
+  title:
+    min_length: 12
+    disallow_prefixes:
+      - Improve
+      - Review
+      - Check
+      - Investigate
+      - Enhance
+  evidence:
+    min_items: 2
+    require_ref_and_reason: true
+  trigger_conditions:
+    min_items: 2
+  implementation_steps:
+    min_items: 2
+  done_criteria:
+    min_items: 2
+  confidence:
+    high_confidence_min_evidence: 2
+  severity:
+    require_blast_radius_for:
+      - high
+      - critical
+rejection_conditions:
+  - missing_concrete_refs
+  - generic_action_language
+  - no_testable_success_criteria
+  - duplicated_root_cause

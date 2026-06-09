@@ -1,0 +1,38 @@
+version: 1
+name: global-policy
+defaults:
+  min_evidence_refs: 2
+  min_trigger_conditions: 2
+  min_recommended_controls: 2
+  min_done_criteria: 2
+  require_blast_radius_for:
+    - high
+    - critical
+  require_actionable_language: true
+  allow_generic_investigation: false
+forbidden_phrases:
+  - improve robustness
+  - enhance maintainability
+  - investigate further
+  - may help
+  - could be better
+  - potentially problematic
+  - consider adding
+output_rules:
+  canonical_finding_must_include:
+    - category
+    - finding_type
+    - severity
+    - confidence
+    - predicted_failure.summary
+    - evidence
+    - recommended_controls
+  issue_candidate_must_include:
+    - title
+    - predicted_failure_summary
+    - why_it_matters
+    - trigger_conditions
+    - evidence
+    - recommended_action_summary
+    - implementation_steps
+    - done_criteria

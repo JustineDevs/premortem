@@ -1,0 +1,849 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum AppRole {
+  owner
+  admin
+  member
+  viewer
+  billing
+}
+
+enum OrgPlan {
+  free
+  pro
+  team
+  enterprise
+}
+
+enum ProviderKind {
+  gitlab
+  github
+}
+
+enum ConnectionStatus {
+  pending
+  active
+  revoked
+  failed
+}
+
+enum ProjectStatus {
+  active
+  archived
+  disconnected
+}
+
+enum AuditTriggerSource {
+  manual
+  webhook
+  scheduled
+  api
+}
+
+enum RunStatus {
+  queued
+  running
+  completed
+  failed
+  cancelled
+  skipped
+}
+
+enum AgentRunMode {
+  always
+  conditional
+}
+
+enum FindingStatus {
+  active
+  merged
+  rejected
+  superseded
+}
+
+enum SeverityLevel {
+  low
+  medium
+  high
+  critical
+}
+
+enum PriorityLevel {
+  p4
+  p3
+  p2
+  p1
+}
+
+enum ClusterMergeStatus {
+  open
+  synthesized
+  rejected
+}
+
+enum ValidationStatus {
+  pending
+  passed
+  failed
+}
+
+enum ReviewStatus {
+  pending
+  approved
+  rejected
+  edited
+}
+
+enum ReviewActionType {
+  approve
+  reject
+  edit
+  merge
+  split
+  publish
+  unpublish
+}
+
+enum PublishSyncStatus {
+  pending
+  created
+  updated
+  closed
+  failed
+}
+
+enum NotificationKind {
+  audit_completed
+  audit_failed
+  issues_ready
+  issue_published
+  member_invited
+  billing_notice
+}
+
+enum InvitationStatus {
+  pending
+  accepted
+  expired
+  revoked
+}
+
+model Profile {
+  id                  String                    @id @db.Uuid
+  email               String?                   @unique @db.Citext
+  username            String?                   @unique @db.Citext
+  fullName            String?
+  avatarUrl           String?
+  bio                 String?
+  timezone            String                    @default("UTC")
+  onboardingCompleted Boolean                   @default(false)
+  defaultOrgId        String?                   @db.Uuid
+  lastSeenAt          DateTime?                 @db.Timestamptz(6)
+  createdAt           DateTime                  @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime                  @updatedAt @db.Timestamptz(6)
+
+  defaultOrg          Organization?             @relation("DefaultOrg", fields: [defaultOrgId], references: [id])
+  createdOrgs         Organization[]            @relation("OrgCreatedBy")
+  memberships         OrganizationMembership[]
+  invitationsAccepted OrganizationInvitation[]  @relation("InvitationAcceptedBy")
+  invitationsSent     OrganizationInvitation[]  @relation("InvitationInvitedBy")
+  createdConnections  ProviderConnection[]      @relation("ConnectionCreatedBy")
+  createdProjects     Project[]                 @relation("ProjectCreatedBy")
+  triggeredAudits     AuditRun[]                @relation("AuditTriggeredBy")
+  approvedIssues      IssueCandidate[]          @relation("IssueApprovedBy")
+  issueVersions       IssueCandidateVersion[]   @relation("IssueVersionEditedBy")
+  reviewActions       ReviewAction[]
+  notifications       Notification[]
+  activityEvents      ActivityEvent[]
+  apiKeys             OrganizationApiKey[]
+  projectMemberships  ProjectMembership[]
+
+  @@map("profiles")
+}
+
+model Organization {
+  id               String                    @id @default(uuid()) @db.Uuid
+  name             String
+  slug             String                    @unique @db.Citext
+  logoUrl          String?
+  websiteUrl       String?
+  plan             OrgPlan                   @default(free)
+  billingEmail     String?                   @db.Citext
+  metadata         Json                      @default("{}")
+  createdById      String                    @db.Uuid
+  createdAt        DateTime                  @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime                  @updatedAt @db.Timestamptz(6)
+
+  createdBy        Profile                   @relation("OrgCreatedBy", fields: [createdById], references: [id])
+  defaultForUsers  Profile[]                 @relation("DefaultOrg")
+  memberships      OrganizationMembership[]
+  invitations      OrganizationInvitation[]
+  billingAccount   OrganizationBillingAccount?
+  providerConnections ProviderConnection[]
+  projects         Project[]
+  auditRuns        AuditRun[]
+  graphSnapshots   GraphSnapshot[]
+  findings         Finding[]
+  dedupeClusters   DedupeCluster[]
+  issueCandidates  IssueCandidate[]
+  rejectedIssueCandidateArtifacts RejectedIssueCandidateArtifact[]
+  publishedIssues  PublishedIssue[]
+  notifications    Notification[]
+  activityEvents   ActivityEvent[]
+  apiKeys          OrganizationApiKey[]
+  usageEvents      UsageEvent[]
+
+  @@map("organizations")
+}
+
+model OrganizationMembership {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  userId         String        @db.Uuid
+  role           AppRole       @default(member)
+  joinedAt       DateTime      @default(now()) @db.Timestamptz(6)
+  createdAt      DateTime      @default(now()) @db.Timestamptz(6)
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           Profile       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@map("organization_memberships")
+}
+
+model OrganizationInvitation {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid
+  email          String           @db.Citext
+  role           AppRole          @default(member)
+  token          String           @unique
+  status         InvitationStatus @default(pending)
+  invitedById    String           @db.Uuid
+  expiresAt      DateTime         @db.Timestamptz(6)
+  acceptedById   String?          @db.Uuid
+  acceptedAt     DateTime?        @db.Timestamptz(6)
+  createdAt      DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @db.Timestamptz(6)
+
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy      Profile          @relation("InvitationInvitedBy", fields: [invitedById], references: [id])
+  acceptedBy     Profile?         @relation("InvitationAcceptedBy", fields: [acceptedById], references: [id])
+
+  @@map("organization_invitations")
+}
+
+model OrganizationBillingAccount {
+  id                  String        @id @default(uuid()) @db.Uuid
+  organizationId      String        @unique @db.Uuid
+  stripeCustomerId    String?       @unique
+  stripeSubscriptionId String?      @unique
+  plan                OrgPlan       @default(free)
+  seats               Int           @default(1)
+  auditQuotaMonthly   Int           @default(50)
+  auditsUsedMonth     Int           @default(0)
+  billingStatus       String?
+  currentPeriodStart  DateTime?     @db.Timestamptz(6)
+  currentPeriodEnd    DateTime?     @db.Timestamptz(6)
+  createdAt           DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime      @updatedAt @db.Timestamptz(6)
+
+  organization        Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("organization_billing_accounts")
+}
+
+model ProviderConnection {
+  id                 String            @id @default(uuid()) @db.Uuid
+  organizationId     String            @db.Uuid
+  provider           ProviderKind
+  externalAccountId  String?
+  externalAccountName String?
+  installationRef    String?
+  accessScope        Json              @default("{}")
+  encryptedAccessToken String?
+  encryptedRefreshToken String?
+  tokenExpiresAt     DateTime?         @db.Timestamptz(6)
+  status             ConnectionStatus  @default(pending)
+  createdById        String            @db.Uuid
+  lastSyncedAt       DateTime?         @db.Timestamptz(6)
+  createdAt          DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime          @updatedAt @db.Timestamptz(6)
+
+  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy          Profile           @relation("ConnectionCreatedBy", fields: [createdById], references: [id])
+  webhooks           ProviderWebhook[]
+  projects           Project[]
+
+  @@unique([organizationId, provider, externalAccountId])
+  @@index([organizationId])
+  @@map("provider_connections")
+}
+
+model ProviderWebhook {
+  id               String            @id @default(uuid()) @db.Uuid
+  connectionId     String            @db.Uuid
+  provider         ProviderKind
+  externalWebhookId String?
+  targetUrl        String?
+  status           ConnectionStatus  @default(pending)
+  secretRef        String?
+  metadata         Json              @default("{}")
+  createdAt        DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime          @updatedAt @db.Timestamptz(6)
+
+  connection       ProviderConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@map("provider_webhooks")
+}
+
+model Project {
+  id               String              @id @default(uuid()) @db.Uuid
+  organizationId   String              @db.Uuid
+  connectionId     String?             @db.Uuid
+  provider         ProviderKind        @default(gitlab)
+  externalProjectId String
+  namespace        String?
+  name             String
+  slug             String              @db.Citext
+  repoUrl          String?
+  defaultBranch    String?             @default("main")
+  visibility       String?
+  status           ProjectStatus       @default(active)
+  settings         Json                @default("{}")
+  metadata         Json                @default("{}")
+  connectedAt      DateTime?           @db.Timestamptz(6)
+  createdById      String?             @db.Uuid
+  createdAt        DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime            @updatedAt @db.Timestamptz(6)
+
+  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  connection       ProviderConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  createdBy        Profile?            @relation("ProjectCreatedBy", fields: [createdById], references: [id])
+  memberships      ProjectMembership[]
+  projectSettings  ProjectSetting?
+  auditRuns        AuditRun[]
+  graphSnapshots   GraphSnapshot[]
+  findings         Finding[]
+  dedupeClusters   DedupeCluster[]
+  issueCandidates  IssueCandidate[]
+  rejectedIssueCandidateArtifacts RejectedIssueCandidateArtifact[]
+  publishedIssues  PublishedIssue[]
+  notifications    Notification[]
+  activityEvents   ActivityEvent[]
+  usageEvents      UsageEvent[]
+
+  @@unique([provider, externalProjectId])
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+  @@index([connectionId])
+  @@map("projects")
+}
+
+model ProjectMembership {
+  id         String   @id @default(uuid()) @db.Uuid
+  projectId   String   @db.Uuid
+  userId      String   @db.Uuid
+  role        AppRole  @default(member)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user        Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@map("project_memberships")
+}
+
+model ProjectSetting {
+  projectId                  String        @id @db.Uuid
+  autoRunOnPush              Boolean       @default(false)
+  autoPublishApprovedIssues  Boolean       @default(false)
+  auditDefaultBranchOnly     Boolean       @default(true)
+  enabledAgents              Json          @default("[]")
+  severityThreshold          SeverityLevel @default(medium)
+  labelsTemplate             Json          @default("[]")
+  ignorePaths                Json          @default("[]")
+  notificationSettings       Json          @default("{}")
+  createdAt                  DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt                  DateTime      @updatedAt @db.Timestamptz(6)
+
+  project                    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("project_settings")
+}
+
+model AuditRun {
+  id               String             @id @default(uuid()) @db.Uuid
+  organizationId   String             @db.Uuid
+  projectId        String             @db.Uuid
+  branch           String
+  commitSha        String?
+  triggerSource    AuditTriggerSource @default(manual)
+  triggeredById    String?            @db.Uuid
+  runStatus        RunStatus          @default(queued)
+  startedAt        DateTime?          @db.Timestamptz(6)
+  completedAt      DateTime?          @db.Timestamptz(6)
+  durationMs       BigInt?
+  graphSnapshotId  String?            @unique @db.Uuid
+  summary          Json               @default("{}")
+  errorMessage     String?
+  createdAt        DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime           @updatedAt @db.Timestamptz(6)
+
+  organization     Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project          Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  triggeredBy      Profile?           @relation("AuditTriggeredBy", fields: [triggeredById], references: [id])
+  graphSnapshot    GraphSnapshot?
+  agentRuns        AgentRun[]
+  findings         Finding[]
+  dedupeClusters   DedupeCluster[]
+  issueCandidates  IssueCandidate[]
+  rejectedIssueCandidateArtifacts RejectedIssueCandidateArtifact[]
+  events           AuditRunEvent[]
+  usageEvents      UsageEvent[]
+
+  @@index([organizationId])
+  @@index([projectId])
+  @@index([runStatus])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_runs")
+}
+
+model AgentRun {
+  id            String       @id @default(uuid()) @db.Uuid
+  auditRunId     String       @db.Uuid
+  agentName      String
+  runMode        AgentRunMode
+  status         RunStatus    @default(queued)
+  skippedReason  String?
+  inputDigest    String?
+  outputDigest   String?
+  promptVersion  String?
+  modelRef       String?
+  durationMs     BigInt?
+  tokenUsage     Json         @default("{}")
+  rawOutput      Json?
+  errorMessage   String?
+  startedAt      DateTime?    @db.Timestamptz(6)
+  completedAt    DateTime?    @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @db.Timestamptz(6)
+
+  auditRun       AuditRun     @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  findings       Finding[]
+
+  @@index([auditRunId])
+  @@index([agentName])
+  @@map("agent_runs")
+}
+
+model GraphSnapshot {
+  id            String      @id @default(uuid()) @db.Uuid
+  organizationId String     @db.Uuid
+  projectId      String     @db.Uuid
+  auditRunId     String     @unique @db.Uuid
+  graphVersion   String?
+  nodeCount      Int        @default(0)
+  edgeCount      Int        @default(0)
+  storageRef     String?
+  metadata       Json       @default("{}")
+  createdAt      DateTime   @default(now()) @db.Timestamptz(6)
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  auditRun       AuditRun     @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+
+  @@map("graph_snapshots")
+}
+
+model Finding {
+  id                       String         @id @default(uuid()) @db.Uuid
+  organizationId           String         @db.Uuid
+  projectId                String         @db.Uuid
+  auditRunId               String         @db.Uuid
+  agentRunId               String         @db.Uuid
+  findingKey               String
+  category                 String
+  findingType              String
+  severity                 SeverityLevel
+  priorityHint             PriorityLevel  @default(p3)
+  confidence               Decimal        @db.Decimal(4, 3)
+  blastRadius              String?
+  predictedFailureSummary  String
+  failureMode              String?
+  whyItMatters             String?
+  triggerConditions        Json           @default("[]")
+  affectedAssets           Json           @default("[]")
+  evidence                 Json           @default("[]")
+  recommendedControls      Json           @default("[]")
+  dedupeKeys               Json           @default("[]")
+  tags                     Json           @default("[]")
+  status                   FindingStatus  @default(active)
+  createdAt                DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt                DateTime       @updatedAt @db.Timestamptz(6)
+
+  organization             Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project                  Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  auditRun                 AuditRun       @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  agentRun                 AgentRun       @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  evidenceRefs             FindingEvidenceRef[]
+  clusterMembers           DedupeClusterMember[]
+
+  @@unique([auditRunId, findingKey])
+  @@index([auditRunId])
+  @@index([projectId])
+  @@index([category])
+  @@index([severity])
+  @@index([status])
+  @@map("findings")
+}
+
+model FindingEvidenceRef {
+  id           String   @id @default(uuid()) @db.Uuid
+  findingId     String   @db.Uuid
+  evidenceKind  String
+  ref           String
+  reason        String
+  weight        Decimal  @default(0.5) @db.Decimal(4, 3)
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  finding       Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([findingId])
+  @@index([ref])
+  @@map("finding_evidence_refs")
+}
+
+model DedupeCluster {
+  id               String              @id @default(uuid()) @db.Uuid
+  organizationId   String              @db.Uuid
+  projectId        String              @db.Uuid
+  auditRunId       String              @db.Uuid
+  clusterKey       String
+  categoryOwner    String
+  titleHint        String?
+  mergeStatus      ClusterMergeStatus  @default(open)
+  severity         SeverityLevel
+  confidence       Decimal             @db.Decimal(4, 3)
+  blastRadius      String?
+  assetScope       Json                @default("[]")
+  triggerSignature Json                @default("[]")
+  createdAt        DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime            @updatedAt @db.Timestamptz(6)
+
+  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project          Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  auditRun         AuditRun            @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  members          DedupeClusterMember[]
+  issueCandidates  IssueCandidate[]
+  rejectedIssueCandidateArtifacts RejectedIssueCandidateArtifact[]
+
+  @@unique([auditRunId, clusterKey])
+  @@index([auditRunId])
+  @@map("dedupe_clusters")
+}
+
+model DedupeClusterMember {
+  id               String        @id @default(uuid()) @db.Uuid
+  clusterId        String        @db.Uuid
+  findingId        String        @db.Uuid
+  role             String        @default("supporting")
+  similarityScore  Decimal       @default(0.5) @db.Decimal(4, 3)
+  createdAt        DateTime      @default(now()) @db.Timestamptz(6)
+
+  cluster          DedupeCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  finding          Finding       @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@unique([clusterId, findingId])
+  @@index([clusterId])
+  @@index([findingId])
+  @@map("dedupe_cluster_members")
+}
+
+model IssueCandidate {
+  id                        String               @id @default(uuid()) @db.Uuid
+  organizationId            String               @db.Uuid
+  projectId                 String               @db.Uuid
+  auditRunId                String               @db.Uuid
+  clusterId                 String               @db.Uuid
+  title                     String
+  category                  String
+  severity                  SeverityLevel
+  priority                  PriorityLevel        @default(p3)
+  confidence                Decimal              @db.Decimal(4, 3)
+  predictedFailureSummary   String
+  failureMode               String?
+  blastRadius               String?
+  whyItMatters              String
+  triggerConditions         Json                 @default("[]")
+  evidence                  Json                 @default("[]")
+  recommendedActionSummary  String
+  implementationSteps       Json                 @default("[]")
+  doneCriteria              Json                 @default("[]")
+  affectedAssets            Json                 @default("[]")
+  sourceAgents              Json                 @default("[]")
+  sourceFindings            Json                 @default("[]")
+  validationStatus          ValidationStatus     @default(pending)
+  validationErrors          Json                 @default("[]")
+  reviewerStatus            ReviewStatus         @default(pending)
+  reviewerNotes             String?
+  approvedById              String?              @db.Uuid
+  approvedAt                DateTime?            @db.Timestamptz(6)
+  createdAt                 DateTime             @default(now()) @db.Timestamptz(6)
+  updatedAt                 DateTime             @updatedAt @db.Timestamptz(6)
+
+  organization              Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project                   Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  auditRun                  AuditRun             @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  cluster                   DedupeCluster        @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  approvedBy                Profile?             @relation("IssueApprovedBy", fields: [approvedById], references: [id])
+  versions                  IssueCandidateVersion[]
+  validationResults         IssueValidationResult[]
+  publishedIssue            PublishedIssue?
+  reviewActions             ReviewAction[]
+
+  @@index([projectId])
+  @@index([auditRunId])
+  @@index([validationStatus])
+  @@index([reviewerStatus])
+  @@map("issue_candidates")
+}
+
+model IssueCandidateVersion {
+  id               String         @id @default(uuid()) @db.Uuid
+  issueCandidateId String         @db.Uuid
+  versionNo        Int
+  bodySnapshot     Json
+  editedById       String?        @db.Uuid
+  editReason       String?
+  createdAt        DateTime       @default(now()) @db.Timestamptz(6)
+
+  issueCandidate   IssueCandidate @relation(fields: [issueCandidateId], references: [id], onDelete: Cascade)
+  editedBy         Profile?       @relation("IssueVersionEditedBy", fields: [editedById], references: [id])
+
+  @@unique([issueCandidateId, versionNo])
+  @@map("issue_candidate_versions")
+}
+
+model IssueValidationResult {
+  id               String           @id @default(uuid()) @db.Uuid
+  issueCandidateId String           @db.Uuid
+  status           ValidationStatus
+  validatorName    String           @default("issue_validator_agent")
+  errors           Json             @default("[]")
+  warnings         Json             @default("[]")
+  score            Decimal?         @db.Decimal(5, 2)
+  createdAt        DateTime         @default(now()) @db.Timestamptz(6)
+
+  issueCandidate   IssueCandidate   @relation(fields: [issueCandidateId], references: [id], onDelete: Cascade)
+
+  @@map("issue_validation_results")
+}
+
+model RejectedIssueCandidateArtifact {
+  id                        String               @id @default(uuid()) @db.Uuid
+  organizationId            String               @db.Uuid
+  projectId                 String               @db.Uuid
+  auditRunId                String               @db.Uuid
+  clusterId                 String?              @db.Uuid
+  title                     String
+  category                  String
+  severity                  SeverityLevel
+  confidence                Decimal              @db.Decimal(4, 3)
+  predictedFailureSummary   String
+  whyItMatters              String
+  triggerConditions         Json                 @default("[]")
+  evidence                  Json                 @default("[]")
+  recommendedActionSummary  String
+  implementationSteps       Json                 @default("[]")
+  doneCriteria              Json                 @default("[]")
+  affectedAssets            Json                 @default("[]")
+  sourceAgents              Json                 @default("[]")
+  sourceFindings            Json                 @default("[]")
+  validationErrors          Json                 @default("[]")
+  validationWarnings        Json                 @default("[]")
+  validatorName             String               @default("issue_validator_agent")
+  createdAt                 DateTime             @default(now()) @db.Timestamptz(6)
+
+  organization              Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project                   Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  auditRun                  AuditRun             @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  cluster                   DedupeCluster?       @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+
+  @@index([auditRunId])
+  @@index([projectId])
+  @@index([category])
+  @@map("rejected_issue_candidate_artifacts")
+}
+
+model PublishedIssue {
+  id               String            @id @default(uuid()) @db.Uuid
+  organizationId   String            @db.Uuid
+  projectId        String            @db.Uuid
+  issueCandidateId String            @unique @db.Uuid
+  provider         ProviderKind      @default(gitlab)
+  externalIssueId  String?
+  externalIssueIid String?
+  url              String?
+  syncStatus       PublishSyncStatus @default(pending)
+  publishedTitle   String
+  publishedBodyMd  String
+  labels           Json              @default("[]")
+  publishedAt      DateTime?         @db.Timestamptz(6)
+  lastSyncedAt     DateTime?         @db.Timestamptz(6)
+  closedAt         DateTime?         @db.Timestamptz(6)
+  createdAt        DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime          @updatedAt @db.Timestamptz(6)
+
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project          Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  issueCandidate   IssueCandidate    @relation(fields: [issueCandidateId], references: [id], onDelete: Cascade)
+  links            PublishedIssueLink[] @relation("PublishedIssueLinksCurrent")
+  priorLinks       PublishedIssueLink[] @relation("PublishedIssueLinksPrior")
+  syncLogs         IssueSyncLog[]
+
+  @@index([projectId])
+  @@index([syncStatus])
+  @@map("published_issues")
+}
+
+model PublishedIssueLink {
+  id                    String          @id @default(uuid()) @db.Uuid
+  publishedIssueId      String          @db.Uuid
+  priorPublishedIssueId String?         @db.Uuid
+  relationType          String
+  createdAt             DateTime        @default(now()) @db.Timestamptz(6)
+
+  publishedIssue        PublishedIssue  @relation("PublishedIssueLinksCurrent", fields: [publishedIssueId], references: [id], onDelete: Cascade)
+  priorPublishedIssue   PublishedIssue? @relation("PublishedIssueLinksPrior", fields: [priorPublishedIssueId], references: [id], onDelete: SetNull)
+
+  @@map("published_issue_links")
+}
+
+model IssueSyncLog {
+  id              String            @id @default(uuid()) @db.Uuid
+  publishedIssueId String           @db.Uuid
+  action          String
+  status          PublishSyncStatus
+  requestPayload  Json              @default("{}")
+  responsePayload Json              @default("{}")
+  errorMessage    String?
+  createdAt       DateTime          @default(now()) @db.Timestamptz(6)
+
+  publishedIssue  PublishedIssue    @relation(fields: [publishedIssueId], references: [id], onDelete: Cascade)
+
+  @@map("issue_sync_logs")
+}
+
+model ReviewAction {
+  id               String           @id @default(uuid()) @db.Uuid
+  issueCandidateId String           @db.Uuid
+  actorId          String           @db.Uuid
+  actionType       ReviewActionType
+  notes            String?
+  payload          Json             @default("{}")
+  createdAt        DateTime         @default(now()) @db.Timestamptz(6)
+
+  issueCandidate   IssueCandidate   @relation(fields: [issueCandidateId], references: [id], onDelete: Cascade)
+  actor            Profile          @relation(fields: [actorId], references: [id])
+
+  @@map("review_actions")
+}
+
+model AuditRunEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  auditRunId   String    @db.Uuid
+  eventType    String
+  actor        String    @default("system")
+  payload      Json      @default("{}")
+  createdAt    DateTime  @default(now()) @db.Timestamptz(6)
+
+  auditRun     AuditRun  @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+
+  @@map("audit_run_events")
+}
+
+model Notification {
+  id             String           @id @default(uuid()) @db.Uuid
+  userId         String           @db.Uuid
+  organizationId String?          @db.Uuid
+  projectId      String?          @db.Uuid
+  kind           NotificationKind
+  title          String
+  body           String?
+  url            String?
+  readAt         DateTime?        @db.Timestamptz(6)
+  metadata       Json             @default("{}")
+  createdAt      DateTime         @default(now()) @db.Timestamptz(6)
+
+  user           Profile          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization?    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project        Project?         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([readAt])
+  @@map("notifications")
+}
+
+model ActivityEvent {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  projectId      String?       @db.Uuid
+  actorId        String?       @db.Uuid
+  eventType      String
+  objectType     String
+  objectId       String?       @db.Uuid
+  summary        String?
+  metadata       Json          @default("{}")
+  createdAt      DateTime      @default(now()) @db.Timestamptz(6)
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project        Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  actor          Profile?      @relation(fields: [actorId], references: [id])
+
+  @@index([organizationId])
+  @@index([projectId])
+  @@map("activity_events")
+}
+
+model OrganizationApiKey {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  label          String
+  keyPrefix      String
+  keyHash        String
+  createdById    String        @db.Uuid
+  lastUsedAt     DateTime?     @db.Timestamptz(6)
+  revokedAt      DateTime?     @db.Timestamptz(6)
+  createdAt      DateTime      @default(now()) @db.Timestamptz(6)
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy      Profile       @relation(fields: [createdById], references: [id])
+
+  @@map("organization_api_keys")
+}
+
+model UsageEvent {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  projectId      String?       @db.Uuid
+  auditRunId     String?       @db.Uuid
+  eventType      String
+  quantity       Decimal       @default(1) @db.Decimal(12, 2)
+  unit           String        @default("count")
+  metadata       Json          @default("{}")
+  createdAt      DateTime      @default(now()) @db.Timestamptz(6)
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project        Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  auditRun       AuditRun?     @relation(fields: [auditRunId], references: [id], onDelete: SetNull)
+
+  @@map("usage_events")
+}

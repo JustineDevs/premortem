@@ -1,0 +1,31 @@
+.premortem-os-root {
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  background-color: #fbfbfa;
+  color: #1f2937;
+}
+
+.premortem-os-root .font-display {
+  font-family: var(--font-space-grotesk), sans-serif;
+}
+
+.premortem-os-root .font-mono {
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+}
+
+.premortem-os-root ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.premortem-os-root ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.premortem-os-root ::-webkit-scrollbar-thumb {
+  background: #e4e2dc;
+  border-radius: 3px;
+}
+
+.premortem-os-root ::-webkit-scrollbar-thumb:hover {
+  background: #c4c2bc;
+}

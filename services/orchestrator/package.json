@@ -1,0 +1,25 @@
+{
+  "name": "@premortem/orchestrator",
+  "private": true,
+  "type": "module",
+  "main": "./dist/services/orchestrator/src/index.js",
+  "exports": {
+    ".": "./dist/services/orchestrator/src/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "lint": "echo lint orchestrator",
+    "test": "echo test orchestrator",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@premortem/agent-kit": "workspace:*",
+    "@premortem/db": "workspace:*",
+    "@premortem/llm": "workspace:*",
+    "@premortem/workflow": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

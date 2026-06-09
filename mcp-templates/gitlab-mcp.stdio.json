@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "GitLab": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://gitlab.com/api/v4/mcp"
+      ]
+    }
+  }
+}

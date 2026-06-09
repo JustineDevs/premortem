@@ -1,0 +1,14 @@
+{
+  "name": "@premortem/graph-model",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "echo lint graph-model",
+    "test": "echo test graph-model",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

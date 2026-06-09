@@ -1,0 +1,14 @@
+{
+  "name": "@premortem/gitlab-client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "echo lint gitlab-client",
+    "test": "echo test gitlab-client",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

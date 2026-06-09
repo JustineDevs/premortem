@@ -1,0 +1,37 @@
+{
+  "name": "@premortem/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "lint": "tsc -p tsconfig.typecheck.json --noEmit",
+    "start": "next start",
+    "test": "node ../../scripts/smoke/run-local-stack.mjs",
+    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit"
+  },
+  "dependencies": {
+    "@radix-ui/react-slot": "^1.2.5",
+    "@supabase/ssr": "^0.12.0",
+    "@supabase/supabase-js": "^2.108.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "geist": "^1.7.2",
+    "lucide-react": "^1.17.0",
+    "next": "14.2.35",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^3.8.1",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.5.0",
+    "postcss": "^8.5.15",
+    "tailwindcss": "3.4.17",
+    "tailwindcss-animate": "^1.0.7",
+    "typescript": "^5.6.3"
+  }
+}

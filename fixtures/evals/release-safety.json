@@ -1,0 +1,6 @@
+{
+  "id": "release-safety-001",
+  "repoScenario": "missing rollback and stale artifact path",
+  "expectedIssueCount": 1,
+  "expectedCategories": ["release_safety"]
+}

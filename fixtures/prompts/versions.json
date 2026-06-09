@@ -1,0 +1,5 @@
+{
+  "repo_topology_agent": ["v1"],
+  "release_safety_agent": ["v1"],
+  "finding_synthesizer_agent": ["v1"]
+}
