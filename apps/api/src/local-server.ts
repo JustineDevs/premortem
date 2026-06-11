@@ -1,28 +1,15 @@
+import './bootstrap-env.js';
 import fs from 'node:fs';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ensureLocalDevelopmentFixture, LOCAL_DEV_FIXTURE } from '@premortem/db';
+import { ensureLocalDevelopmentFixture } from '@premortem/db';
+import { isLocalAuthBypassEnabled, LOCAL_DEV_FIXTURE } from '@premortem/domain';
+import { initServerObservability } from '@premortem/observability';
 import { executeAuditJob } from '@premortem/orchestrator';
 import type { AuditJob } from '@premortem/workflow';
 import { appRouter } from './lib/router';
 import type { AppEnv } from './lib/types';
-
-function loadLocalEnv(repoRoot: string) {
-  for (const fileName of ['.env.local', '.env']) {
-    const absolutePath = path.join(repoRoot, fileName);
-    if (!fs.existsSync(absolutePath)) continue;
-
-    const lines = fs.readFileSync(absolutePath, 'utf8').split(/\r?\n/);
-    for (const line of lines) {
-      const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
-      if (!match) continue;
-      const [, key, rawValue] = match;
-      if (process.env[key] !== undefined) continue;
-      process.env[key] = rawValue.replace(/^"/, '').replace(/"$/, '');
-    }
-  }
-}
 
 function resolveRepoRoot() {
   let current = path.dirname(fileURLToPath(import.meta.url));
@@ -56,7 +43,7 @@ async function readBody(request: import('node:http').IncomingMessage) {
 
 async function main() {
   const repoRoot = resolveRepoRoot();
-  loadLocalEnv(repoRoot);
+  initServerObservability('premortem-api-local');
 
   await ensureLocalDevelopmentFixture();
 
@@ -92,8 +79,8 @@ async function main() {
           JSON.stringify({
             ok: true,
             service: 'premortem-local-api',
-            mode: 'node-local',
-            fixture: LOCAL_DEV_FIXTURE
+            mode: isLocalAuthBypassEnabled() ? 'auth-bypass' : 'supabase',
+            ...(isLocalAuthBypassEnabled() ? { fixture: LOCAL_DEV_FIXTURE } : {})
           })
         );
         return;
@@ -136,7 +123,7 @@ async function main() {
       JSON.stringify({
         service: 'premortem-local-api',
         url: `http://${host}:${port}`,
-        fixture: LOCAL_DEV_FIXTURE
+        auth: isLocalAuthBypassEnabled() ? 'bypass' : 'supabase'
       })
     );
   });

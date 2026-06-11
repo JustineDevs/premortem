@@ -49,8 +49,8 @@ export default function PrivacyPage() {
       </MarketingParagraph>
       <MarketingParagraph>
         Questions: contact{' '}
-        <MarketingTextLink href={marketingLinks.maintainer} external>
-          @Justindevs
+        <MarketingTextLink href={marketingLinks.contactEmail}>
+          justinedevs@jstn.site
         </MarketingTextLink>
         . See also our <MarketingTextLink href={marketingLinks.terms}>Terms</MarketingTextLink>.
       </MarketingParagraph>

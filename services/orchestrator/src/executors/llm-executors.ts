@@ -1,21 +1,42 @@
 import type { AgentExecutor } from '@premortem/agent-kit';
-import { parseFindingEnvelope, parseIssueEnvelope } from '@premortem/agent-kit';
+import { DEFAULT_GEMINI_MODEL } from '@premortem/domain';
+import { parseFindingEnvelope, parseIssueEnvelope, synthesizeMockIssues } from '@premortem/agent-kit';
 import { createLlmAdapter } from '@premortem/llm';
 
-export function createLlmExecutors(promptByAgent: Record<string, string>): Record<string, AgentExecutor> {
+export interface LlmExecutorConfig {
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export function createLlmExecutors(
+  promptByAgent: Record<string, string>,
+  config?: LlmExecutorConfig
+): Record<string, AgentExecutor> {
   const llm = createLlmAdapter();
+  const model = config?.model ?? process.env.LLM_MODEL ?? DEFAULT_GEMINI_MODEL;
+  const temperature = config?.temperature ?? 0.2;
 
   const specialist = (agentName: string): AgentExecutor => ({
     kind: 'specialist',
     run: async (context) => {
       const result = await llm.generate({
-        model: process.env.LLM_MODEL ?? 'gemini-2.5-pro',
+        model,
+        temperature,
         messages: [
           { role: 'system', content: promptByAgent[agentName] ?? '' },
           { role: 'user', content: JSON.stringify(context.payload) }
         ]
       });
-      return parseFindingEnvelope(result.text);
+      try {
+        return parseFindingEnvelope(result.text);
+      } catch (error) {
+        console.warn(
+          `[${agentName}] finding parse failed; continuing with empty findings:`,
+          error instanceof Error ? error.message : error
+        );
+        return [];
+      }
     }
   });
 
@@ -23,13 +44,25 @@ export function createLlmExecutors(promptByAgent: Record<string, string>): Recor
     kind: 'synthesizer',
     run: async (context, findings) => {
       const result = await llm.generate({
-        model: process.env.LLM_MODEL ?? 'gemini-2.5-pro',
+        model,
+        temperature,
         messages: [
           { role: 'system', content: promptByAgent[agentName] ?? '' },
           { role: 'user', content: JSON.stringify({ payload: context.payload, findings }) }
         ]
       });
-      return parseIssueEnvelope(result.text);
+      try {
+        return parseIssueEnvelope(result.text);
+      } catch (error) {
+        if (agentName === 'finding_synthesizer_agent' && findings.length > 0) {
+          console.warn(
+            `[${agentName}] issue parse failed; falling back to deterministic synthesis:`,
+            error instanceof Error ? error.message : error
+          );
+          return synthesizeMockIssues(findings);
+        }
+        throw error;
+      }
     }
   });
 

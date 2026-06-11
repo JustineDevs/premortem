@@ -4,7 +4,14 @@
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
-    ".": "./dist/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./prompt-presets": {
+      "types": "./dist/prompt-presets.d.ts",
+      "default": "./dist/prompt-presets.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -13,6 +20,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@premortem/observability": "workspace:^",
     "zod": "^3.23.8"
   },
   "devDependencies": {

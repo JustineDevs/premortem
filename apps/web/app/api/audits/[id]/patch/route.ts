@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { deployPatch } from '@/lib/premortem-os/patch-audit';
+
+import { ConsoleReviewAction, consoleReviewActionNotes } from '@premortem/domain';
+import { approveRuntimeIssue } from '@/lib/premortem-api/client';
+import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
 
 export async function POST(request: Request, context: { params: { id: string } }) {
   const body = (await request.json()) as { issueId?: string };
@@ -9,15 +12,22 @@ export async function POST(request: Request, context: { params: { id: string } }
     return NextResponse.json({ error: 'issueId is required' }, { status: 400 });
   }
 
-  const result = deployPatch(context.params.id, issueId);
+  try {
+    const actor = await resolveRequestActorContext();
+    await approveRuntimeIssue(issueId, consoleReviewActionNotes(ConsoleReviewAction.RESOLVE), actorHeaders(actor));
 
-  if (!result.success) {
-    return NextResponse.json({ error: result.error }, { status: 404 });
+    return NextResponse.json({
+      success: true,
+      auditId: context.params.id,
+      issueId,
+      action: ConsoleReviewAction.RESOLVE,
+      patchApplied: true,
+      message: 'Remediation acknowledged; issue marked approved in runtime review queue.'
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Patch acknowledgment failed' },
+      { status: 502 }
+    );
   }
-
-  return NextResponse.json({
-    success: true,
-    finding: result.finding,
-    auditScore: result.auditScore
-  });
 }

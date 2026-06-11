@@ -9,6 +9,10 @@
     "test": "echo test graph-builder",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
+  "dependencies": {
+    "@premortem/graph-model": "workspace:*",
+    "@premortem/integrations": "workspace:*"
+  },
   "devDependencies": {
     "typescript": "^5.6.3"
   }

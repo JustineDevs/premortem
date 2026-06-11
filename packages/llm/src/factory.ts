@@ -8,7 +8,12 @@ export function createLlmAdapter(): LlmAdapter {
   }
 
   if (process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_API_KEY) {
-    return new AzureOpenAIAdapter(process.env.AZURE_OPENAI_ENDPOINT, process.env.AZURE_OPENAI_API_KEY);
+    return new AzureOpenAIAdapter(
+      process.env.AZURE_OPENAI_ENDPOINT,
+      process.env.AZURE_OPENAI_API_KEY,
+      undefined,
+      process.env.AZURE_OPENAI_DEPLOYMENT ?? process.env.AZURE_OPENAI_MODEL
+    );
   }
 
   throw new Error('No LLM adapter configured. Set GEMINI_API_KEY or AZURE_OPENAI_* env vars.');

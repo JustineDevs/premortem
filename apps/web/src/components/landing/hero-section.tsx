@@ -1,3 +1,4 @@
+import { authProviderHref } from '@/lib/auth-links';
 import { GitLabLogo } from './icons/gitlab-logo';
 import { HeroInfoSection } from './hero-info-section';
 import { assets } from './assets';
@@ -62,7 +63,8 @@ export function HeroSection() {
 
       <HeroInfoSection />
 
-      <div
+      <a
+        href={authProviderHref('gitlab', 'signup')}
         className="framer-akk7mv"
         data-border="true"
         style={{
@@ -73,9 +75,10 @@ export function HeroSection() {
         <WindowChrome />
         <span className="framer-6oxvv3 landing-cta-label">Connect to</span>
         <GitLabLogo />
-      </div>
+      </a>
 
-      <div
+      <a
+        href={authProviderHref('github', 'signup')}
         className="framer-mlk6bw"
         data-border="true"
         style={{
@@ -88,7 +91,7 @@ export function HeroSection() {
         <div className="framer-1dzkffg" data-border="true" style={chromeStyle()} />
         <div className="framer-1cz4zd2" data-border="true" style={chromeStyle()} />
         <span className="framer-115vgtw landing-cta-label landing-cta-label-muted">
-          (Coming soon)
+          Connect to
         </span>
         <img
           src={assets.githubIcon}
@@ -97,7 +100,7 @@ export function HeroSection() {
           height={19}
           className="framer-a3dd0r"
         />
-      </div>
+      </a>
 
       <h2 className="framer-jbx38w" style={sectionTitle}>
         Built with / Ecosystem

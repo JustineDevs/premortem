@@ -1,3 +1,14 @@
+export * from './repository-discovery';
+export * from './audit-readiness';
 export * from './client';
 export * from './dev-fixtures';
 export * from './repositories';
+export * from './workspace';
+export * from './entitlements';
+export * from './actor-context';
+export * from './provider-tokens';
+export * from './audit-lifecycle';
+export * from './supabase-auth';
+export { applySupabaseDatabaseEnv } from './supabase-database-url';
+export * from './stripe-env';
+export * from './smoke-stranger-workspace';

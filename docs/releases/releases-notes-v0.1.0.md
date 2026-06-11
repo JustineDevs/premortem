@@ -16,6 +16,12 @@ Premortem v0.1.0 establishes the GitLab-first foundation for predictive reposito
 - Queue workers, notifications, and dashboard flows still need runnable implementation depth.
 - GitHub parity and enterprise auth are not part of this release baseline.
 
+## Verification (2026-06-11)
+- `pnpm run smoke:production-readiness` — stranger self-serve, publish, Neo4j graph.
+- `pnpm run smoke:full-app-stress` — 66 route/BFF checks (marketing, docs, auth, billing guards, audits).
+- Stripe test catalog wired (`Premortem Starter` / `Premortem Growth` price IDs).
+- Deploy guide: [DEPLOY-PRODUCTION.md](./DEPLOY-PRODUCTION.md).
+
 ## Upgrade notes
 - Apply Supabase migrations in order.
 - Rebuild generated Prisma client after schema changes.

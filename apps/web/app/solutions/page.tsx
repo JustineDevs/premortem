@@ -1,13 +1,16 @@
 import {
   MarketingCallout,
   MarketingEcosystemStrip,
+  MarketingFeatureList,
   MarketingLinkGrid,
   MarketingPersonaCards,
-  MarketingStepGrid
+  MarketingScreenshot
 } from '@/components/landing/blocks';
 import { MarketingSectionHeading } from '@/components/landing/marketing-content';
 import { MarketingPageLayout } from '@/components/landing/marketing-page-layout';
 import { solutionsPage } from '@/content/marketing/solutions';
+import { premortemFeatures } from '@/content/marketing/shared';
+import { howItWorksPage } from '@/content/marketing/how-it-works';
 import { marketingLinks } from '@/lib/marketing-links';
 
 export const metadata = {
@@ -33,10 +36,16 @@ export default function SolutionsPage() {
             <div className="landing-solutions-mid__col">
               <MarketingSectionHeading>Workflow</MarketingSectionHeading>
               <MarketingCallout title="Audit → Review → Publish" body={solutionsPage.workflowSummary} />
+              <MarketingFeatureList items={premortemFeatures} />
             </div>
             <div className="landing-solutions-mid__col">
-              <MarketingSectionHeading>Three-step flow</MarketingSectionHeading>
-              <MarketingStepGrid />
+              <MarketingSectionHeading>Console preview</MarketingSectionHeading>
+              <MarketingScreenshot
+                src={howItWorksPage.screenshot.src}
+                alt={howItWorksPage.screenshot.alt}
+                crop="preview"
+                caption="Reviewer console: approve structured findings before GitLab sync."
+              />
             </div>
           </div>
 

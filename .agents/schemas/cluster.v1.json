@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://premortem.dev/schemas/cluster.v1.json",
+  "title": "Premortem Cluster v1",
+  "type": "object",
+  "required": ["id", "run_id", "finding_ids", "theme", "status"],
+  "properties": {
+    "id": { "type": "string" },
+    "run_id": { "type": "string" },
+    "finding_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "theme": { "type": "string" },
+    "dedupe_reason": { "type": "string" },
+    "status": { "type": "string" }
+  },
+  "additionalProperties": true
+}

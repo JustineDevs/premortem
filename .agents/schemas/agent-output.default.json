@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://premortem.dev/schemas/agent-output.default.json",
+  "title": "Premortem Default Agent Output",
+  "type": "object",
+  "required": ["status", "scope", "observations", "findings", "uncertainties", "recommended_next_actions"],
+  "properties": {
+    "status": { "enum": ["ok", "insufficient_context", "refused", "error"] },
+    "scope": { "type": "object" },
+    "observations": { "type": "array" },
+    "findings": { "type": "array" },
+    "uncertainties": { "type": "array" },
+    "recommended_next_actions": { "type": "array" }
+  },
+  "additionalProperties": true
+}

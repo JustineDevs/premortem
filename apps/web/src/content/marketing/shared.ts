@@ -33,8 +33,8 @@ export const ecosystemCards = [
     logo: 'googleCloud' as const,
     logoWidth: 137,
     logoHeight: 23,
-    body: 'Agent orchestration and multi-step reasoning via Agent Builder.',
-    href: 'https://cloud.google.com/products/agent-builder',
+    body: 'Gemini models and optional agent-builder mission hooks; audits execute in @premortem/orchestrator.',
+    href: 'https://ai.google.dev/',
     linkLabel: 'Learn more'
   },
   {

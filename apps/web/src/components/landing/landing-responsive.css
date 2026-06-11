@@ -442,6 +442,22 @@
     max-height: none;
   }
 
+  .landing-scale-host[data-layout='responsive'] .landing-doc-content-row {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-scale-host[data-layout='responsive'] .landing-doc-toc {
+    display: none;
+  }
+
+  .landing-scale-host[data-layout='responsive'] .landing-doc-article__mobile-toc {
+    display: block;
+  }
+
+  .landing-scale-host[data-layout='responsive'] .landing-doc-audience-grid {
+    grid-template-columns: 1fr;
+  }
+
   .landing-scale-host[data-layout='responsive'] .landing-block-screenshot__img {
     width: 100%;
     height: auto;

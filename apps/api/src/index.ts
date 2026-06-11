@@ -1,10 +1,13 @@
 import { buildWorkerRegisteredAgents, executeAuditJob } from '@premortem/orchestrator';
+import { captureServerException, initServerObservability } from '@premortem/observability';
 import type { RegisteredAgent } from '@premortem/agent-kit';
 import type { AuditJob } from '@premortem/workflow';
 import { appRouter } from './lib/router';
 import type { AppEnv, ExecutionContextLike, QueueBatchLike } from './lib/types';
 
 const MAX_AUDIT_QUEUE_ATTEMPTS = 3;
+
+initServerObservability('premortem-api');
 
 function isAuditJob(value: unknown): value is AuditJob {
   if (!value || typeof value !== 'object') return false;
@@ -49,6 +52,7 @@ export async function handleAuditQueue(
         attempts,
         error: error instanceof Error ? error.message : String(error)
       });
+      captureServerException(error, { queue: batch.queue, messageId: message.id, attempts });
 
       if (attempts >= MAX_AUDIT_QUEUE_ATTEMPTS) {
         message.ack();

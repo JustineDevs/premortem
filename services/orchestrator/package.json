@@ -3,8 +3,12 @@
   "private": true,
   "type": "module",
   "main": "./dist/services/orchestrator/src/index.js",
+  "types": "./src/index.ts",
   "exports": {
-    ".": "./dist/services/orchestrator/src/index.js"
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/services/orchestrator/src/index.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -14,10 +18,16 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@premortem/agent-builder": "workspace:*",
+    "@premortem/domain": "workspace:*",
     "@premortem/agent-kit": "workspace:*",
     "@premortem/db": "workspace:*",
+    "@premortem/integrations": "workspace:*",
+    "@premortem/graph-model": "workspace:*",
     "@premortem/llm": "workspace:*",
-    "@premortem/workflow": "workspace:*"
+    "@premortem/workflow": "workspace:*",
+    "@premortem/storage": "workspace:*",
+    "@premortem/observability": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

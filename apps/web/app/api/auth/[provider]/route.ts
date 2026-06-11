@@ -55,7 +55,8 @@ export async function GET(
     provider: providers[provider],
     options: {
       redirectTo,
-      scopes: 'read_user read_api read_repository'
+      // GitLab login only needs read_user (Supabase docs). Repo/API access uses GITLAB_TOKEN separately.
+      scopes: 'read_user'
     }
   });
 

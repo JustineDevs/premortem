@@ -1,4 +1,6 @@
-import React from 'react';
+'use client';
+
+import React, { useState } from 'react';
 import { premortemBrand } from '@/lib/premortem-os/branding';
 import { 
   Project, 
@@ -8,35 +10,180 @@ import {
 import { 
   ShieldCheck, 
   ShieldAlert, 
-  AlertOctagon, 
-  Settings2, 
   RefreshCw, 
-  GitPullRequest, 
-  Heart,
-  Globe,
   Radio,
   ArrowUpRight,
   TrendingUp,
-  Fingerprint
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
+import { OsTableSkeleton } from './os-skeleton';
+import { AuditRuntimeConsole } from './audit-runtime-console';
+import { ContinuousAuditLockToggle } from './continuous-audit-lock-toggle';
+
+const CLUSTER_PREVIEW_COUNT = 3;
+const AUDIT_PREVIEW_COUNT = 5;
+const PROJECT_PREVIEW_COUNT = 4;
 
 interface DashboardViewProps {
   projects: Project[];
   audits: AuditRun[];
+  riskClusters: RiskCluster[];
   onTriggerScan: (projectId: string) => void;
   onSelectAudit: (auditId: string) => void;
+  onOpenRiskCluster?: (cluster: RiskCluster) => void;
+  onNavigateTab?: (tab: string) => void;
   systemScore: number;
+  apiHealthy?: boolean | null;
+  runningAudits?: number;
+  isLoading?: boolean;
+  continuousAuditEnabled?: boolean;
+  onToggleContinuousAudit?: () => void;
+  isTogglingContinuousAudit?: boolean;
+  continuousAuditPipelineActive?: boolean;
+  onStopAllRuntime?: () => void | Promise<void>;
+  onResumeAudit?: (auditId: string) => void | Promise<void>;
+  showStopAll?: boolean;
+  isStopAllPending?: boolean;
+  isResumePending?: boolean;
+}
+
+function SeeMoreButton({
+  expanded,
+  hiddenCount,
+  onToggle,
+  onNavigate,
+  navigateLabel,
+  tone = 'light'
+}: {
+  expanded: boolean;
+  hiddenCount: number;
+  onToggle?: () => void;
+  onNavigate?: () => void;
+  navigateLabel?: string;
+  tone?: 'light' | 'dark';
+}) {
+  if (hiddenCount <= 0 && !navigateLabel) return null;
+
+  const primaryClass =
+    tone === 'dark'
+      ? 'text-[#72C8AF] hover:text-white'
+      : 'text-emerald-900 hover:text-emerald-950';
+  const secondaryClass =
+    tone === 'dark' ? 'text-[#A6BCB4] hover:text-white' : 'text-[#5C6560] hover:text-emerald-900';
+
+  return (
+    <div className={`pt-3 flex items-center justify-between ${tone === 'light' ? 'border-t border-[#EAE6DF]/60 mt-4' : 'mt-2'}`}>
+      {hiddenCount > 0 && onToggle ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          className={`inline-flex items-center gap-1.5 text-[11px] font-mono font-bold uppercase tracking-wider transition-colors ${primaryClass}`}
+        >
+          {expanded ? (
+            <>
+              <ChevronUp size={14} />
+              Show less
+            </>
+          ) : (
+            <>
+              <ChevronDown size={14} />
+              See more ({hiddenCount})
+            </>
+          )}
+        </button>
+      ) : (
+        <span />
+      )}
+      {onNavigate && navigateLabel ? (
+        <button
+          type="button"
+          onClick={onNavigate}
+          className={`inline-flex items-center gap-1 text-[11px] font-mono font-bold uppercase tracking-wider transition-colors ${secondaryClass}`}
+        >
+          {navigateLabel}
+          <ArrowUpRight size={12} />
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 export function DashboardView({ 
   projects, 
   audits, 
+  riskClusters,
   onTriggerScan, 
   onSelectAudit,
-  systemScore 
+  onOpenRiskCluster,
+  onNavigateTab,
+  systemScore,
+  apiHealthy = null,
+  runningAudits = 0,
+  isLoading = false,
+  continuousAuditEnabled = false,
+  onToggleContinuousAudit,
+  isTogglingContinuousAudit = false,
+  continuousAuditPipelineActive = false,
+  onStopAllRuntime,
+  onResumeAudit,
+  showStopAll = false,
+  isStopAllPending = false,
+  isResumePending = false
 }: DashboardViewProps) {
+  const [clustersExpanded, setClustersExpanded] = useState(false);
+  const [projectsExpanded, setProjectsExpanded] = useState(false);
+  const [monitorSnapshot, setMonitorSnapshot] = useState<{
+    agentRuns: Array<{ agentName: string; status: string; startedAt?: string | null }>;
+    events: Array<{ eventType: string; actor: string; createdAt: string }>;
+    summary?: unknown;
+  } | null>(null);
+
+  const monitorAudit =
+    audits.find((audit) => audit.status === 'RUNNING') ??
+    audits.find((audit) => audit.status === 'PAUSED') ??
+    audits.find((audit) => audit.status === 'COMPLETED') ??
+    audits[0];
+
+  React.useEffect(() => {
+    if (!monitorAudit?.id) {
+      setMonitorSnapshot(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadSnapshot = () => {
+      void fetch(`/api/audits/${monitorAudit.id}`)
+        .then((response) => response.json())
+        .then((payload) => {
+          if (cancelled || !payload.snapshot) return;
+          setMonitorSnapshot({
+            agentRuns: payload.snapshot.agentRuns ?? [],
+            events: payload.snapshot.events ?? [],
+            summary: payload.snapshot.summary
+          });
+        })
+        .catch(() => {
+          if (!cancelled) setMonitorSnapshot(null);
+        });
+    };
+
+    loadSnapshot();
+
+    if (monitorAudit.status !== 'RUNNING' && monitorAudit.status !== 'PAUSED') {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const timer = window.setInterval(loadSnapshot, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [monitorAudit?.id, monitorAudit?.status]);
   
-  // Calculate vulnerability stats
   const totalAuditsCount = audits.filter(a => a.status === 'COMPLETED').length;
   const recentAudit = audits.find(a => a.status === 'COMPLETED');
   
@@ -51,32 +198,32 @@ export function DashboardView({
     low: audits.reduce((sum, item) => sum + (item.lowCount || 0), 0),
   };
 
-  const riskClusters: RiskCluster[] = [
-    {
-      id: "clust-1",
-      name: "Unencrypted PII in Transit",
-      description: "Health/banking records and session API tokens transmitted over non-secure transport protocols",
-      severity: "CRITICAL",
-      findingsCount: audits.reduce((acc, current) => {
-        return acc + (current.findings?.filter(f => f.category === 'unencrypted-transit' && f.status === 'OPEN').length || 0);
-      }, 0),
-      projectIds: ["proj-payments-middleware", "proj-telemetry-dispatch"]
-    },
-    {
-      id: "clust-2",
-      name: "Stale IAM / Hardcoded Credentials",
-      description: "Direct string parameters representing secret storage buckets access credentials and diagnostic bypass fallbacks",
-      severity: "HIGH",
-      findingsCount: audits.reduce((acc, current) => {
-        return acc + (current.findings?.filter(f => f.category === 'hardcoded-secrets' && f.status === 'OPEN').length || 0);
-      }, 0),
-      projectIds: ["proj-user-identity", "proj-payments-middleware"]
-    }
-  ];
+  const clustersToShow: RiskCluster[] =
+    riskClusters.length > 0
+      ? riskClusters
+      : [
+          {
+            id: 'runtime-empty',
+            name: 'No clustered risks yet',
+            description: 'Run an audit to populate deduplicated risk clusters from the orchestrator.',
+            severity: 'LOW',
+            findingsCount: totalFindingsCount,
+            projectIds: projects.map((project) => project.id)
+          }
+        ];
+
+  const visibleClusters = clustersExpanded
+    ? clustersToShow
+    : clustersToShow.slice(0, CLUSTER_PREVIEW_COUNT);
+
+  const visibleProjects = projectsExpanded
+    ? projects
+    : projects.slice(0, PROJECT_PREVIEW_COUNT);
+
+  const visibleAudits = audits.slice(0, AUDIT_PREVIEW_COUNT);
 
   return (
     <div className="flex-1 overflow-y-auto p-8 font-sans space-y-8 max-w-7xl mx-auto w-full">
-      {/* Title Header Section */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-[#EAE6DF] pb-6 gap-4">
         <div>
           <span className="text-[10px] uppercase tracking-widest font-mono text-[#8A958F]">
@@ -90,24 +237,39 @@ export function DashboardView({
           </p>
         </div>
         
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded font-mono text-[11px]">
-            <Radio size={12} className="text-emerald-600 animate-pulse" />
-            <span>Telemetry online</span>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-3 w-full md:w-auto">
+          {onToggleContinuousAudit ? (
+            <div className="min-w-[260px]">
+              <ContinuousAuditLockToggle
+                layout="card"
+                enabled={continuousAuditEnabled}
+                onToggle={onToggleContinuousAudit}
+                isPending={isTogglingContinuousAudit}
+                pipelineActive={continuousAuditPipelineActive}
+              />
+            </div>
+          ) : null}
+          <div className={`flex items-center gap-1.5 px-3 py-1 border rounded font-mono text-[11px] self-start ${
+            apiHealthy === false
+              ? 'bg-rose-50 text-rose-800 border-rose-200'
+              : apiHealthy === true
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                : 'bg-zinc-50 text-zinc-600 border-zinc-200'
+          }`}>
+            <Radio size={12} className={apiHealthy === true ? 'text-emerald-600 animate-pulse' : 'text-zinc-500'} />
+            <span>{apiHealthy === false ? 'API offline' : apiHealthy === true ? 'Runtime online' : 'Checking runtime…'}</span>
           </div>
         </div>
       </div>
 
-      {/* Grid of Key Stats & Dial */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Compliance Rating Card */}
         <div className="bg-[#FAF8F5] border border-[#EAE6DF] rounded p-6 flex flex-col justify-between relative overflow-hidden group hover:shadow-sm transition-all">
           <div className="z-10">
             <span className="text-[10px] uppercase font-mono tracking-wider text-[#8A958F]">System Guard</span>
             <h3 className="text-md font-semibold text-[#1E2522] mt-0.5 font-display">Compliance Rating</h3>
             
             <div className="flex items-baseline gap-2 mt-4">
-              <span className="text-5xl font-bold font-display tracking-tight text-[#1E2522]">
+              <span className="text-5xl font-bold font-display tracking-tight text-[#1E2522] tabular-nums">
                 {systemScore}
               </span>
               <span className="text-sm font-semibold font-mono text-[#8A958F]">/100</span>
@@ -121,7 +283,7 @@ export function DashboardView({
             <span>AUDITED PROJECTS: {projects.length}</span>
             <div className="flex items-center gap-1 text-emerald-700">
               <TrendingUp size={12} />
-              <span>STABLE RUNTIME</span>
+              <span>{runningAudits > 0 ? `${runningAudits} AUDITS RUNNING` : audits.some((a) => a.status === 'RUNNING') ? 'AUDIT IN PROGRESS' : 'IDLE'}</span>
             </div>
           </div>
 
@@ -130,35 +292,27 @@ export function DashboardView({
           </div>
         </div>
 
-        {/* Multi-tier Risk Stats Counter */}
         <div className="bg-[#FAF8F5] border border-[#EAE6DF] rounded p-6 col-span-1 lg:col-span-2 flex flex-col justify-between">
           <div>
             <span className="text-[10px] uppercase font-mono tracking-wider text-[#8A958F]">Active Vulnerabilities Ledger</span>
             <h3 className="text-md font-semibold text-[#1E2522] mt-0.5 font-display">Severity Distribution</h3>
             
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5">
-              {/* Critical */}
               <div className="border border-[#EAE6DF] bg-[#FDFDFD] rounded p-3 text-center relative overflow-hidden group hover:border-[#E15A5A] transition-all">
                 <span className="text-[10px] font-mono text-rose-600 font-bold tracking-wider">CRITICAL</span>
                 <p className="text-3xl font-bold font-display text-[#1E2522] mt-1">{stats.critical}</p>
                 <div className="w-1 h-full bg-rose-600 absolute left-0 top-0" />
               </div>
-
-              {/* High */}
               <div className="border border-[#EAE6DF] bg-[#FDFDFD] rounded p-3 text-center relative overflow-hidden group hover:border-[#E88B5D] transition-all">
                 <span className="text-[10px] font-mono text-amber-600 font-bold tracking-wider">HIGH</span>
                 <p className="text-3xl font-bold font-display text-[#1E2522] mt-1">{stats.high}</p>
                 <div className="w-1 h-full bg-amber-500 absolute left-0 top-0" />
               </div>
-
-              {/* Medium */}
               <div className="border border-[#EAE6DF] bg-[#FDFDFD] rounded p-3 text-center relative overflow-hidden group hover:border-[#8370F2] transition-all">
                 <span className="text-[10px] font-mono text-indigo-500 font-bold tracking-wider">MEDIUM</span>
                 <p className="text-3xl font-bold font-display text-[#1E2522] mt-1">{stats.medium}</p>
                 <div className="w-1 h-full bg-indigo-500 absolute left-0 top-0" />
               </div>
-
-              {/* Low */}
               <div className="border border-[#EAE6DF] bg-[#FDFDFD] rounded p-3 text-center relative overflow-hidden group hover:border-[#7AB355] transition-all">
                 <span className="text-[10px] font-mono text-emerald-600 font-bold tracking-wider">LOW</span>
                 <p className="text-3xl font-bold font-display text-[#1E2522] mt-1">{stats.low}</p>
@@ -176,9 +330,31 @@ export function DashboardView({
         </div>
       </div>
 
-      {/* Risk Clusters Section & Active Threats */}
+      {monitorAudit ? (
+        <AuditRuntimeConsole
+          panelTitle="Operations Runtime"
+          auditId={monitorAudit.id}
+          auditStatus={monitorAudit.status}
+          agentRuns={
+            monitorSnapshot?.agentRuns ??
+            monitorAudit.agentRuns?.map((run) => ({
+              agentName: run.agentName,
+              status: run.status,
+              startedAt: run.startedAt
+            })) ??
+            []
+          }
+          events={monitorSnapshot?.events ?? []}
+          summary={monitorSnapshot?.summary}
+          onStopAll={onStopAllRuntime}
+          onResume={onResumeAudit}
+          showStopAll={showStopAll}
+          isStopAllPending={isStopAllPending}
+          isResumePending={isResumePending}
+        />
+      ) : null}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Risk Clusters Left Column 2 parts */}
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-[#FAF8F5] border border-[#EAE6DF] rounded p-6">
             <div className="flex justify-between items-center mb-4">
@@ -187,12 +363,12 @@ export function DashboardView({
                 <h3 className="text-md  font-semibold text-[#1E2522] font-display">Active Risk Clusters</h3>
               </div>
               <span className="text-xs font-mono px-2 py-0.5 bg-neutral-100 border border-neutral-200 rounded text-neutral-600">
-                Live Group Aggregate
+                {clustersToShow.length} clusters
               </span>
             </div>
 
             <div className="space-y-4">
-              {riskClusters.map((cluster) => (
+              {visibleClusters.map((cluster) => (
                 <div key={cluster.id} className="border border-[#EAE6DF] bg-[#FDFDFD] rounded p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-emerald-950/20 transition-all">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -214,22 +390,47 @@ export function DashboardView({
                       <span className="block text-[#8A958F] text-[9px] uppercase">PROJECTS IMPACTED</span>
                       <span className="font-semibold text-[#1E2522]">{cluster.projectIds.length} instances</span>
                     </div>
-                    <div className="px-3 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-800 rounded font-bold text-center min-w-[70px]">
+                    <button
+                      type="button"
+                      onClick={() => onOpenRiskCluster?.(cluster)}
+                      disabled={
+                        !onOpenRiskCluster ||
+                        cluster.id === 'runtime-empty' ||
+                        !cluster.auditRunId ||
+                        cluster.findingsCount === 0
+                      }
+                      className="px-3 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-800 rounded font-bold text-center min-w-[70px] hover:bg-indigo-100 hover:border-indigo-300 transition-all inline-flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      aria-label={`Open ${cluster.findingsCount} findings in ${cluster.name}`}
+                    >
                       {cluster.findingsCount} Open
-                    </div>
+                      <ArrowUpRight size={12} />
+                    </button>
                   </div>
                 </div>
               ))}
             </div>
+
+            <SeeMoreButton
+              expanded={clustersExpanded}
+              hiddenCount={Math.max(0, clustersToShow.length - CLUSTER_PREVIEW_COUNT)}
+              onToggle={() => setClustersExpanded((prev) => !prev)}
+              onNavigate={onNavigateTab ? () => onNavigateTab('audits') : undefined}
+              navigateLabel={onNavigateTab ? 'Open audits' : undefined}
+            />
           </div>
 
-          {/* Historical Audits Feed */}
           <div className="bg-[#FAF8F5] border border-[#EAE6DF] rounded p-6">
-            <h3 className="text-md font-semibold text-[#1E2522] font-display mb-4">
-              Audit Logs History
-            </h3>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-md font-semibold text-[#1E2522] font-display">
+                Audit Logs History
+              </h3>
+              <span className="text-xs font-mono text-[#717A75]">{audits.length} total</span>
+            </div>
             
             <div className="overflow-x-auto">
+              {isLoading ? (
+                <OsTableSkeleton rows={6} />
+              ) : (
               <table className="w-full text-left border-collapse font-sans">
                 <thead>
                   <tr className="border-b border-[#EAE6DF]/80 font-mono text-[10px] text-[#8A958F] uppercase bg-[#FAF8F5]/50">
@@ -242,7 +443,7 @@ export function DashboardView({
                   </tr>
                 </thead>
                 <tbody className="text-xs divide-y divide-[#EAE6DF]/60">
-                  {audits.map((audit) => {
+                  {visibleAudits.map((audit) => {
                     const totalRisks = (audit.criticalCount || 0) + (audit.highCount || 0) + (audit.mediumCount || 0) + (audit.lowCount || 0);
                     return (
                       <tr key={audit.id} className="hover:bg-[#FCECF3]/10 transition-all">
@@ -266,10 +467,10 @@ export function DashboardView({
                             {audit.score >= 85 ? 'SECURE' : 'ATTENTION REQUIRED'}
                           </span>
                         </td>
-                        <td className="py-3 px-3 text-center font-mono font-bold">
+                        <td className="py-3 px-3 text-center font-mono font-bold tabular-nums">
                           {audit.score}
                         </td>
-                        <td className="py-3 px-3 text-center font-mono font-bold text-rose-600 text-sm">
+                        <td className="py-3 px-3 text-center font-mono font-bold text-rose-600 text-sm tabular-nums">
                           {totalRisks}
                         </td>
                         <td className="py-3 px-3 text-right">
@@ -286,13 +487,20 @@ export function DashboardView({
                   })}
                 </tbody>
               </table>
+              )}
             </div>
+
+            <SeeMoreButton
+              expanded={false}
+              hiddenCount={Math.max(0, audits.length - AUDIT_PREVIEW_COUNT)}
+              onNavigate={onNavigateTab ? () => onNavigateTab('history') : undefined}
+              navigateLabel={audits.length > AUDIT_PREVIEW_COUNT && onNavigateTab ? 'See full history' : undefined}
+            />
           </div>
         </div>
 
-        {/* Sidebar Trigger Board Right Column */}
         <div className="space-y-6">
-          <div className="bg-emerald-950 text-[#FAF8F5] rounded p-6 shadow-sm relative overflow-hidden flex flex-col justify-between h-full min-h-[400px]">
+          <div className="bg-emerald-950 text-[#FAF8F5] rounded p-6 shadow-sm relative overflow-hidden flex flex-col justify-between min-h-[400px]">
             <div className="z-10 space-y-4">
               <div className="inline-flex py-1 px-2.5 bg-emerald-900 border border-emerald-800 rounded text-[9px] font-mono font-bold uppercase tracking-widest text-[#72C8AF]">
                 OPERATIONS RUNTIME
@@ -303,7 +511,7 @@ export function DashboardView({
               </h3>
               
               <p className="text-xs text-[#B2C5BD] leading-relaxed">
-                Invoke Premortem's AI Engine to execute a telemetry deep-scan. Gemini will isolate credentials leak indicators, parse transit encryption pathways, and trace request chains.
+                Invoke Premortem&apos;s AI Engine to execute a telemetry deep-scan. Gemini will isolate credentials leak indicators, parse transit encryption pathways, and trace request chains.
               </p>
 
               <div className="space-y-3 pt-2">
@@ -311,7 +519,7 @@ export function DashboardView({
                   Select Scope Repository:
                 </label>
                 <div className="space-y-2">
-                  {projects.map((proj) => (
+                  {visibleProjects.map((proj) => (
                     <button
                       key={proj.id}
                       onClick={() => onTriggerScan(proj.id)}
@@ -330,6 +538,15 @@ export function DashboardView({
                     </button>
                   ))}
                 </div>
+
+                <SeeMoreButton
+                  expanded={projectsExpanded}
+                  hiddenCount={Math.max(0, projects.length - PROJECT_PREVIEW_COUNT)}
+                  onToggle={() => setProjectsExpanded((prev) => !prev)}
+                  onNavigate={onNavigateTab ? () => onNavigateTab('projects') : undefined}
+                  navigateLabel={onNavigateTab ? 'All projects' : undefined}
+                  tone="dark"
+                />
               </div>
             </div>
 
@@ -338,7 +555,6 @@ export function DashboardView({
               <span className="text-white">{premortemBrand.engineVersion}</span>
             </div>
             
-            {/* Background elements */}
             <div className="absolute right-[-40px] bottom-[-40px] text-emerald-900/40 pointer-events-none noselect select-none rotate-12">
               <ShieldAlert size={280} strokeWidth={0.5} />
             </div>

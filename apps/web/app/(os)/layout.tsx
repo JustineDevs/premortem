@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Inter, JetBrains_Mono, Space_Grotesk } from 'next/font/google';
 
+import { OsProviders } from '@/providers/os-providers';
 import { premortemBrand } from '@/lib/premortem-os/branding';
 import '@/components/premortem-os/premortem-os.css';
 
@@ -29,10 +30,12 @@ export const metadata: Metadata = {
 
 export default function PremortemOsLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className={`premortem-os-root ${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} h-screen w-screen overflow-hidden`}
-    >
-      {children}
-    </div>
+    <OsProviders>
+      <div
+        className={`premortem-os-root ${inter.variable} ${spaceGrotesk.variable} ${jetbrainsMono.variable} h-screen w-screen overflow-hidden`}
+      >
+        {children}
+      </div>
+    </OsProviders>
   );
 }

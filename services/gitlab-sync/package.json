@@ -2,12 +2,22 @@
   "name": "@premortem/gitlab-sync",
   "private": true,
   "type": "module",
+  "main": "./dist/services/gitlab-sync/src/index.js",
+  "exports": {
+    ".": "./dist/services/gitlab-sync/src/index.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
     "lint": "echo lint gitlab-sync",
     "test": "echo test gitlab-sync",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@premortem/db": "workspace:*",
+    "@premortem/domain": "workspace:*",
+    "@premortem/integrations": "workspace:*",
+    "@premortem/orchestrator": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

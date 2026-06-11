@@ -1,0 +1,154 @@
+# CONTEXT.md
+
+Project context for AI-assisted development.
+
+## Project Overview
+
+**Name:** [Project Name]
+**Description:** [Brief description]
+**Repository:** [URL]
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Language | |
+| Framework | |
+| Database | |
+| Testing | |
+| CI/CD | |
+
+---
+
+## Architecture
+
+### High-Level Structure
+
+```
+src/
+├── [layer]/          # [description]
+├── [layer]/          # [description]
+└── [layer]/          # [description]
+```
+
+### Key Patterns
+
+- **[Pattern name]:** [Brief description of how/where it's used]
+- **[Pattern name]:** [Brief description of how/where it's used]
+
+### Important Files
+
+| File | Purpose |
+|------|---------|
+| | |
+| | |
+
+---
+
+## Current Focus
+
+### Active Work
+
+**Feature:** [Current feature being developed]
+**PRD:** [Link to PRD]
+**Status:** [In Progress / Blocked / Review]
+
+**Recent changes:**
+- [Change 1]
+- [Change 2]
+
+### Blocked Items
+
+| Issue | Blocker | Waiting On |
+|-------|---------|------------|
+| | | |
+
+---
+
+## Conventions
+
+### Code Style
+
+- [Convention 1]
+- [Convention 2]
+
+### Naming
+
+- Files: [convention]
+- Functions: [convention]
+- Variables: [convention]
+
+### Git
+
+- Branch naming: [convention]
+- Commit messages: [convention]
+
+---
+
+## Dependencies
+
+### External Services
+
+| Service | Purpose | Docs |
+|---------|---------|------|
+| | | |
+
+### Key Libraries
+
+| Library | Version | Purpose |
+|---------|---------|---------|
+| | | |
+
+---
+
+## Environment
+
+### Local Setup
+
+```bash
+# [Setup commands]
+```
+
+### Environment Variables
+
+| Variable | Purpose | Required |
+|----------|---------|----------|
+| | | |
+
+---
+
+## Known Issues
+
+- [ ] [Issue 1]
+- [ ] [Issue 2]
+
+---
+
+## Quick Reference
+
+### Common Commands
+
+```bash
+# Run tests
+[command]
+
+# Start dev server
+[command]
+
+# Build
+[command]
+```
+
+### Useful Queries
+
+```sql
+-- [Description]
+[query]
+```
+
+---
+
+*Last updated: [DATE]*
+*Maintainer: [NAME]*

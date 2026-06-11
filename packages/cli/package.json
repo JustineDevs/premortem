@@ -1,0 +1,20 @@
+{
+  "name": "@premortem/cli",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "premortem": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@premortem/db": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "tsx": "^4.20.0"
+  }
+}

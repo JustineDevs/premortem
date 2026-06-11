@@ -1,7 +1,18 @@
 import React, { useState } from 'react';
 import { premortemBrand } from '@/lib/premortem-os/branding';
-import { AuditRun, Finding, TraceStep, SeverityType } from '@/lib/premortem-os/types';
+import { AuditRun, Finding, TraceStep, SeverityType, ConsoleReviewActionValue, RiskCluster } from '@/lib/premortem-os/types';
+import { mapSnapshotToAuditRun } from '@/lib/premortem-api/map-runtime-to-console';
+import { ConsoleReviewAction, ConsoleIssueStatus } from '@premortem/domain';
 import { AuditsInvestigationsPanel } from './audits-investigations-panel';
+import { AuditRuntimeConsole } from './audit-runtime-console';
+import { SwarmDualLanePanel } from './swarm-dual-lane-panel';
+import { OsTabs } from './os-tabs';
+import {
+  buildSwarmTimelineActions,
+  classifySwarmLane,
+  splitAgentsIntoLanes,
+  type SwarmLaneAgent
+} from '@/lib/premortem-os/swarm-lanes';
 import { ProviderIcon } from './ProviderIcon';
 import { 
   ShieldAlert, 
@@ -35,23 +46,41 @@ import {
 interface AuditsViewProps {
   audits: AuditRun[];
   selectedAuditId: string | null;
+  focusCluster?: RiskCluster | null;
+  onFocusClusterComplete?: () => void;
   onSelectAudit: (auditId: string) => void;
-  onUpdateFindingStatus: (auditId: string, issueId: string, action: 'CONFIRMED' | 'DISMISSED' | 'RESOLVED') => void;
+  onUpdateFindingStatus: (auditId: string, issueId: string, action: ConsoleReviewActionValue) => void;
   onUpdateFindingFields: (auditId: string, findingId: string, fields: Partial<Finding>) => void;
+  onPersistFindingFields: (auditId: string, findingId: string, fields: Partial<Finding>) => Promise<void>;
+  onAuditHydrated: (auditId: string, audit: AuditRun) => void;
   onDeployPatch: (auditId: string, issueId: string) => void;
   isPatching: boolean;
   onTriggerScan: (projectId: string) => void;
+  onStopAllRuntime?: () => void | Promise<void>;
+  onResumeAudit?: (auditId: string) => void | Promise<void>;
+  showStopAll?: boolean;
+  isStopAllPending?: boolean;
+  isResumePending?: boolean;
 }
 
 export function AuditsView({
   audits,
   selectedAuditId,
+  focusCluster = null,
+  onFocusClusterComplete,
   onSelectAudit,
   onUpdateFindingStatus,
   onUpdateFindingFields,
+  onPersistFindingFields,
+  onAuditHydrated,
   onDeployPatch,
   isPatching,
-  onTriggerScan
+  onTriggerScan,
+  onStopAllRuntime,
+  onResumeAudit,
+  showStopAll = false,
+  isStopAllPending = false,
+  isResumePending = false
 }: AuditsViewProps) {
   const [activeTab, setActiveTab] = useState<'summary' | 'findings' | 'swarm'>('findings');
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
@@ -60,10 +89,62 @@ export function AuditsView({
   // GitLab Issue synthesis mode variables
   const [workspaceMode, setWorkspaceMode] = useState<'inspect' | 'synthesis'>('inspect');
   const [isSyncingToGitLab, setIsSyncingToGitLab] = useState(false);
+  const [isSavingSynthesis, setIsSavingSynthesis] = useState(false);
   const [mergeTargetId, setMergeTargetId] = useState<string>('');
-  const [activeAgentId, setActiveAgentId] = useState<string>('sec-guard');
+  const [splitTitle, setSplitTitle] = useState('');
+  const [isSplitting, setIsSplitting] = useState(false);
+  const [activeAgentId, setActiveAgentId] = useState<string>('');
+  const [runtimeSnapshot, setRuntimeSnapshot] = useState<{
+    agentRuns: Array<{ id: string; agentName: string; status: string; startedAt?: string | null; completedAt?: string | null }>;
+    lineage: Array<{ stage: string; id: string; label: string; parentId?: string }>;
+    graphSnapshot?: { nodeCount: number; edgeCount: number } | null;
+    events: Array<{ eventType: string; actor: string; createdAt: string }>;
+    findings: Array<{ id: string; title: string; category: string; severity: string; agentRunId: string }>;
+    summary?: unknown;
+  } | null>(null);
 
   const selectedAudit = audits.find((a) => a.id === selectedAuditId) || audits[0];
+
+  React.useEffect(() => {
+    if (!selectedAudit?.id) {
+      setRuntimeSnapshot(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadSnapshot = () => {
+      void fetch(`/api/audits/${selectedAudit.id}`)
+        .then((response) => response.json())
+        .then((payload) => {
+          if (cancelled || !payload.snapshot) return;
+          setRuntimeSnapshot(payload.snapshot);
+          if (payload.snapshot.agentRuns?.[0]?.id && !activeAgentId) {
+            setActiveAgentId(payload.snapshot.agentRuns[0].id);
+          }
+
+          const hydrated = mapSnapshotToAuditRun(payload.snapshot, selectedAudit.projectName);
+          onAuditHydrated(selectedAudit.id, hydrated);
+        })
+        .catch(() => {
+          if (!cancelled) setRuntimeSnapshot(null);
+        });
+    };
+
+    loadSnapshot();
+
+    const shouldPoll =
+      selectedAudit.status === 'RUNNING' ||
+      selectedAudit.status === 'PAUSED' ||
+      activeTab === 'swarm';
+    if (!shouldPoll) return () => { cancelled = true; };
+
+    const timer = window.setInterval(loadSnapshot, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [selectedAudit?.id, selectedAudit?.projectName, selectedAudit?.status, activeTab, onAuditHydrated]);
 
   React.useEffect(() => {
     if (selectedAudit && selectedAudit.findings?.length > 0) {
@@ -74,6 +155,38 @@ export function AuditsView({
       setSelectedFindingId(null);
     }
   }, [selectedAuditId, selectedAudit]);
+
+  React.useEffect(() => {
+    if (!focusCluster || focusCluster.auditRunId !== selectedAudit?.id) return;
+
+    const findings = selectedAudit.findings ?? [];
+    if (findings.length === 0) return;
+
+    setActiveTab('findings');
+    setSeverityFilter(focusCluster.severity);
+
+    const clusterIssueIds = new Set(
+      (selectedAudit.lineage ?? [])
+        .filter((entry) => entry.stage === 'issue_candidate' && entry.parentId === focusCluster.id)
+        .map((entry) => entry.id)
+    );
+
+    const clusterFinding =
+      findings.find((finding) => clusterIssueIds.has(finding.id) && !finding.mergedIntoId) ??
+      findings.find((finding) => finding.severity === focusCluster.severity && !finding.mergedIntoId);
+
+    if (clusterFinding) {
+      setSelectedFindingId(clusterFinding.id);
+    }
+
+    onFocusClusterComplete?.();
+  }, [
+    focusCluster,
+    selectedAudit?.id,
+    selectedAudit?.findings,
+    selectedAudit?.lineage,
+    onFocusClusterComplete
+  ]);
 
   if (!selectedAudit) {
     return (
@@ -94,42 +207,7 @@ export function AuditsView({
 
   const activeFinding = findings.find(f => f.id === selectedFindingId) || filteredFindings[0] || findings[0];
 
-  // Smart fail-safe text derivations based on spec fields
-  const getExpectedBehavior = (item: Finding) => {
-    if (item.expectedBehavior) return item.expectedBehavior;
-    if (item.category === 'unencrypted-transit') {
-      return `Implement TLS/SSL transport wrappers around internal service hosts on Port 443 (HTTPS) instead of relying on Port 80 plain-text endpoints. Enable verification parameter constraints.`;
-    }
-    if (item.category === 'hardcoded-secrets') {
-      return `Load application AWS tokens and diagnostic keys dynamically at runtime from environment definitions (process.env) or secure vault parameters. Never commit raw code configuration credentials.`;
-    }
-    if (item.category === 'pii-exposure') {
-      return `Prune critical user credentials logs entirely before production releases or route data streams through a secure diagnostic filter to scrub sensitive routing passwords.`;
-    }
-    return `Enforce robust secure standard execution configurations inside ${item.filepath} to prevent administrative access bypasses or SQL parameter injections.`;
-  };
-
-  const getSuccessCriteria = (item: Finding) => {
-    if (item.successCriteria) return item.successCriteria;
-    if (item.category === 'unencrypted-transit') {
-      return `1. The service rejects unauthenticated Port 80 HTTP connection parameters immediately.\n2. Router clients successfully negotiate secure SSL cert handshakes.\n3. Automated pipeline compliance linting detects no raw "http://" endpoints inside source files.`;
-    }
-    if (item.category === 'hardcoded-secrets') {
-      return `1. Configuration functions verify presence of env tokens before launching.\n2. Secrets scan utilities flag zero access tokens within repository checkouts.\n3. Production secrets rotate correctly without affecting active storage workflows.`;
-    }
-    if (item.category === 'pii-exposure') {
-      return `1. Diagnostic payload wrappers are replaced with sanitized metadata properties.\n2. Structured log parameters contain zero trace keys.\n3. Auditing checks do not report plain-text passwords in process output logs.`;
-    }
-    return `1. Dynamic query params are correctly bound via parameterized inputs.\n2. Continuous integration builds compile without configuration vulnerabilities.`;
-  };
-
-  const getWhyItMatters = (item: Finding) => {
-    if (item.whyItMatters) return item.whyItMatters;
-    if (item.severity === 'CRITICAL' || item.severity === 'HIGH') {
-      return `Failing to remediate this threat increases vulnerability vectors for direct man-in-the-middle data interception or remote command injections, directly violating SOC2, HIPAA, and industry-standard operational privacy guidelines.`;
-    }
-    return `Correcting this enhances general DX maintainability, mitigates developer console log exposure risks, and establishes proper secure-by-default environment guidelines ahead of production scale.`;
-  };
+  const synthesisField = (value: string | undefined, emptyLabel: string) => value?.trim() ? value : '';
 
   const getSeverityStyles = (severity: SeverityType) => {
     switch (severity) {
@@ -154,6 +232,8 @@ export function AuditsView({
         return 'bg-stone-100 text-stone-500 border border-stone-200 line-through';
       case 'RESOLVED':
         return 'bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold';
+      case 'PUBLISHED':
+        return 'bg-orange-50 text-orange-800 border border-orange-200 font-bold uppercase';
       default:
         return 'bg-zinc-100 text-zinc-700';
     }
@@ -165,174 +245,172 @@ export function AuditsView({
     onUpdateFindingFields(selectedAudit.id, activeFinding.id, { [fieldName]: val });
   };
 
-  // 2. Mock GitLab Issue Push Flow
-  const handlePushToGitLab = () => {
+  const handleSaveSynthesis = async () => {
     if (!activeFinding) return;
-    setIsSyncingToGitLab(true);
-    setTimeout(() => {
-      const issueNum = Math.floor(Math.random() * 800) + 100;
-      onUpdateFindingFields(selectedAudit.id, activeFinding.id, {
-        gitlabIssueId: `GL-issue-${issueNum}`,
-        status: 'CONFIRMED'
+    setIsSavingSynthesis(true);
+    try {
+      await onPersistFindingFields(selectedAudit.id, activeFinding.id, {
+        title: activeFinding.title,
+        description: activeFinding.description,
+        whyItMatters: activeFinding.whyItMatters ?? '',
+        recommendation: activeFinding.recommendation
       });
-      setIsSyncingToGitLab(false);
-    }, 1200);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Failed to save synthesis fields.');
+    } finally {
+      setIsSavingSynthesis(false);
+    }
   };
 
-  // 3. Merge Findings (de-duplicate)
-  const handleMergeFindings = () => {
+  // GitLab publish via runtime API (requires prior reviewer confirmation)
+  const handlePushToGitLab = async () => {
+    if (!activeFinding) return;
+    if (
+      activeFinding.status !== ConsoleIssueStatus.CONFIRMED &&
+      activeFinding.status !== ConsoleIssueStatus.RESOLVED
+    ) {
+      alert('Confirm this finding before publishing to GitLab.');
+      return;
+    }
+    setIsSyncingToGitLab(true);
+    try {
+      await onPersistFindingFields(selectedAudit.id, activeFinding.id, {
+        title: activeFinding.title,
+        description: activeFinding.description,
+        whyItMatters: activeFinding.whyItMatters ?? '',
+        recommendation: activeFinding.recommendation
+      });
+      const publishResponse = await fetch(`/api/issues/${activeFinding.id}/publish`, { method: 'POST' });
+      if (!publishResponse.ok) {
+        const errPayload = await publishResponse.json().catch(() => ({}));
+        throw new Error(errPayload.error || 'Publish failed');
+      }
+      const publishResult = await publishResponse.json();
+      const publishRes = await fetch(`/api/audits/${selectedAudit.id}`);
+      const publishPayload = await publishRes.json();
+      const published = publishPayload.snapshot?.issueCandidates?.find(
+        (issue: { id: string }) => issue.id === activeFinding.id
+      );
+      const publishedUrl =
+        published?.publishedUrl ?? publishResult.publishedIssue?.url ?? null;
+      if (publishedUrl) {
+        onUpdateFindingFields(selectedAudit.id, activeFinding.id, {
+          gitlabIssueId: publishedUrl,
+          status: ConsoleIssueStatus.PUBLISHED
+        });
+      }
+    } finally {
+      setIsSyncingToGitLab(false);
+    }
+  };
+
+  // Merge duplicate findings via persisted review API
+  const handleMergeFindings = async () => {
     if (!activeFinding || !mergeTargetId) return;
     const target = findings.find(f => f.id === mergeTargetId);
     if (!target) return;
 
-    // Set merged targets properties
+    const mergeResponse = await fetch(`/api/issues/${mergeTargetId}/merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mergedIntoIssueCandidateId: activeFinding.id })
+    });
+    if (!mergeResponse.ok) {
+      alert('Failed to merge findings.');
+      return;
+    }
+
     onUpdateFindingFields(selectedAudit.id, mergeTargetId, {
       mergedIntoId: activeFinding.id,
-      status: 'DISMISSED'
+      status: ConsoleIssueStatus.DISMISSED
     });
 
-    // Update active finding title or description to indicate composite structure
-    const updatedDesc = `${activeFinding.description}\n\n[DEDUPLICATED RISK GROUP] Incorporated identical finding from ${target.filepath}:${target.line}: "${target.title}"`;
-    onUpdateFindingFields(selectedAudit.id, activeFinding.id, {
+    const updatedDesc = `${activeFinding.description}\n\n[DEDUPLICATED] Merged "${target.title}" from ${target.filepath}:${target.line}.`;
+    await onPersistFindingFields(selectedAudit.id, activeFinding.id, {
       description: updatedDesc
     });
 
     setMergeTargetId('');
-    alert(`Successfully merged duplicate finding "${target.title}" into "${activeFinding.title}".`);
   };
 
-  // 4. Split Finding
-  const handleSplitFinding = () => {
+  const handleSplitFinding = async () => {
     if (!activeFinding) return;
-    const splitId = `find-split-${Date.now().toString(36)}`;
-    
-    // Create new split finding object
-    const splitFinding: Finding = {
-      ...activeFinding,
-      id: splitId,
-      title: `${activeFinding.title} [SPLIT CORE TASK]`,
-      description: `${activeFinding.description}\n\n[SPLIT PROCESS] Segmented task isolated for separate pipeline validation.`,
-      isSplitted: true,
-      gitlabIssueId: undefined, // Must request approval independently
-      status: 'OPEN'
-    };
 
-    // We can simulate split by telling parent audits state to push a new finding!
-    // Since our onUpdateFindingFields hook operates on finding scopes, let's inject this into parent audit list
-    // To do this simply, we can tell App.tsx to append to selectedAudit's findings
-    const updatedFindings = [...findings, splitFinding];
-    // We can run this update by simulating a bulk fields update or letting App.tsx update it.
-    // In our handleUpdateFindingFields callback inside App.tsx, it iterates findings. To make it support split seamlessly, 
-    // we can update finders or alert it.
-    // Let's implement split by inserting it into audits findings.
-    // To avoid breaking typescript types on normal flows, we can trigger split message:
-    onUpdateFindingFields(selectedAudit.id, activeFinding.id, {
-      title: `${activeFinding.title} (Primary Node)`,
-      description: `${activeFinding.description}\n\n[SYSTEM] A secondary split ticket has been created reference: #${splitId}`
-    });
+    const title = splitTitle.trim() || `${activeFinding.title} (Follow-up)`;
+    setIsSplitting(true);
+    try {
+      const splitResponse = await fetch(`/api/issues/${activeFinding.id}/split`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          notes: 'Split from reviewer console'
+        })
+      });
+      if (!splitResponse.ok) {
+        const errPayload = await splitResponse.json().catch(() => ({}));
+        throw new Error(errPayload.error || 'Split failed');
+      }
 
-    setSelectedFindingId(activeFinding.id);
-    alert(`Issue split successfully. Root task Isolated reference: #${splitId}`);
+      const auditResponse = await fetch(`/api/audits/${selectedAudit.id}`);
+      if (auditResponse.ok) {
+        const auditPayload = await auditResponse.json();
+        if (auditPayload.snapshot) {
+          onAuditHydrated(
+            selectedAudit.id,
+            mapSnapshotToAuditRun(auditPayload.snapshot, selectedAudit.projectName)
+          );
+        }
+      }
+
+      onUpdateFindingFields(selectedAudit.id, activeFinding.id, {
+        isSplitted: true
+      });
+      setSplitTitle('');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Failed to split finding.');
+    } finally {
+      setIsSplitting(false);
+    }
   };
 
-  // Swarm Risk Lenses Definitions matching abstract specification
-  const swarmAgents = [
-    {
-      id: 'sec-guard',
-      name: 'Security & Privacy Guard',
-      lens: 'Vulnerabilities & Hardcoded Key Scans',
-      status: 'COMPLETED',
-      boundedFiles: ['aws-s3-config.ts', 'paymentsRouter.ts', 'dispatchPatientData.ts'],
-      memoryState: 'Identified access tokens exposure and plaintext transmission parameters on Port 80.',
-      findingsCount: findings.filter(f => f.category === 'hardcoded-secrets' || f.category === 'unencrypted-transit').length,
+  const runtimeAgentRuns = runtimeSnapshot?.agentRuns ?? selectedAudit.agentRuns ?? [];
+  const snapshotFindings = runtimeSnapshot?.findings ?? [];
+  const swarmAgents: SwarmLaneAgent[] = runtimeAgentRuns.map((run) => {
+    const agentFindings = snapshotFindings.filter((finding) => finding.agentRunId === run.id);
+    const lineageLabels = (runtimeSnapshot?.lineage ?? selectedAudit.lineage ?? [])
+      .filter((entry) => entry.parentId === run.id || entry.id === run.id)
+      .map((entry) => entry.label);
+    return {
+      id: run.id,
+      name: run.agentName,
+      lens: run.agentName.replace(/-/g, ' '),
+      status: run.status === 'completed' ? 'COMPLETED' : run.status === 'failed' ? 'FAILED' : 'ACTIVE',
+      boundedFiles: lineageLabels.slice(0, 4),
+      memoryState: `${agentFindings.length} findings · ${run.status}`,
+      findingsCount: agentFindings.length,
+      lane: classifySwarmLane(run.agentName),
       logs: [
-        'Checking code segments against cryptographic standard registries...',
-        'Vulnerability detected in transport definitions (unencrypted HTTP binding present).',
-        'Vulnerability detected in credential loading (found process.env key backup string fallbacks).'
-      ]
-    },
-    {
-      id: 'fail-modes',
-      name: 'Future Failure Modes Agent',
-      lens: 'Scaling Bottlenecks & Race Conditions',
-      status: 'COMPLETED',
-      boundedFiles: ['paymentsRouter.ts', 'dbHandler.ts'],
-      memoryState: 'Payload standard dump prints secret tokens. Intensive transaction spikes can overflow debugging logging indexes.',
-      findingsCount: findings.filter(f => f.category === 'pii-exposure').length,
-      logs: [
-        'Inspecting logging hooks in transfer routines...',
-        'Trace warning: Dump string operations directly serialize HTTP header parameters into stdout process stdout logs.',
-        'High execution payload bursts could prompt logs buffer depletion. Standard rotation missing.'
-      ]
-    },
-    {
-      id: 'product-gaps',
-      name: 'Product Gaps Analyzer',
-      lens: 'Metadata Misalignment & Requirements Drift',
-      status: 'ACTIVE',
-      boundedFiles: ['metadata.json', 'README.md'],
-      memoryState: 'Comparing metadata definitions with live workspace endpoints map. Telemetry tracking stable.',
-      findingsCount: 0,
-      logs: [
-        'Validating framework system configurations against metadata schema declarations...',
-        'No major scope drift found between system declaration parameters.'
-      ]
-    },
-    {
-      id: 'onboard-inspector',
-      name: 'Onboarding Experience Inspector',
-      lens: 'Run Setup Correctness & Environment Defaults',
-      status: 'ACTIVE',
-      boundedFiles: ['.env.example', 'package.json'],
-      memoryState: 'Verifying setup variables and missing defaults check.',
-      findingsCount: 1,
-      logs: [
-        'Trace warning: Missing error validation handlers on env S3 credential load parameters.',
-        'Assessing local development instructions correctness.'
-      ]
-    },
-    {
-      id: 'rollout-detector',
-      name: 'Rollout & Rollback Failure Detector',
-      lens: 'Deployment Boundary Fallbacks & Fault Paths',
-      status: 'DORMANT',
-      boundedFiles: ['docker-compose.yml', 'Dockerfile'],
-      memoryState: 'Rollback models trace secure state. No custom deployment blocks registered.',
-      findingsCount: 0,
-      logs: [
-        'Validating fallback staging routines...',
-        'Container ports map verified correct for ingress coordinates routing.'
-      ]
-    },
-    {
-      id: 'artifacts-compliance',
-      name: 'Generated Artifacts Compliance Tool',
-      lens: 'Bundle Size, Sourcemaps & Exposure Threat',
-      status: 'ACTIVE',
-      boundedFiles: ['vite.config.ts', 'tsconfig.json'],
-      memoryState: 'Analyzing target build configuration output paths.',
-      findingsCount: 0,
-      logs: [
-        'Checking bundler configuration parameters for security map leaks...',
-        'Verified source maps are correctly constrained in production build outputs.'
-      ]
-    },
-    {
-      id: 'boundaries-inspector',
-      name: 'Integration Boundaries Inspector',
-      lens: 'Inter-service APIs & Unsecure Webhooks',
-      status: 'COMPLETED',
-      boundedFiles: ['fetch() routing', 'http.request'],
-      memoryState: 'Inter-service bindings checked. Identifies unsecure local gateway communication protocols.',
-      findingsCount: 1,
-      logs: [
-        'Mapping internal network service layout...',
-        'Flagged HTTP call in paymentsRouter to http://internal-pay-gw.prod.local.'
-      ]
-    }
-  ];
+        run.startedAt ? `Started ${new Date(run.startedAt).toLocaleString()}` : null,
+        ...agentFindings.slice(0, 6).map((finding) => `[${finding.severity}] ${finding.title}`),
+        run.completedAt
+          ? `Completed ${new Date(run.completedAt).toLocaleString()}`
+          : `Current status: ${run.status}`
+      ].filter(Boolean) as string[]
+    };
+  });
 
-  const selectedAgent = swarmAgents.find(a => a.id === activeAgentId) || swarmAgents[0];
+  const { repository: repositoryAgents, runtime: runtimeAgents } = splitAgentsIntoLanes(swarmAgents);
+  const swarmTimeline = buildSwarmTimelineActions({
+    events: runtimeSnapshot?.events ?? [],
+    findings: snapshotFindings,
+    agentRuns: runtimeAgentRuns
+  });
+
+  const selectedAgent = swarmAgents.find((a) => a.id === activeAgentId) || swarmAgents[0];
+  const graphNodeCount =
+    runtimeSnapshot?.graphSnapshot?.nodeCount ?? selectedAudit.graphSnapshot?.nodeCount ?? 0;
+  const lineageEntries = runtimeSnapshot?.lineage ?? selectedAudit.lineage ?? [];
 
   return (
     <div className="flex-1 flex overflow-hidden font-sans h-screen" id="audits-view-panel">
@@ -374,29 +452,17 @@ export function AuditsView({
           </div>
 
           {/* Sub-tabs switch */}
-          <div className="flex border-b border-[#EAE6DF]/60 mt-6 gap-2">
-            {[
-              { id: 'summary', name: 'Compliance Summary', icon: FileText },
-              { id: 'findings', name: 'Trace Investigations', icon: ShieldAlert },
-              { id: 'swarm', name: 'Swarm Orchestration Plan', icon: Layers }
-            ].map((t) => {
-              const IconComp = t.icon;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => setActiveTab(t.id as any)}
-                  className={`py-2 px-3 font-semibold text-xs border-b-2 transition-all cursor-pointer flex items-center gap-1.5 select-none ${
-                    activeTab === t.id
-                      ? 'border-emerald-950 text-emerald-950 font-bold'
-                      : 'border-transparent text-zinc-400 hover:text-zinc-600'
-                  }`}
-                >
-                  <IconComp size={13} />
-                  <span>{t.name}</span>
-                </button>
-              );
-            })}
-          </div>
+          <OsTabs
+            className="mt-6"
+            activeId={activeTab}
+            onChange={(id) => setActiveTab(id as typeof activeTab)}
+            ariaLabel="Audit workspace sections"
+            tabs={[
+              { id: 'summary', label: 'Compliance Summary', icon: FileText },
+              { id: 'findings', label: 'Trace Investigations', icon: ShieldAlert },
+              { id: 'swarm', label: 'Swarm Orchestration Plan', icon: Layers }
+            ]}
+          />
         </div>
 
         {/* Tab content renders */}
@@ -663,7 +729,7 @@ export function AuditsView({
                       </div>
 
                       {/* Active Trace flow steps */}
-                      {activeFinding.trace && activeFinding.trace.length > 0 && (
+                      {((activeFinding.trace && activeFinding.trace.length > 0) || lineageEntries.length > 0) && (
                         <div className="space-y-4">
                           <h4 className="text-[11px] font-mono tracking-wider font-bold text-[#8A958F] uppercase flex items-center gap-1 mr-1">
                             <CornerDownRight size={12} />
@@ -699,6 +765,19 @@ export function AuditsView({
                                 </div>
                               </div>
                             ))}
+                            {lineageEntries
+                              .filter((entry) => entry.id === activeFinding.id || entry.parentId === activeFinding.id)
+                              .map((entry, idx) => (
+                                <div key={`lineage-${entry.id}-${idx}`} className="relative flex gap-4">
+                                  <div className="w-5 h-5 rounded-full bg-orange-700 text-white flex items-center justify-center font-mono text-[10px] font-bold shrink-0 mt-0.5">
+                                    L
+                                  </div>
+                                  <div className="space-y-1 bg-orange-50 border border-orange-200 rounded p-3 text-xs w-full">
+                                    <span className="font-mono text-[9px] uppercase text-orange-800">{entry.stage}</span>
+                                    <p className="text-[#5C6560]">{entry.label}</p>
+                                  </div>
+                                </div>
+                              ))}
                           </div>
                         </div>
                       )}
@@ -760,8 +839,8 @@ export function AuditsView({
                       <div className="border-t border-[#EAE6DF] pt-6 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4">
                         <div className="flex gap-2 text-xs">
                           <button
-                            onClick={() => onUpdateFindingStatus(selectedAudit.id, activeFinding.id, 'CONFIRMED')}
-                            disabled={activeFinding.status === 'CONFIRMED'}
+                            onClick={() => onUpdateFindingStatus(selectedAudit.id, activeFinding.id, ConsoleReviewAction.CONFIRM)}
+                            disabled={activeFinding.status === ConsoleIssueStatus.CONFIRMED}
                             className="py-2 px-3 border border-[#EAE6DF] rounded font-semibold text-[#1E2522] hover:bg-[#FAF8F5] transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
                           >
                             <ThumbsUp size={12} className="text-amber-500" />
@@ -769,8 +848,8 @@ export function AuditsView({
                           </button>
 
                           <button
-                            onClick={() => onUpdateFindingStatus(selectedAudit.id, activeFinding.id, 'DISMISSED')}
-                            disabled={activeFinding.status === 'DISMISSED'}
+                            onClick={() => onUpdateFindingStatus(selectedAudit.id, activeFinding.id, ConsoleReviewAction.DISMISS)}
+                            disabled={activeFinding.status === ConsoleIssueStatus.DISMISSED}
                             className="py-2 px-3 border border-[#EAE6DF] rounded font-semibold text-[#1E2522] hover:bg-[#FAF8F5] transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
                           >
                             <Ban size={12} className="text-stone-400" />
@@ -879,7 +958,8 @@ export function AuditsView({
                           </label>
                           <textarea 
                             rows={3}
-                            value={getExpectedBehavior(activeFinding)}
+                            value={synthesisField(activeFinding.expectedBehavior, 'expected behavior')}
+                            placeholder="Expected secure behavior from runtime synthesis (edit to enrich before publish)"
                             onChange={(e) => handleFieldChange('expectedBehavior', e.target.value)}
                             className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs text-zinc-800 leading-relaxed font-sans focus:ring-1 focus:ring-emerald-950 focus:outline-none"
                           />
@@ -905,7 +985,8 @@ export function AuditsView({
                           </label>
                           <textarea 
                             rows={3}
-                            value={getSuccessCriteria(activeFinding)}
+                            value={synthesisField(activeFinding.successCriteria, 'success criteria')}
+                            placeholder="Testable success criteria from runtime (edit before publish)"
                             onChange={(e) => handleFieldChange('successCriteria', e.target.value)}
                             className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs text-zinc-800 leading-relaxed font-sans focus:ring-1 focus:ring-emerald-950 focus:outline-none"
                           />
@@ -918,11 +999,24 @@ export function AuditsView({
                           </label>
                           <textarea 
                             rows={3}
-                            value={getWhyItMatters(activeFinding)}
+                            value={synthesisField(activeFinding.whyItMatters, 'why it matters')}
+                            placeholder="Business impact rationale from runtime synthesis"
                             onChange={(e) => handleFieldChange('whyItMatters', e.target.value)}
                             className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs text-zinc-800 leading-relaxed font-sans focus:ring-1 focus:ring-emerald-950 focus:outline-none"
                           />
                         </div>
+                      </div>
+
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleSaveSynthesis}
+                          disabled={isSavingSynthesis}
+                          className="py-2 px-4 border border-emerald-950 text-emerald-950 hover:bg-emerald-950 hover:text-white rounded font-bold flex items-center gap-2 text-xs transition-all disabled:opacity-50"
+                        >
+                          <Save size={13} />
+                          {isSavingSynthesis ? 'Saving…' : 'Save Synthesis to Runtime'}
+                        </button>
                       </div>
 
                       {/* ADVANCED MULTI-ANGLE DEDUPLICATION WORK DESK */}
@@ -939,7 +1033,7 @@ export function AuditsView({
                           <select
                             value={mergeTargetId}
                             onChange={(e) => setMergeTargetId(e.target.value)}
-                            className="flex-1 p-2 border border-[#EAE6DF] rounded bg-white font-sans focus:outline-none focus:border-emerald-950 text-neutral-850"
+                            className="flex-1 p-2 border border-[#EAE6DF] rounded bg-white font-sans focus:outline-none focus:border-emerald-950 text-neutral-800"
                           >
                             <option value="">-- Choose overlapping duplicate finding to merge --</option>
                             {findings
@@ -963,24 +1057,34 @@ export function AuditsView({
                       </div>
 
                       {/* SPLITTING OPERATIONS MODULE */}
-                      <div className="p-5 border border-zinc-200 bg-[#FAF8F5]/45 rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 text-xs">
+                      <div className="p-5 border border-zinc-200 bg-[#FAF8F5]/45 rounded-lg flex flex-col gap-4 text-xs">
                         <div>
                           <h4 className="font-bold text-zinc-800 uppercase tracking-wide text-[11px] flex items-center gap-1">
                             <Layers size={13} />
                             Split Action Item Proposals
                           </h4>
                           <p className="text-zinc-500 leading-relaxed text-[11px] mt-0.5 max-w-sm">
-                            Separate this risk finding into duplicate work coordinates if parts are managed by different teams.
+                            Create a separate issue candidate when part of this risk should be tracked independently.
                           </p>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={handleSplitFinding}
-                          className="py-2 px-3 border border-[#EAE6DF] rounded font-bold hover:bg-[#FAF8F5] text-zinc-700 hover:text-zinc-950 cursor-pointer block text-center shrink-0"
-                        >
-                          Split Into Separate Action Task
-                        </button>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input
+                            type="text"
+                            value={splitTitle}
+                            onChange={(e) => setSplitTitle(e.target.value)}
+                            placeholder={`${activeFinding.title} (Follow-up)`}
+                            className="flex-1 p-2 border border-[#EAE6DF] rounded bg-white font-sans focus:outline-none focus:border-emerald-950 text-neutral-800"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleSplitFinding}
+                            disabled={isSplitting}
+                            className="py-2 px-3 border border-[#EAE6DF] rounded font-bold hover:bg-[#FAF8F5] text-zinc-700 hover:text-zinc-950 cursor-pointer block text-center shrink-0 disabled:opacity-40"
+                          >
+                            {isSplitting ? 'Splitting...' : 'Split Into Separate Task'}
+                          </button>
+                        </div>
                       </div>
 
                       {/* APPROVE & PUSH TO GITLAB INTEGRATION */}
@@ -1000,7 +1104,7 @@ export function AuditsView({
 
                         {activeFinding.gitlabIssueId ? (
                           <a
-                            href={`https://gitlab.internal.systems/projects/${selectedAudit.projectId}/issues`}
+                            href={activeFinding.gitlabIssueId}
                             target="_blank"
                             rel="referrer noopener"
                             className="py-2 px-4 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded flex items-center justify-center gap-2 text-xs shadow transition-all cursor-pointer uppercase select-none font-mono"
@@ -1051,111 +1155,88 @@ export function AuditsView({
 
           {/* TAB 3: SWARM ORCHESTRATION PLAN DESK */}
           {activeTab === 'swarm' && (
-            <div className="p-6 overflow-y-auto h-full space-y-8 animate-fadeIn text-xs font-sans">
-              
-              {/* Swarm State Header Brief */}
+            <div className="p-6 overflow-y-auto h-full space-y-6 animate-fadeIn text-xs font-sans">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-zinc-50 border border-[#EAE6DF] p-5 rounded-lg">
                 <div className="md:col-span-2 space-y-1">
                   <h4 className="font-bold text-[#1E2522] uppercase tracking-wide text-xs flex items-center gap-1.5">
                     <Activity size={14} className="text-emerald-700" />
-                    AI Robot Audit Swarm (Overview)
+                    Premortem Audit Swarm
                   </h4>
                   <p className="text-[#5C6560] leading-relaxed text-[11px]">
-                    To provide multi-angle safety checks, Premortem commissions 7 specialized robotic agents. Each scans a custom bounded repository context sharing memory state to deduplicate overlapping problem vectors.
+                    Specialist agents run in parallel across repository and runtime lenses. Shared graph memory deduplicates overlapping risk vectors before synthesis.
                   </p>
                 </div>
 
                 <div className="p-3 bg-white border border-[#EAE6DF] rounded text-center space-y-1">
                   <span className="block text-[9px] uppercase tracking-wider font-mono text-[#8A958F]">COOPERATING AGENTS</span>
-                  <p className="text-xl font-bold font-display text-zinc-900">7 Active Lenses</p>
+                  <p className="text-xl font-bold font-display text-zinc-900">{swarmAgents.length} Active Lenses</p>
                 </div>
 
                 <div className="p-3 bg-white border border-[#EAE6DF] rounded text-center space-y-1">
-                  <span className="block text-[9px] uppercase tracking-wider font-mono text-[#8A958F]">REPOSITORY STATUS</span>
-                  <span className="inline-flex py-0.5 px-2 bg-emerald-100 border border-emerald-200 text-emerald-800 rounded font-mono font-bold text-[9px] mt-1 animate-pulse">
-                    MAPPED COHESIVE
+                  <span className="block text-[9px] uppercase tracking-wider font-mono text-[#8A958F]">GRAPH MEMORY</span>
+                  <span className="inline-flex py-0.5 px-2 bg-emerald-100 border border-emerald-200 text-emerald-800 rounded font-mono font-bold text-[9px] mt-1">
+                    {graphNodeCount} NODES · {lineageEntries.length} LINEAGE
                   </span>
                 </div>
               </div>
 
-              {/* Swarm Grid */}
-              <div className="space-y-4">
-                <h4 className="font-bold text-zinc-800 font-display text-xs uppercase tracking-wide">
-                  Logical Sub-Agent Inventory & Memory Maps
-                </h4>
+              <AuditRuntimeConsole
+                auditId={selectedAudit.id}
+                auditStatus={selectedAudit.status}
+                agentRuns={runtimeAgentRuns}
+                events={runtimeSnapshot?.events ?? []}
+                summary={runtimeSnapshot?.summary}
+                onStopAll={onStopAllRuntime}
+                onResume={onResumeAudit}
+                showStopAll={showStopAll}
+                isStopAllPending={isStopAllPending}
+                isResumePending={isResumePending}
+              />
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {swarmAgents.map((agent) => {
-                    const isSel = agent.id === activeAgentId;
-                    return (
-                      <div 
-                        key={agent.id}
-                        onClick={() => setActiveAgentId(agent.id)}
-                        className={`p-4 border rounded-lg cursor-pointer transition-all flex flex-col justify-between space-y-4 hover:shadow-sm ${
-                          isSel
-                            ? 'bg-neutral-900 text-neutral-100 border-neutral-950 shadow-inner'
-                            : 'bg-white border-[#EAE6DF] text-zinc-800 hover:bg-zinc-50'
-                        }`}
-                      >
-                        <div className="space-y-1.5">
-                          <div className="flex justify-between items-center">
-                            <span className={`text-[9px] font-mono border px-1.5 py-0.2 rounded font-bold uppercase tracking-wide ${
-                              agent.status === 'COMPLETED' 
-                                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                                : 'bg-amber-50 border-amber-200 text-amber-800 animate-pulse'
-                            }`}>
-                              {agent.status}
-                            </span>
-                            <span className="font-mono text-[9px] text-zinc-500">Focus: {agent.lens}</span>
-                          </div>
-
-                          <h3 className={`font-bold font-display text-xs ${isSel ? 'text-white' : 'text-zinc-900'}`}>
-                            {agent.name}
-                          </h3>
-
-                          <p className={`text-[11px] leading-relaxed ${isSel ? 'text-zinc-400' : 'text-zinc-650'}`}>
-                            Memory State: "{agent.memoryState}"
-                          </p>
-                        </div>
-
-                        <div className="border-t pt-3 flex justify-between items-center font-mono text-[9.5px]">
-                          <span className={isSel ? 'text-zinc-500' : 'text-zinc-400'}>
-                            Bounded Mapped: {agent.boundedFiles.join(', ')}
-                          </span>
-                          <span className={`font-bold uppercase ${agent.findingsCount > 0 ? 'text-rose-500' : 'text-emerald-600'}`}>
-                            {agent.findingsCount} risks isolated
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
+              {swarmAgents.length === 0 ? (
+                <div className="p-6 border border-dashed border-[#EAE6DF] rounded text-center text-[#5C6560]">
+                  No specialist agent runs loaded yet. Select a completed audit or trigger a new run.
                 </div>
-              </div>
+              ) : (
+                <SwarmDualLanePanel
+                  repositoryAgents={repositoryAgents}
+                  runtimeAgents={runtimeAgents}
+                  timeline={swarmTimeline}
+                  activeAgentId={activeAgentId}
+                  onSelectAgent={setActiveAgentId}
+                />
+              )}
 
-              {/* Console logs output */}
-              <div className="space-y-2">
-                <div className="flex justify-between items-center text-[11px] font-mono text-[#8A958F]">
-                  <span className="font-bold uppercase flex items-center gap-1.5">
-                    <Terminal size={12} />
-                    Robot Swarm Executed Telemetry Log Buffer
-                  </span>
-                  <span>Agent Instance: {selectedAgent.name}</span>
-                </div>
+              {selectedAgent ? (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-[11px] font-mono text-[#8A958F]">
+                    <span className="font-bold uppercase flex items-center gap-1.5">
+                      <Terminal size={12} />
+                      Agent telemetry buffer
+                    </span>
+                    <span>Agent Instance: {selectedAgent.name}</span>
+                  </div>
 
-                <div className="bg-neutral-950 font-mono text-[11px] text-zinc-300 rounded-lg p-5 overflow-hidden shadow-inner border border-neutral-800 leading-relaxed font-sans max-h-60 overflow-y-auto">
-                  <div className="space-y-1 selection:bg-zinc-700 select-text">
-                    <p className="text-zinc-500">[INFO] LOADING SYSTEM SCHEMAS MAPPING CONFIGS FOR PROJECT: "{selectedAudit.projectName}" ON COMMITS: {selectedAudit.id}</p>
-                    <p className="text-zinc-500">[INFO] DISPATCHING FULL SWARM EXPERT ANALYZERS IN ISOLATED PROCESS CHAINS...</p>
-                    {selectedAgent.logs.map((log, idx) => (
-                      <p key={idx} className={log.includes('warning') || log.includes('detected') || log.includes('detected') ? 'text-amber-500 font-bold' : log.includes('Vulnerability') ? 'text-rose-500 font-bold' : 'text-zinc-300'}>
-                        &gt; [{selectedAgent.id.toUpperCase()}] {log}
-                      </p>
-                    ))}
-                    <p className="text-emerald-500 font-semibold">[SUCCESS] {selectedAgent.name} completed parsing lifecycle context cleanly. Memory shared successfully.</p>
+                  <div className="bg-neutral-950 font-mono text-[11px] text-zinc-300 rounded-lg p-5 overflow-hidden shadow-inner border border-neutral-800 leading-relaxed max-h-48 overflow-y-auto">
+                    <div className="space-y-1 selection:bg-zinc-700 select-text">
+                      {selectedAgent.logs.map((log, idx) => (
+                        <p
+                          key={idx}
+                          className={
+                            log.includes('CRITICAL') || log.includes('HIGH')
+                              ? 'text-rose-500 font-bold'
+                              : log.includes('MEDIUM')
+                                ? 'text-amber-500'
+                                : 'text-zinc-300'
+                          }
+                        >
+                          &gt; [{selectedAgent.id.toUpperCase()}] {log}
+                        </p>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
-
+              ) : null}
             </div>
           )}
 

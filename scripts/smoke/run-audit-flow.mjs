@@ -83,9 +83,12 @@ const FIXTURE = {
   projectId: 'f28e9bd2-5673-45d2-a97f-55a0b174e751',
   email: 'smoke-runner@premortem.local',
   username: 'premortem-smoke',
-  organizationSlug: 'premortem-smoke-org',
-  projectSlug: 'premortem-smoke-project'
+  organizationSlug: 'jstn-studio-local',
+  projectSlug: 'meta-architect'
 };
+
+const GITLAB_EXTERNAL_PROJECT_ID =
+  process.env.GITLAB_EXTERNAL_PROJECT_ID?.trim() || 'jstn-studio/meta-architect';
 
 function createFakeQueue() {
   const jobs = [];
@@ -182,26 +185,26 @@ async function ensureFixture() {
     update: {
       email: FIXTURE.email,
       username: FIXTURE.username,
-      fullName: 'Premortem Smoke Runner'
+      fullName: 'Local Dev Operator'
     },
     create: {
       id: FIXTURE.profileId,
       email: FIXTURE.email,
       username: FIXTURE.username,
-      fullName: 'Premortem Smoke Runner'
+      fullName: 'Local Dev Operator'
     }
   });
 
   await prisma.organization.upsert({
     where: { id: FIXTURE.organizationId },
     update: {
-      name: 'Premortem Smoke Org',
+      name: 'Premortem Local Dev',
       slug: FIXTURE.organizationSlug,
       createdById: FIXTURE.profileId
     },
     create: {
       id: FIXTURE.organizationId,
-      name: 'Premortem Smoke Org',
+      name: 'Premortem Local Dev',
       slug: FIXTURE.organizationSlug,
       createdById: FIXTURE.profileId
     }
@@ -227,8 +230,8 @@ async function ensureFixture() {
     update: {
       organizationId: FIXTURE.organizationId,
       provider: 'gitlab',
-      externalProjectId: 'premortem-smoke-project',
-      name: 'Premortem Smoke Project',
+      externalProjectId: GITLAB_EXTERNAL_PROJECT_ID,
+      name: GITLAB_EXTERNAL_PROJECT_ID.split('/').pop() ?? 'meta-architect',
       slug: FIXTURE.projectSlug,
       defaultBranch: 'main',
       createdById: FIXTURE.profileId
@@ -237,8 +240,8 @@ async function ensureFixture() {
       id: FIXTURE.projectId,
       organizationId: FIXTURE.organizationId,
       provider: 'gitlab',
-      externalProjectId: 'premortem-smoke-project',
-      name: 'Premortem Smoke Project',
+      externalProjectId: GITLAB_EXTERNAL_PROJECT_ID,
+      name: GITLAB_EXTERNAL_PROJECT_ID.split('/').pop() ?? 'meta-architect',
       slug: FIXTURE.projectSlug,
       defaultBranch: 'main',
       createdById: FIXTURE.profileId
@@ -326,9 +329,21 @@ async function main() {
   assert.ok(rejectedSnapshot.auditRun.rejectedIssueCandidates.length > 0);
 
   const eventTypes = rejectedSnapshot.auditRun.events.map((event) => event.eventType);
-  for (const required of ['audit.enqueued', 'audit.started', 'audit.completed', 'audit.issue_validation_rejected']) {
+  for (const required of [
+    'audit.enqueued',
+    'audit.started',
+    'audit.ingestion_completed',
+    'audit.graph_built',
+    'audit.completed',
+    'audit.issue_validation_rejected'
+  ]) {
     assert.ok(eventTypes.includes(required), `missing audit event ${required}`);
   }
+
+  assert.ok(rejectedSnapshot.auditRun.graphSnapshot, 'expected graph snapshot on completed audit');
+  assert.ok(rejectedSnapshot.auditRun.graphSnapshot.nodeCount > 0, 'expected graph nodes');
+  assert.ok(rejectedSnapshot.auditRun.agentRuns.length > 1, 'expected parallel specialist agent runs');
+  assert.ok(rejectedSnapshot.auditRun.lineage.length > 0, 'expected lineage entries');
 
   const fetchImpl = createAppFetch(rejectedRun.env);
   const apiBackedSnapshot = await loadAuditRunSnapshot(rejectedRun.submission.auditRunId, {

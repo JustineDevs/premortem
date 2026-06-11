@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 import { authProviderHref, type AuthMode } from '@/lib/auth-links';
 
@@ -23,11 +24,13 @@ const notices: Record<string, { message: string; tone: 'warn' | 'error' }> = {
     tone: 'warn'
   },
   config: {
-    message: 'Auth is not configured yet. Set Supabase environment variables to enable sign-in.',
+    message:
+      'Supabase sign-in is not available in this dev server. Restart after setting NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in the repository root .env.local.',
     tone: 'error'
   },
   oauth: {
-    message: 'Could not start provider sign-in. Try again or contact support.',
+    message:
+      'Could not start GitLab sign-in. Check Supabase GitLab provider settings and that your GitLab app enables the read_user scope.',
     tone: 'error'
   },
   callback: {
@@ -45,7 +48,23 @@ export function AuthProviderForm({
 }: AuthProviderFormProps) {
   const searchParams = useSearchParams();
   const noticeKey = searchParams.get('notice') ?? searchParams.get('error');
-  const notice = noticeKey ? notices[noticeKey] : null;
+  const redirectNotice = noticeKey ? notices[noticeKey] : null;
+  const [runtimeConfigured, setRuntimeConfigured] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    void fetch('/api/auth/status')
+      .then((response) => response.json())
+      .then((payload: { configured?: boolean }) => {
+        setRuntimeConfigured(Boolean(payload.configured));
+      })
+      .catch(() => setRuntimeConfigured(false));
+  }, []);
+
+  const notice =
+    redirectNotice ??
+    (runtimeConfigured === false
+      ? notices.config
+      : null);
 
   return (
     <div className="landing-auth-shell">

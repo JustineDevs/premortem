@@ -11,6 +11,8 @@ coverage
 dist
 pnpm-lock.yaml
 *.log
+*.tsbuildinfo
+**/__pycache__/
 
 # Internal / private design and strategy
 /internal/
@@ -52,3 +54,4 @@ pnpm-lock.yaml
 .DS_Store
 .idea/
 .vscode/*.code-workspace
+.cursor/obsidian-vault/

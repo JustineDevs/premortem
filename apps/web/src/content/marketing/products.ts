@@ -15,10 +15,12 @@ export const productsPage = {
   scopeRows: [
     { feature: 'Agent registry, prompts, and Zod validation', status: 'included' as ScopeStatus },
     { feature: 'Prisma + Supabase schema and RLS starters', status: 'included' as ScopeStatus },
-    { feature: 'Gemini and Azure OpenAI adapter seams', status: 'included' as ScopeStatus },
-    { feature: 'Reviewer console at /app', status: 'included' as ScopeStatus },
-    { feature: 'Audit detail at /audits/[auditRunId]', status: 'included' as ScopeStatus },
-    { feature: 'Queue workers and notification delivery', status: 'scaffold' as ScopeStatus },
+    { feature: 'Repo/CI ingestion and graph snapshot runtime', status: 'included' as ScopeStatus },
+    { feature: 'Parallel specialist swarm orchestration (mock/LLM executors)', status: 'included' as ScopeStatus },
+    { feature: 'Reviewer console at /app backed by runtime API', status: 'included' as ScopeStatus },
+    { feature: 'Review approve/reject/publish APIs + CLI', status: 'included' as ScopeStatus },
+    { feature: 'Audit detail, lineage, and workflow canvas trace', status: 'included' as ScopeStatus },
+    { feature: 'Session middleware on /app (Supabase OAuth)', status: 'included' as ScopeStatus },
     { feature: 'GitHub provider parity', status: 'soon' as ScopeStatus },
     { feature: 'Enterprise SSO (Entra ID)', status: 'soon' as ScopeStatus }
   ] satisfies ReadonlyArray<{ feature: string; status: ScopeStatus }>

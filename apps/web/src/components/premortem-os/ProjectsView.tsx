@@ -1,7 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Project, ProviderType } from '@/lib/premortem-os/types';
 import { ProviderBadge } from './provider-badge';
 import { ProviderIcon } from './ProviderIcon';
+import { OsEmptyState } from './os-empty-state';
+import { RepositoryDiscoveryPanel } from './repository-discovery-panel';
+import type { WorkspaceIntegration } from '@/hooks/workspace-types';
 import { 
   FolderGit2, 
   GitBranch, 
@@ -20,6 +23,9 @@ import {
 
 interface ProjectsViewProps {
   projects: Project[];
+  gitlabIntegration?: WorkspaceIntegration | null;
+  gitlabAccessPhase?: 'identity_only' | 'repository_access';
+  onProjectsChanged?: () => void;
   onTriggerScan: (projectId: string) => void;
   onRegisterProject: (project: {
     name: string;
@@ -30,15 +36,35 @@ interface ProjectsViewProps {
   }) => void;
 }
 
-export function ProjectsView({ projects, onTriggerScan, onRegisterProject }: ProjectsViewProps) {
+export function ProjectsView({
+  projects,
+  gitlabIntegration = null,
+  gitlabAccessPhase = gitlabIntegration ? 'repository_access' : 'identity_only',
+  onProjectsChanged,
+  onTriggerScan,
+  onRegisterProject
+}: ProjectsViewProps) {
   const [filterType, setFilterType] = useState<'all' | ProviderType>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [showAddForm, setShowAddForm] = useState(false);
+  const [showAdvancedForm, setShowAdvancedForm] = useState(false);
+  const [autoDiscoverCatalog, setAutoDiscoverCatalog] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('discover') === '1') {
+      setAutoDiscoverCatalog(true);
+      params.delete('discover');
+      const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
+      window.history.replaceState({}, '', nextUrl);
+    }
+  }, []);
 
   const [newProjName, setNewProjName] = useState('');
   const [newProjUrl, setNewProjUrl] = useState('');
   const [newProjBranch, setNewProjBranch] = useState('main');
   const [newProjProvider, setNewProjProvider] = useState<ProviderType>('github');
+  const [formErrors, setFormErrors] = useState<{ name?: string; url?: string }>({});
   const [newProjSnippet, setNewProjSnippet] = useState(`// Configure your custom vulnerable code here
 import express from 'express';
 const app = express();
@@ -59,22 +85,37 @@ app.get('/unsecured-route', (req, res) => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProjName || !newProjUrl) return;
+    const errors: { name?: string; url?: string } = {};
+    if (!newProjName.trim()) errors.name = 'Project name is required.';
+    if (!newProjUrl.trim()) {
+      errors.url = 'Repository URL is required.';
+    } else {
+      try {
+        const parsed = new URL(newProjUrl.trim());
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          errors.url = 'URL must use http or https.';
+        }
+      } catch {
+        errors.url = 'Enter a valid repository URL (https://…).';
+      }
+    }
+    setFormErrors(errors);
+    if (Object.keys(errors).length > 0) return;
 
     onRegisterProject({
-      name: newProjName,
-      repoUrl: newProjUrl,
+      name: newProjName.trim(),
+      repoUrl: newProjUrl.trim(),
       branch: newProjBranch,
       provider: newProjProvider,
       scanCodeSnippet: newProjSnippet
     });
 
-    // Reset Form
     setNewProjName('');
     setNewProjUrl('');
     setNewProjBranch('main');
     setNewProjProvider('github');
-    setShowAddForm(false);
+    setFormErrors({});
+    setShowAdvancedForm(false);
   };
 
   return (
@@ -94,16 +135,24 @@ app.get('/unsecured-route', (req, res) => {
         </div>
 
         <button
-          onClick={() => setShowAddForm(!showAddForm)}
-          className="px-3 py-2 bg-emerald-950 text-[#F5F4F0] hover:bg-emerald-900 border border-emerald-950 hover:border-emerald-900 text-xs font-semibold rounded flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+          onClick={() => setShowAdvancedForm(!showAdvancedForm)}
+          className="px-3 py-2 bg-white text-[#1E2522] hover:bg-[#FAF8F5] border border-[#EAE6DF] text-xs font-semibold rounded flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
         >
           <Plus size={14} />
-          <span>Register Repository</span>
+          <span>Advanced manual register</span>
         </button>
       </div>
 
-      {/* Add Project Form Drawer/Modal section */}
-      {showAddForm && (
+      <RepositoryDiscoveryPanel
+        gitlabIntegration={gitlabIntegration}
+        gitlabAccessPhase={gitlabAccessPhase}
+        autoDiscoverOnMount={autoDiscoverCatalog || Boolean(gitlabIntegration)}
+        skipDiscoverSessionCache={autoDiscoverCatalog}
+        onProjectsChanged={onProjectsChanged}
+      />
+
+      {/* Advanced manual registration */}
+      {showAdvancedForm && (
         <div className="bg-[#FAF8F5] border border-[#EAE6DF] rounded p-6 shadow-sm animate-fadeIn">
           <h3 className="text-sm font-bold uppercase tracking-wide text-[#1E2522] font-display mb-4 border-b border-[#EAE6DF] pb-2">
             Register New Vulnerable Repository Asset
@@ -120,23 +169,37 @@ app.get('/unsecured-route', (req, res) => {
                   required
                   placeholder="e.g. Identity Management Core"
                   value={newProjName}
-                  onChange={(e) => setNewProjName(e.target.value)}
+                  onChange={(e) => {
+                    setNewProjName(e.target.value);
+                    if (formErrors.name) setFormErrors((prev) => ({ ...prev, name: undefined }));
+                  }}
+                  aria-invalid={Boolean(formErrors.name)}
                   className="w-full p-2.5 bg-[#FDFDFD] border border-[#EAE6DF] rounded focus:outline-none focus:border-emerald-950 font-sans text-[#1F2937]"
                 />
+                {formErrors.name ? (
+                  <p className="text-[10px] text-rose-700" role="alert">{formErrors.name}</p>
+                ) : null}
               </div>
 
               <div className="space-y-1.5">
-                <label className="block font-mono font-bold uppercase tracking-wider text-[#717A75]">
+                <label className="block font-mono font-bold uppercase tracking-wider text-[#5C6560]">
                   VCS Repository URL
                 </label>
                 <input
-                  type="text"
+                  type="url"
                   required
                   placeholder="e.g. https://github.com/organization/vault-api"
                   value={newProjUrl}
-                  onChange={(e) => setNewProjUrl(e.target.value)}
+                  onChange={(e) => {
+                    setNewProjUrl(e.target.value);
+                    if (formErrors.url) setFormErrors((prev) => ({ ...prev, url: undefined }));
+                  }}
+                  aria-invalid={Boolean(formErrors.url)}
                   className="w-full p-2.5 bg-[#FDFDFD] border border-[#EAE6DF] rounded focus:outline-none focus:border-emerald-950 font-sans text-xs"
                 />
+                {formErrors.url ? (
+                  <p className="text-[10px] text-rose-700" role="alert">{formErrors.url}</p>
+                ) : null}
               </div>
 
               <div className="space-y-1.5">
@@ -196,7 +259,7 @@ app.get('/unsecured-route', (req, res) => {
             <div className="flex gap-2 justify-end text-xs">
               <button
                 type="button"
-                onClick={() => setShowAddForm(false)}
+                onClick={() => setShowAdvancedForm(false)}
                 className="px-4 py-2 border border-[#EAE6DF] text-[#4A5550] hover:bg-[#FAF8F5] rounded font-semibold transition-all"
               >
                 Cancel
@@ -264,6 +327,22 @@ app.get('/unsecured-route', (req, res) => {
       </div>
 
       {/* Projects Inventory Table Grid */}
+      {projects.length === 0 ? (
+        <OsEmptyState
+          icon={FolderGit2}
+          title="No projects registered yet"
+          description="Connect a repository to start continuous security audits and compliance tracking."
+          action={
+            <button
+              type="button"
+              onClick={() => setShowAdvancedForm(true)}
+              className="cursor-pointer rounded bg-emerald-950 px-4 py-2 text-xs font-semibold text-[#FAF8F5] hover:bg-emerald-900"
+            >
+              Register first repository
+            </button>
+          }
+        />
+      ) : (
       <div className="border border-[#EAE6DF] bg-[#FAF8F5] rounded overflow-hidden">
         <table className="w-full text-left border-collapse font-sans text-xs">
           <thead>
@@ -362,6 +441,7 @@ app.get('/unsecured-route', (req, res) => {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }

@@ -37,8 +37,14 @@ import {
   PlusCircle,
   LogOut
 } from 'lucide-react';
+import { ProviderConnectCards } from './provider-connect-cards';
 import { ProviderIcon } from './ProviderIcon';
 import { OsIconButton } from './os-icon-button';
+import type { Project } from '@/lib/premortem-os/types';
+import { DEFAULT_WORK_ITEM_ATTRIBUTE_CONFIG, type WorkItemAttributeConfig } from '@premortem/domain';
+import { DEFAULT_VENDOR_ROUTING, type VendorRoutingTier } from '@/lib/premortem-os/vendor-pool';
+import { useWorkspace } from '@/hooks/use-workspace';
+import { useReconciliationEvents } from '@/hooks/use-os-console-data';
 
 const getIconSlugByName = (name: string) => {
   const lowercase = name.toLowerCase();
@@ -52,70 +58,99 @@ const getIconSlugByName = (name: string) => {
   return 'git';
 };
 
-export function SettingsView() {
+export function SettingsView({ projects: _projects }: { projects?: Project[] }) {
+  const {
+    workspace,
+    isLoading,
+    error,
+    patchPolicies,
+    patchRuntime,
+    patchWorkItemAttributes,
+    patchNotifications,
+    patchLlm,
+    patchProfile,
+    patchOrganization,
+    patchBillingPlan,
+    startCheckout,
+    reconcileIssues,
+    syncIntegration
+  } = useWorkspace();
+  const reconciliationQuery = useReconciliationEvents();
+
   const [activeSubTab, setActiveSubTab] = useState<'profile' | 'organization' | 'integrations' | 'providers' | 'billing' | 'notifications'>('integrations');
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [authConfigured, setAuthConfigured] = useState<boolean | null>(null);
 
-  // 1. Integrations and Policies State
-  const [integrations, setIntegrations] = useState([
-    { name: 'GitHub Enterprise Host', status: 'connected', scope: 'repo, read:org, write:pull_requests', lastSync: '10 mins ago', vcsOwner: 'globalsys-org' },
-    { name: 'GitLab Self-Managed Core', status: 'connected', scope: 'api, read_repository', lastSync: '15 mins ago', vcsOwner: 'Token expires in 3 days' },
-    { name: 'BitBucket Cloud Services', status: 'active_check', scope: 'repository:read', lastSync: '1 hour ago', vcsOwner: 'globalsys-cloud' },
-    { name: 'Azure DevOps Organizations', status: 'connected', scope: 'vso.code_read, vso.work_write', lastSync: '4 mins ago', vcsOwner: 'global-devops-core' },
-    { name: 'Gitea Self-Hosted Core', status: 'disconnected', scope: 'api, read_repository', lastSync: 'Never', vcsOwner: 'unknown-scope' },
-    { name: 'Google Cloud Source Repositories', status: 'connected', scope: 'devstorage.read_only, source.read_only', lastSync: '30 mins ago', vcsOwner: 'gcp-systems-prod' },
-    { name: 'AWS Organizations Policy Scope', status: 'disconnected', scope: 'arn:aws:iam::policy/SecurityAudit', lastSync: 'Never', vcsOwner: '12 Accounts' }
-  ]);
-
-  const [policies, setPolicies] = useState([
-    { id: 'pol-1', name: 'Strict Transport Isolation (SSL)', description: 'Reject any raw port 80 or unencrypted plaintext transit connections during live routing.', active: true },
-    { id: 'pol-2', name: 'Reject environment fallback literals', description: 'Flag hardcoded access ids or keys fallback properties on module dependencies configuration.', active: true },
-    { id: 'pol-3', name: 'Strict parameters SQL verification', description: 'Prevent raw queries string concatenations on database router configurations.', active: true },
-    { id: 'pol-4', name: 'Mask sensitive prints logs targets', description: 'Inhibit standard console print buffers output on critical credentials transaction requests.', active: false }
-  ]);
-
-  // 2. AI Model Providers State
-  const [selectedGeminiModel, setSelectedGeminiModel] = useState('gemini-2.5-flash');
+  const [profileDraft, setProfileDraft] = useState({ fullName: '', username: '', timezone: 'UTC' });
+  const [organizationDraft, setOrganizationDraft] = useState({ name: '', billingEmail: '', websiteUrl: '' });
+  const [selectedGeminiModel, setSelectedGeminiModel] = useState('gemini-3-flash-preview');
   const [maxTokens, setMaxTokens] = useState(8192);
   const [temperature, setTemperature] = useState(0.2);
-  const [customProviders, setCustomProviders] = useState([
-    { name: 'Local Ollama Instance', host: 'http://localhost:11434', active: false, model: 'llama3:8b' }
-  ]);
+  const [customProviders, setCustomProviders] = useState<
+    Array<{ name: string; host: string; model: string; active: boolean }>
+  >([]);
+  const [vendorRouting, setVendorRouting] = useState<VendorRoutingTier[]>(
+    DEFAULT_VENDOR_ROUTING.map((tier) => ({ ...tier }))
+  );
+  const [workItemAttributes, setWorkItemAttributes] = useState<WorkItemAttributeConfig>(
+    DEFAULT_WORK_ITEM_ATTRIBUTE_CONFIG
+  );
   const [newProvName, setNewProvName] = useState('');
   const [newProvHost, setNewProvHost] = useState('');
   const [newProvModel, setNewProvModel] = useState('');
-
-  // 3. Billing & Allocation State
-  const [activeTier, setActiveTier] = useState<'free' | 'pro' | 'swarm-enterprise'>('swarm-enterprise');
+  const [activeTier, setActiveTier] = useState<'free' | 'pro' | 'team' | 'enterprise'>('free');
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
-
-  // Resource usage telemetry
-  const usageStats = {
-    scans: { used: 542, limit: 1000 },
-    tokens: { used: 12.8, limit: 50.0 }, // in Millions
-    patches: { used: 14, limit: 50 }
-  };
-
-  const invoices = [
-    { id: 'INV-2026-004', date: 'June 01, 2026', amount: 249.00, status: 'Paid', method: 'Visa ending 4242' },
-    { id: 'INV-2026-003', date: 'May 01, 2026', amount: 249.00, status: 'Paid', method: 'Visa ending 4242' },
-    { id: 'INV-2026-002', date: 'April 01, 2026', amount: 249.00, status: 'Paid', method: 'Visa ending 4242' },
-    { id: 'INV-2026-001', date: 'March 01, 2026', amount: 49.00, status: 'Paid', method: 'Visa ending 4242' }
-  ];
-
-  // 4. Webhooks State
-  const [slackWebhook, setSlackWebhook] = useState('https://hooks.slack.com/services/T000/B000/XXXXXX');
-  const [slackChannel, setSlackChannel] = useState('#secops-audit-swarm');
-  const [isSlackConnected, setIsSlackConnected] = useState(true);
-  const [alertEmails, setAlertEmails] = useState('secops-alerts@globalsystems.org');
+  const [slackWebhook, setSlackWebhook] = useState('');
+  const [slackChannel, setSlackChannel] = useState('');
+  const [isSlackConnected, setIsSlackConnected] = useState(false);
+  const [alertEmails, setAlertEmails] = useState('');
   const [alertSeverity, setAlertSeverity] = useState('HIGH');
 
-  // Add Provider Trigger Mode
-  const [showAddProviderForm, setShowAddProviderForm] = useState(false);
-  const [newProviderName, setNewProviderName] = useState('');
-  const [newProviderStatus, setNewProviderStatus] = useState<'connected' | 'active_check' | 'disconnected'>('connected');
-  const [newProviderScope, setNewProviderScope] = useState('repo, read:org');
-  const [newProviderUserScope, setNewProviderUserScope] = useState('globalsys-added');
+  React.useEffect(() => {
+    void fetch('/api/auth/status')
+      .then((response) => response.json())
+      .then((payload) => setAuthConfigured(Boolean(payload.configured)))
+      .catch(() => setAuthConfigured(false));
+  }, []);
+
+  React.useEffect(() => {
+    if (!workspace) return;
+    setProfileDraft({
+      fullName: workspace.profile.fullName ?? '',
+      username: workspace.profile.username ?? '',
+      timezone: workspace.profile.timezone
+    });
+    setOrganizationDraft({
+      name: workspace.organization.name,
+      billingEmail: workspace.organization.billingEmail ?? '',
+      websiteUrl: workspace.organization.websiteUrl ?? ''
+    });
+    setSelectedGeminiModel(workspace.llm.selectedGeminiModel);
+    setMaxTokens(workspace.llm.maxTokens);
+    setTemperature(workspace.llm.temperature);
+    setCustomProviders(workspace.llm.customProviders);
+    setVendorRouting(
+      workspace.llm.vendorRouting?.length
+        ? workspace.llm.vendorRouting.map((tier) => ({ ...tier }))
+        : DEFAULT_VENDOR_ROUTING.map((tier) => ({ ...tier }))
+    );
+    setWorkItemAttributes(workspace.workItemAttributes ?? DEFAULT_WORK_ITEM_ATTRIBUTE_CONFIG);
+    setActiveTier(workspace.billing.plan as typeof activeTier);
+    setSlackWebhook(workspace.notifications.slackWebhook);
+    setSlackChannel(workspace.notifications.slackChannel);
+    setIsSlackConnected(workspace.notifications.isSlackConnected);
+    setAlertEmails(workspace.notifications.alertEmails);
+    setAlertSeverity(workspace.notifications.alertSeverity);
+  }, [workspace]);
+
+  const integrations = workspace?.integrations ?? [];
+  const policies = workspace?.policies ?? [];
+  const usageStats = workspace?.usage ?? {
+    scans: { used: 0, limit: 0 },
+    tokens: { used: 0, limit: 0 },
+    patches: { used: 0, limit: 0 }
+  };
+  const invoices = workspace?.billing.invoices ?? [];
 
   const showToast = (message: string) => {
     setSuccessToast(message);
@@ -124,55 +159,105 @@ export function SettingsView() {
     }, 3050);
   };
 
-  const togglePolicy = (id: string) => {
-    setPolicies(policies.map(p => p.id === id ? { ...p, active: !p.active } : p));
-    showToast('Continuous enforcement policy thresholds updated.');
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const notice = params.get('integration_notice');
+    if (!notice) return;
+
+    const messages: Record<string, string> = {
+      gitlab_connected: 'GitLab connected successfully. Repository access is ready.',
+      coming_soon: 'That provider connector is coming soon.',
+      denied: 'Provider authorization was cancelled.',
+      config: 'GitLab OAuth is not configured. Set GITLAB_CLIENT_ID and GITLAB_CLIENT_SECRET.',
+      invalid_state: 'OAuth state mismatch. Please try connecting again.',
+      oauth_failed: 'Provider OAuth failed. Check credentials and redirect URI.',
+      persist_failed: 'Connected to GitLab but failed to save the connection.'
+    };
+
+    const detail = params.get('integration_detail');
+    showToast(detail ? `${messages[notice] ?? 'Integration updated.'} (${detail})` : messages[notice] ?? 'Integration updated.');
+
+    params.delete('integration_notice');
+    params.delete('integration_detail');
+    params.delete('integration_provider');
+    const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
+    window.history.replaceState({}, '', nextUrl);
+  }, []);
+
+  const togglePolicy = async (id: string) => {
+    const nextPolicies = policies.map((policy) =>
+      policy.id === id ? { ...policy, active: !policy.active } : policy
+    );
+    try {
+      await patchPolicies(nextPolicies);
+      showToast('Continuous enforcement policy thresholds updated.');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to save policy.');
+    }
   };
 
-  const handleAddCustomProvider = (e: React.FormEvent) => {
+  const handleAddCustomProvider = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProvName || !newProvHost) {
       alert('Provide a valid name and host coordinate path.');
       return;
     }
-    const newProv = {
-      name: newProvName,
-      host: newProvHost,
-      model: newProvModel || 'custom-model',
-      active: true
-    };
-    setCustomProviders([...customProviders, newProv]);
-    setNewProvName('');
-    setNewProvHost('');
-    setNewProvModel('');
-    showToast(`Registered custom AI engine provider "${newProv.name}" successfully.`);
+    const nextProviders = [
+      ...customProviders,
+      {
+        name: newProvName,
+        host: newProvHost,
+        model: newProvModel || 'custom-model',
+        active: true
+      }
+    ];
+    try {
+      await patchLlm({
+        selectedGeminiModel,
+        maxTokens,
+        temperature,
+        customProviders: nextProviders
+      });
+      setNewProvName('');
+      setNewProvHost('');
+      setNewProvModel('');
+      showToast(`Registered custom AI engine provider "${newProvName}" successfully.`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to save provider.');
+    }
   };
 
-  const handleDeleteProvider = (index: number) => {
+  const handleDeleteProvider = async (index: number) => {
     const item = customProviders[index];
-    setCustomProviders(customProviders.filter((_, idx) => idx !== index));
-    showToast(`Removed custom provider "${item.name}".`);
+    const nextProviders = customProviders.filter((_, idx) => idx !== index);
+    try {
+      await patchLlm({ customProviders: nextProviders });
+      showToast(`Removed custom provider "${item.name}".`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to remove provider.');
+    }
   };
 
   const triggerInvoiceDownload = (invoiceId: string) => {
-    showToast(`Generating secure PDF download stream for ${invoiceId}...`);
+    showToast(`Stripe billing portal required to download ${invoiceId}.`);
   };
 
-  const handleRegisterGenericProvider = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newProviderName) return;
-    const item = {
-      name: newProviderName,
-      status: newProviderStatus,
-      scope: newProviderScope,
-      lastSync: '1 min ago',
-      vcsOwner: newProviderUserScope || 'globalsys-org'
-    };
-    setIntegrations([item, ...integrations]);
-    setNewProviderName('');
-    setShowAddProviderForm(false);
-    showToast(`Successfully registered new provider connection: "${item.name}"`);
-  };
+  if (isLoading) {
+    return (
+      <div className="flex-1 p-8 text-center text-xs text-[#5C6560] italic">
+        Loading workspace integrations and scopes from runtime…
+      </div>
+    );
+  }
+
+  if (error || !workspace) {
+    return (
+      <div className="flex-1 p-8 text-center text-xs text-rose-700">
+        {error ?? 'Unable to load workspace settings.'}
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 overflow-y-auto p-6 md:p-8 font-sans max-w-7xl mx-auto w-full space-y-8 animate-fadeIn" id="settings-view-hub">
@@ -220,8 +305,7 @@ export function SettingsView() {
                 <button
                   key={subTab.id}
                   onClick={() => {
-                    setActiveSubTab(subTab.id as any);
-                    setShowAddProviderForm(false);
+                    setActiveSubTab(subTab.id as typeof activeSubTab);
                   }}
                   className={`py-2 px-3 text-xs rounded transition-all cursor-pointer flex items-center gap-2.5 whitespace-nowrap outline-none border-0 ${
                     isSelected
@@ -255,30 +339,47 @@ export function SettingsView() {
 
                 <div className="flex flex-col md:flex-row gap-6 items-start md:items-center p-4 bg-white border border-[#EAE6DF] rounded">
                   <div className="w-14 h-14 bg-emerald-950 text-white rounded-full flex items-center justify-center font-bold text-lg border border-emerald-900 shadow font-display">
-                    TG
+                    {(workspace.profile.fullName ?? workspace.profile.email ?? '?').slice(0, 2).toUpperCase()}
                   </div>
                   <div className="space-y-1">
-                    <span className="text-[10px] font-mono uppercase bg-slate-100 border px-1.5 py-0.2 rounded font-bold text-slate-800">Workspace Administrator</span>
-                    <h4 className="text-md font-bold text-neutral-900 font-display">operator@premortem.dev</h4>
-                    <p className="text-[11px] text-[#717A75]">Access key credentials bounds secure sandboxes environments.</p>
+                    <span className="text-[10px] font-mono uppercase bg-slate-100 border px-1.5 py-0.2 rounded font-bold text-slate-800">
+                      {workspace.profile.role}
+                    </span>
+                    <h4 className="text-md font-bold text-neutral-900 font-display">
+                      {workspace.profile.email ?? workspace.profile.username ?? workspace.profile.id}
+                    </h4>
+                    <p className="text-[11px] text-[#717A75]">Profile loaded from Supabase session and Premortem runtime.</p>
                   </div>
                 </div>
 
-                <form id="profile-settings-form" onSubmit={(e) => { e.preventDefault(); showToast('Profile settings updated successfully.'); }} className="space-y-4 text-xs">
+                <form
+                  id="profile-settings-form"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    try {
+                      await patchProfile(profileDraft);
+                      showToast('Profile settings updated successfully.');
+                    } catch (err) {
+                      alert(err instanceof Error ? err.message : 'Failed to save profile.');
+                    }
+                  }}
+                  className="space-y-4 text-xs"
+                >
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">Full Display Name</label>
-                      <input 
-                        type="text" 
-                        defaultValue="Trader G Admin"
+                      <input
+                        type="text"
+                        value={profileDraft.fullName}
+                        onChange={(e) => setProfileDraft((prev) => ({ ...prev, fullName: e.target.value }))}
                         className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs text-zinc-900 font-medium"
                       />
                     </div>
                     <div className="space-y-1.5">
                       <label className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">Contact Email Address</label>
-                      <input 
-                        type="email" 
-                        defaultValue="operator@premortem.dev"
+                      <input
+                        type="email"
+                        value={workspace.profile.email ?? ''}
                         disabled
                         className="w-full p-2.5 bg-zinc-50 border border-[#EAE6DF] rounded text-xs text-zinc-450 cursor-not-allowed font-medium font-mono"
                       />
@@ -306,18 +407,16 @@ export function SettingsView() {
               <div className="p-6 bg-white border border-[#EAE6DF] rounded-lg space-y-4">
                 <h4 className="text-xs font-mono uppercase font-bold tracking-wider text-[#1E2522]">Recent Security Access Trails</h4>
                 <div className="font-mono text-[10px] space-y-2 text-[#717A75]">
-                  <div className="flex justify-between border-b pb-1.5">
-                    <span>Successful Token Refresh (GitLab Agent)</span>
-                    <span className="text-zinc-500">Today 13:42:15</span>
-                  </div>
-                  <div className="flex justify-between border-b pb-1.5">
-                    <span>Authorized IP Login (Cloud Container Ingress)</span>
-                    <span className="text-zinc-500">Yesterday 18:24:09</span>
-                  </div>
-                  <div className="flex justify-between border-b pb-1.5">
-                    <span>Full-scale Swarm Run Initiated (Pre-production)</span>
-                    <span className="text-zinc-500 font-bold text-emerald-800">June 08, 11:32</span>
-                  </div>
+                  {workspace.activity.length === 0 ? (
+                    <p className="italic">No activity events recorded yet. Run an audit to populate trails.</p>
+                  ) : (
+                    workspace.activity.map((event) => (
+                      <div key={event.id} className="flex justify-between border-b pb-1.5">
+                        <span>{event.summary}</span>
+                        <span className="text-zinc-500">{new Date(event.createdAt).toLocaleString()}</span>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -340,37 +439,96 @@ export function SettingsView() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-mono">
                   <div className="p-4 bg-white border border-[#EAE6DF] rounded space-y-1">
                     <span className="text-[9px] text-[#8A958F] font-bold block uppercase">Organization Name</span>
-                    <span className="font-bold text-[#1E2522] text-sm font-sans block">Global Systems Corp</span>
+                    <span className="font-bold text-[#1E2522] text-sm font-sans block">{workspace.organization.name}</span>
                   </div>
                   <div className="p-4 bg-white border border-[#EAE6DF] rounded space-y-1">
-                    <span className="text-[9px] text-[#8A958F] font-bold block uppercase">Swarm Subscription Tier</span>
-                    <span className="font-bold text-emerald-800 text-sm font-sans block">Enterprise Tier (Unlimited)</span>
+                    <span className="text-[9px] text-[#8A958F] font-bold block uppercase">Subscription Tier</span>
+                    <span className="font-bold text-emerald-800 text-sm font-sans block capitalize">{workspace.billing.plan}</span>
                   </div>
                   <div className="p-4 bg-white border border-[#EAE6DF] rounded space-y-1">
-                    <span className="text-[9px] text-[#8A958F] font-bold block uppercase">Active Scanners</span>
-                    <span className="font-bold text-[#1E2522] text-sm font-sans block">24 / 25 Auditors Active</span>
+                    <span className="text-[9px] text-[#8A958F] font-bold block uppercase">Workspace Activity</span>
+                    <span className="font-bold text-[#1E2522] text-sm font-sans block">
+                      {workspace.runtime.runningAudits} running · {workspace.organization.projectCount} projects · {workspace.organization.memberCount} members
+                    </span>
                   </div>
                 </div>
+
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    try {
+                      await patchOrganization(organizationDraft);
+                      showToast('Organization profile saved.');
+                    } catch (err) {
+                      alert(err instanceof Error ? err.message : 'Failed to save organization.');
+                    }
+                  }}
+                  className="border border-[#EAE6DF] bg-white rounded-lg p-5 space-y-4 text-xs"
+                >
+                  <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-neutral-900 flex items-center gap-1.5">
+                    <Building2 size={14} className="text-emerald-700" />
+                    Organization Details
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">Display Name</label>
+                      <input
+                        type="text"
+                        value={organizationDraft.name}
+                        onChange={(e) => setOrganizationDraft((prev) => ({ ...prev, name: e.target.value }))}
+                        className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">Billing Email</label>
+                      <input
+                        type="email"
+                        value={organizationDraft.billingEmail}
+                        onChange={(e) => setOrganizationDraft((prev) => ({ ...prev, billingEmail: e.target.value }))}
+                        className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs font-mono"
+                      />
+                    </div>
+                    <div className="space-y-1.5 md:col-span-2">
+                      <label className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">Website URL</label>
+                      <input
+                        type="url"
+                        value={organizationDraft.websiteUrl}
+                        onChange={(e) => setOrganizationDraft((prev) => ({ ...prev, websiteUrl: e.target.value }))}
+                        className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <button type="submit" className="py-2 px-4 bg-emerald-950 font-bold text-white rounded hover:bg-emerald-900 transition-all cursor-pointer">
+                      Save Organization
+                    </button>
+                  </div>
+                </form>
 
                 <div className="border border-[#EAE6DF] bg-white rounded-lg p-5">
                   <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-neutral-900 mb-4 flex items-center gap-1.5">
                     <ShieldCheck size={14} className="text-emerald-700" />
-                    Regulatory Compliance Standards Guard
+                    Enforcement Policies (from workspace)
                   </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                    <div className="p-3 bg-emerald-50/50 border border-emerald-200/50 rounded flex items-center gap-2">
-                      <span className="w-2 h-2 bg-emerald-600 rounded-full" />
-                      <span className="font-bold text-emerald-950 font-display">SOC 2 Type II Gate</span>
+                  {policies.length === 0 ? (
+                    <p className="text-xs text-[#717A75] italic">No policies configured yet.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      {policies.map((policy) => (
+                        <div
+                          key={policy.id}
+                          className={`p-3 rounded flex items-center gap-2 border ${
+                            policy.active
+                              ? 'bg-emerald-50/50 border-emerald-200/50'
+                              : 'bg-zinc-50 border-zinc-200 text-zinc-500'
+                          }`}
+                        >
+                          <span className={`w-2 h-2 rounded-full ${policy.active ? 'bg-emerald-600' : 'bg-zinc-400'}`} />
+                          <span className="font-bold font-display">{policy.name}</span>
+                        </div>
+                      ))}
                     </div>
-                    <div className="p-3 bg-emerald-50/50 border border-emerald-200/50 rounded flex items-center gap-2">
-                      <span className="w-2 h-2 bg-emerald-600 rounded-full" />
-                      <span className="font-bold text-emerald-950 font-display">ISO-27001 Active</span>
-                    </div>
-                    <div className="p-3 bg-zinc-50 border border-zinc-200 rounded flex items-center gap-2 text-zinc-500">
-                      <span className="w-2 h-2 bg-zinc-400 rounded-full" />
-                      <span className="font-display">HIPAA Secure Gate</span>
-                    </div>
-                  </div>
+                  )}
                 </div>
               </div>
 
@@ -429,242 +587,128 @@ export function SettingsView() {
                     Connected Providers
                   </h2>
                   <p className="text-xs text-[#5C6560] max-w-xl">
-                    Integrate external code repositories, issue trackers, and CI/CD pipelines to feed data into the audit evidence vault.
+                    GitLab sign-in verifies identity. Repository access is a separate one-time OAuth grant for discovery, publish, and reconciliation.
+                  </p>
+                </div>
+              </div>
+
+              <ProviderConnectCards
+                connectedProviders={integrations.map((item) => item.provider ?? item.name)}
+                integrations={integrations}
+              />
+
+              <div className="bg-[#FAF8F5] border border-[#EAE6DF] rounded-lg p-6 space-y-4">
+                <div>
+                  <h3 className="text-md font-bold text-[#1E2522] font-display mb-1 flex items-center gap-2">
+                    <Map size={16} />
+                    Work item attributes automation
+                  </h3>
+                  <p className="text-xs text-[#717A75]">
+                    When publishing approved findings, Premortem automatically creates provider labels and traceability metadata using each platform&apos;s official REST APIs (GitLab Labels + Issues, GitHub Labels + Issues).
                   </p>
                 </div>
 
-                <button 
-                  onClick={() => setShowAddProviderForm(!showAddProviderForm)}
-                  className="py-1.5 px-4 bg-emerald-950 hover:bg-emerald-900 text-[#FAF8F5] font-bold text-xs rounded transition-all flex items-center justify-center gap-1.5 cursor-pointer uppercase font-mono tracking-wider"
-                >
-                  <Plus size={14} strokeWidth={2.5} />
-                  <span>Add Provider</span>
-                </button>
-              </div>
-
-              {/* Add Custom Provider Interactive Sliding form */}
-              {showAddProviderForm && (
-                <form onSubmit={handleRegisterGenericProvider} className="space-y-4 bg-[#FAF8F5] border-2 border-dashed border-emerald-950/20 p-5 rounded-lg animate-fadeIn text-xs">
-                  <div className="flex justify-between items-center pb-2 border-b border-[#EAE6DF]">
-                    <span className="font-mono font-bold text-emerald-900 uppercase">PROVISION VCS/INFRASTRUCTURE CONNECTOR</span>
-                    <button type="button" onClick={() => setShowAddProviderForm(false)} className="text-[#8A958F] hover:text-[#1E2522]">
-                      <X size={15} />
-                    </button>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="block font-mono font-bold text-[#4A5550]">PROVIDER SERVICE NAME</label>
-                      <input 
-                        type="text" 
-                        required
-                        placeholder="e.g. GitLab Enterprise Cloud, AWS Core Production"
-                        value={newProviderName}
-                        onChange={(e) => setNewProviderName(e.target.value)}
-                        className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded focus:outline-none focus:border-emerald-950 text-neutral-900"
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  {[
+                    { key: 'autoApply', label: 'Auto-apply labels on publish' },
+                    { key: 'includeSeverity', label: 'Severity label tier' },
+                    { key: 'includeCategory', label: 'Category label tier' },
+                    { key: 'includePriority', label: 'Priority label tier' },
+                    { key: 'includeConfidenceBand', label: 'Confidence band label' },
+                    { key: 'includeAuditRef', label: 'Audit traceability table in description' }
+                  ].map((item) => (
+                    <label key={item.key} className="flex items-center justify-between border border-[#EAE6DF] bg-white rounded p-3 cursor-pointer">
+                      <span className="text-[#1E2522] font-medium">{item.label}</span>
+                      <input
+                        type="checkbox"
+                        checked={workItemAttributes[item.key as keyof WorkItemAttributeConfig] as boolean}
+                        onChange={(e) =>
+                          setWorkItemAttributes((prev) => ({
+                            ...prev,
+                            [item.key]: e.target.checked
+                          }))
+                        }
+                        className="accent-emerald-950"
                       />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="block font-mono font-bold text-[#4A5550]">WORKSPACE OR ORGANIZATION SCOPE</label>
-                      <input 
-                        type="text" 
-                        placeholder="e.g. globalsys-org, accounts-12"
-                        value={newProviderUserScope}
-                        onChange={(e) => setNewProviderUserScope(e.target.value)}
-                        className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded focus:outline-none focus:border-emerald-950 text-neutral-900 font-mono"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="block font-mono font-bold text-[#4A5550]">INITIAL STATUS GATE</label>
-                      <select 
-                        value={newProviderStatus}
-                        onChange={(e: any) => setNewProviderStatus(e.target.value)}
-                        className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-neutral-950 focus:outline-none focus:border-emerald-950"
-                      >
-                        <option value="connected">Connected (Synchronized)</option>
-                        <option value="active_check">Active Checking Connection</option>
-                        <option value="disconnected">Staged (Inactive)</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="block font-mono font-bold text-[#4A5550]">SECURITY SCOPE STRING</label>
-                      <input 
-                        type="text" 
-                        value={newProviderScope}
-                        onChange={(e) => setNewProviderScope(e.target.value)}
-                        className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-neutral-900 font-mono"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="pt-2 flex justify-end gap-2">
-                    <button 
-                      type="button" 
-                      onClick={() => setShowAddProviderForm(false)}
-                      className="px-4 py-2 border border-[#EAE6DF] rounded bg-white text-zinc-700 font-bold hover:bg-zinc-50"
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      type="submit" 
-                      className="px-4 py-2 bg-emerald-950 text-[#FAF8F5] rounded font-bold hover:bg-emerald-900"
-                    >
-                      Authorize Connection
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {/* Category 1: SOURCE CONTROL */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono text-neutral-500 uppercase font-semibold select-none letter-spacing-wide tracking-wider">
-                    &lt;&gt; SOURCE CONTROL
-                  </span>
-                  <div className="flex-1 h-px bg-[#EAE6DF]/60" />
+                    </label>
+                  ))}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  
-                  {/* Card 1: GitHub Enterprise */}
-                  <div className="border border-[#EAE6DF] bg-white rounded-md shadow-sm overflow-hidden flex flex-col justify-between h-full hover:border-[#CDC7BD] transition-all">
-                    <div className="p-4 flex items-start justify-between gap-4">
-                      <div className="flex gap-3.5 items-center">
-                        <div className="p-2.5 bg-[#FAF8F5] border border-[#EAE6DF] rounded">
-                          <ProviderIcon slug="github" className="w-5 h-5 object-contain" />
-                        </div>
-                        <div className="space-y-0.5">
-                          <h4 className="font-bold text-[#1E2522] text-sm tracking-tight leading-none">GitHub Enterprise</h4>
-                          <div className="flex items-center gap-1.5 text-xs text-[#5C6560]">
-                            <span className="w-1.5 h-1.5 bg-emerald-600 rounded-full" />
-                            <span className="text-[11px] font-medium text-slate-800">Connected: globalsys-org</span>
-                          </div>
-                        </div>
-                      </div>
-                      <OsIconButton
-                        label="Provider options"
-                        onClick={() => showToast("Showing GitHub credentials and scopes configuration bundle.")}
-                        className="text-[#8A958F] hover:text-[#5C6560] hover:bg-[#FAF8F5] rounded"
-                      >
-                        <MoreVertical size={15} />
-                      </OsIconButton>
-                    </div>
-                    <div className="bg-[#FAF8F5] border-t border-[#EAE6DF] px-4 py-2.5 flex justify-between items-center text-[11px]">
-                      <span className="font-mono text-[#5C6560]">Analyzers Active: 24</span>
-                      <button 
-                        onClick={() => showToast("Live workspace trigger: Synchronization initialized with GitHub cluster...")}
-                        className="text-emerald-950 font-bold hover:text-emerald-800 flex items-center gap-1.5 transition-all text-[10px] uppercase tracking-wider font-mono cursor-pointer"
-                      >
-                        <RefreshCcw size={11} className="animate-spin-slow" />
-                        <span>Sync Now</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Card 2: GitLab Self-Managed */}
-                  <div className="border border-[#EAE6DF] bg-white rounded-md shadow-sm overflow-hidden flex flex-col justify-between h-full hover:border-[#CDC7BD] transition-all">
-                    <div className="p-4 flex items-start justify-between gap-4">
-                      <div className="flex gap-3.5 items-center">
-                        <div className="p-2.5 bg-[#FAF8F5] border border-[#EAE6DF] rounded">
-                          <ProviderIcon slug="gitlab" className="w-5 h-5 object-contain" />
-                        </div>
-                        <div className="space-y-0.5">
-                          <h4 className="font-bold text-[#1E2522] text-sm tracking-tight leading-none">GitLab Self-Managed</h4>
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <span className="w-1.5 h-1.5 bg-amber-505 bg-amber-500 rounded-full" />
-                            <span className="text-[11px] text-amber-800 font-bold">Token expires in 3 days</span>
-                          </div>
-                        </div>
-                      </div>
-                      <OsIconButton
-                        label="Provider options"
-                        onClick={() => showToast("Showing GitLab connection auth parameters.")}
-                        className="text-[#8A958F] hover:text-[#5C6560] hover:bg-[#FAF8F5] rounded"
-                      >
-                        <MoreVertical size={15} />
-                      </OsIconButton>
-                    </div>
-                    <div className="bg-[#FAF8F5] border-t border-[#EAE6DF] px-4 py-2.5 flex justify-between items-center text-[11px]">
-                      <span className="font-mono text-[#5C6560]">Risk Clusters: 3</span>
-                      <button 
-                        onClick={() => showToast("Initiated GitLab workspace token rotation phase secure logs...")}
-                        className="text-[#B91C1C] font-bold hover:text-[#991B1B] flex items-center gap-1.5 transition-all text-[10px] uppercase tracking-wider font-mono cursor-pointer"
-                      >
-                        <RotateCw size={11} />
-                        <span>Rotate Token</span>
-                      </button>
-                    </div>
-                  </div>
-
-                </div>
-              </div>
-
-              {/* Category 2: INFRASTRUCTURE */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono text-neutral-500 uppercase font-semibold select-none letter-spacing-wide tracking-wider">
-                    ☁ INFRASTRUCTURE
-                  </span>
-                  <div className="flex-1 h-px bg-[#EAE6DF]/60" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <label className="space-y-1">
+                    <span className="text-[10px] font-mono uppercase tracking-wide text-[#8A958F]">Label prefix</span>
+                    <input
+                      value={workItemAttributes.labelPrefix}
+                      onChange={(e) =>
+                        setWorkItemAttributes((prev) => ({ ...prev, labelPrefix: e.target.value }))
+                      }
+                      className="w-full p-2 bg-white border border-[#EAE6DF] rounded font-mono"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between border border-[#EAE6DF] bg-white rounded p-3 cursor-pointer">
+                    <span className="text-[#1E2522] font-medium">Ensure GitLab project labels exist</span>
+                    <input
+                      type="checkbox"
+                      checked={workItemAttributes.gitlab.ensureProjectLabels}
+                      onChange={(e) =>
+                        setWorkItemAttributes((prev) => ({
+                          ...prev,
+                          gitlab: { ...prev.gitlab, ensureProjectLabels: e.target.checked }
+                        }))
+                      }
+                      className="accent-emerald-950"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between border border-[#EAE6DF] bg-white rounded p-3 cursor-pointer md:col-span-2">
+                    <span className="text-[#1E2522] font-medium">Ensure GitHub repository labels exist</span>
+                    <input
+                      type="checkbox"
+                      checked={workItemAttributes.github.ensureRepositoryLabels}
+                      onChange={(e) =>
+                        setWorkItemAttributes((prev) => ({
+                          ...prev,
+                          github: { ...prev.github, ensureRepositoryLabels: e.target.checked }
+                        }))
+                      }
+                      className="accent-emerald-950"
+                    />
+                  </label>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  
-                  {/* Card 1: AWS Organizations */}
-                  <div className="border border-[#EAE6DF] bg-white rounded-md shadow-sm overflow-hidden flex flex-col justify-between h-full hover:border-[#CDC7BD] transition-all">
-                    <div className="p-4 flex items-start justify-between gap-4">
-                      <div className="flex gap-3.5 items-center">
-                        <div className="p-2.5 bg-[#FAF8F5] border border-[#EAE6DF] rounded">
-                          <ProviderIcon slug="aws" className="w-5 h-5 object-contain" />
-                        </div>
-                        <div className="space-y-0.5">
-                          <h4 className="font-bold text-[#1E2522] text-sm tracking-tight leading-none">AWS Organizations</h4>
-                          <div className="flex items-center gap-1.5 text-xs text-[#5C6560]">
-                            <span className="w-1.5 h-1.5 bg-emerald-600 rounded-full" />
-                            <span className="text-[11px] font-medium text-slate-800">Connected: 12 Accounts</span>
-                          </div>
-                        </div>
-                      </div>
-                      <OsIconButton
-                        label="Provider options"
-                        onClick={() => showToast("Showing AWS IAM policy scope layout properties.")}
-                        className="text-[#8A958F] hover:text-[#5C6560] hover:bg-[#FAF8F5] rounded"
-                      >
-                        <MoreVertical size={15} />
-                      </OsIconButton>
-                    </div>
-                    <div className="bg-[#FAF8F5] border-t border-[#EAE6DF] px-4 py-2.5 flex justify-between items-center text-[11px]">
-                      <span className="font-mono text-[#5C6560]">Issues Synced: 142</span>
-                      <button 
-                        onClick={() => showToast("Opening AWS Topology VPC threat vector mapping dashboard...")}
-                        className="text-emerald-950 font-bold hover:text-emerald-800 flex items-center gap-1.5 transition-all text-[10px] uppercase tracking-wider font-mono cursor-pointer"
-                      >
-                        <Map size={11} />
-                        <span>View Map</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Card 2: Dotted placeholder - Add Infrastructure Provider */}
-                  <div 
-                    onClick={() => {
-                      setNewProviderName('AWS Production Portal');
-                      setNewProviderUserScope('AWS Accounts');
-                      setNewProviderScope('arn:aws:iam::policy/SecurityAudit');
-                      setShowAddProviderForm(true);
-                      showToast("Pre-filled AWS configuration parameters in authorization template form above!");
+                <div className="flex justify-end border-t border-[#EAE6DF]/60 pt-4">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await patchWorkItemAttributes(workItemAttributes);
+                        showToast('Work item attribute automation saved.');
+                      } catch (err) {
+                        alert(err instanceof Error ? err.message : 'Failed to save work item attributes.');
+                      }
                     }}
-                    className="border border-dashed border-[#CDC7BD] bg-[#FAF8F5]/30 hover:bg-[#FAF8F5] rounded-md flex flex-col items-center justify-center p-6 text-center group cursor-pointer transition-all min-h-[110px]"
+                    className="py-2 px-5 bg-emerald-950 hover:bg-emerald-900 text-white font-bold rounded shadow transition-all cursor-pointer font-mono uppercase tracking-wide text-[10px]"
                   >
-                    <PlusCircle size={24} className="text-[#8A958F] group-hover:text-emerald-950 transition-colors mb-2" />
-                    <span className="font-bold text-[#1E2522] text-xs leading-none">Add Infrastructure Provider</span>
-                    <span className="text-[10px] text-[#717A75] mt-1">Connect AWS, GCP, or Azure</span>
-                  </div>
-
+                    Save Work Item Rules
+                  </button>
                 </div>
               </div>
 
-              {/* Dynamic Added / Remaining Providers from state */}
+              {/* Runtime provider connections from database */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-neutral-500 uppercase font-semibold tracking-wider">
+                    CONNECTED PROVIDERS
+                  </span>
+                  <div className="flex-1 h-px bg-[#EAE6DF]/60" />
+                </div>
+
+                {integrations.length === 0 ? (
+                  <div className="border border-dashed border-[#CDC7BD] bg-[#FAF8F5]/30 rounded-md p-6 text-center text-xs text-[#5C6560]">
+                    No active provider connections yet. Use Connect with OAuth above to authorize GitLab.
+                  </div>
+                ) : null}
+
+              {/* Dynamic provider registry list */}
               {integrations.length > 0 && (
                 <div className="bg-white border border-[#EAE6DF] rounded-lg p-5 space-y-4">
                   <div className="border-b pb-2">
@@ -673,42 +717,46 @@ export function SettingsView() {
                   </div>
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {integrations.map((int, idx) => {
-                      // skip if they are already rendered individually above
-                      if (int.name.includes('GitHub Enterprise') || int.name.includes('GitLab Self-Managed') || int.name.includes('AWS Organizations')) {
-                        // let's still render them here or show beautiful custom layout details
-                      }
+                    {integrations.map((int) => {
                       const iconSlug = getIconSlugByName(int.name);
+                      const lastSyncLabel = int.lastSync
+                        ? new Date(int.lastSync).toLocaleString()
+                        : 'Never synced';
                       return (
-                        <div key={idx} className="border border-[#EAE6DF]/70 bg-[#FAF8F5]/40 rounded p-3 flex justify-between items-center text-xs">
+                        <div key={int.id} className="border border-[#EAE6DF]/70 bg-[#FAF8F5]/40 rounded p-3 flex justify-between items-center text-xs gap-3">
                           <div className="flex items-center gap-2.5 min-w-0">
                             <ProviderIcon slug={iconSlug} className="w-4 h-4 shrink-0" />
                             <div className="min-w-0">
                               <span className="font-bold text-neutral-800 tracking-tight truncate block">{int.name}</span>
                               <span className="text-[9.5px] font-mono text-zinc-500 truncate block">{int.scope}</span>
+                              <span className="text-[9px] font-mono text-zinc-400 truncate block">{int.vcsOwner} · {lastSyncLabel}</span>
                             </div>
                           </div>
 
                           <div className="flex items-center gap-2 font-mono text-[9px] shrink-0">
                             <span className={`px-1.5 py-0.5 rounded border uppercase font-bold ${
-                              int.status === 'connected' 
-                                ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                              int.status === 'connected'
+                                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                                 : int.status === 'active_check'
                                   ? 'bg-amber-50 border-amber-200 text-amber-800'
                                   : 'bg-rose-50 border-rose-200 text-rose-800'
                             }`}>
                               {int.status.replace('_', ' ')}
                             </span>
-                            <OsIconButton
-                              label="Delete Connection"
-                              onClick={() => {
-                                setIntegrations(integrations.filter((_, i) => i !== idx));
-                                showToast(`Removed network integrations registry endpoint: "${int.name}"`);
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await syncIntegration(int.id);
+                                  showToast(`Synced ${int.name}.`);
+                                } catch (err) {
+                                  alert(err instanceof Error ? err.message : 'Sync failed.');
+                                }
                               }}
-                              className="hover:text-[#B91C1C] text-zinc-400 rounded"
+                              className="px-2 py-1 border border-[#EAE6DF] rounded bg-white hover:bg-zinc-50 font-bold"
                             >
-                              <Trash2 size={12} />
-                            </OsIconButton>
+                              Sync
+                            </button>
                           </div>
                         </div>
                       );
@@ -716,6 +764,69 @@ export function SettingsView() {
                   </div>
                 </div>
               )}
+              </div>
+
+              <div className="bg-[#FAF8F5] border border-[#EAE6DF] rounded-lg p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-[#1E2522] font-display">Publish Reconciliation</h3>
+                    <p className="text-xs text-[#717A75] mt-1">
+                      Compare published GitLab issues against Premortem snapshots and record drift events.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={reconcileIssues.isPending}
+                    onClick={() => {
+                      reconcileIssues.mutate(undefined, {
+                        onSuccess: (result) => {
+                          showToast(
+                            `Reconciled ${result.reconciledCount ?? 0} issues (${result.driftedCount ?? 0} drifted).`
+                          );
+                          void reconciliationQuery.refetch();
+                        },
+                        onError: (err) => alert(err instanceof Error ? err.message : 'Reconciliation failed.')
+                      });
+                    }}
+                    className="px-4 py-2 bg-emerald-950 hover:bg-emerald-900 disabled:opacity-60 text-[#FAF8F5] font-bold text-xs rounded uppercase font-mono tracking-wider"
+                  >
+                    {reconcileIssues.isPending ? 'Reconciling…' : 'Run Reconciliation'}
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {(reconciliationQuery.data?.events ?? []).length === 0 ? (
+                    <p className="text-xs text-zinc-500 font-mono">No reconciliation events yet.</p>
+                  ) : (
+                    reconciliationQuery.data?.events.map((event) => (
+                      <div
+                        key={event.id}
+                        className="flex items-start justify-between gap-3 border border-[#EAE6DF] bg-white rounded p-3 text-xs"
+                      >
+                        <div>
+                          <p className="font-semibold text-[#1E2522]">
+                            {event.publishedIssue?.publishedTitle ?? 'Published issue'}
+                          </p>
+                          <p className="text-zinc-500 font-mono mt-0.5">
+                            {event.status}
+                            {event.driftFields?.length ? ` · drift: ${event.driftFields.join(', ')}` : ''}
+                          </p>
+                        </div>
+                        {event.publishedIssue?.url ? (
+                          <a
+                            href={event.publishedIssue.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-emerald-900 font-mono uppercase text-[10px] shrink-0"
+                          >
+                            View
+                          </a>
+                        ) : null}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
 
             </div>
           )}
@@ -741,25 +852,23 @@ export function SettingsView() {
                   {/* Primary model select */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                     <div className="space-y-1.5">
-                      <label className="block font-mono font-bold text-zinc-650 uppercase tracking-wider text-[9.5px]">
+                      <label className="block font-mono font-bold text-zinc-600 uppercase tracking-wider text-[9.5px]">
                         Primary Agent Model
                       </label>
                       <select
                         value={selectedGeminiModel}
-                        onChange={(e) => {
-                          setSelectedGeminiModel(e.target.value);
-                          showToast(`Main AI model swapped to ${e.target.value}`);
-                        }}
+                        onChange={(e) => setSelectedGeminiModel(e.target.value)}
                         className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs text-zinc-905 text-zinc-900 focus:ring-1 focus:ring-emerald-950 focus:outline-none font-medium font-mono"
                       >
-                        <option value="gemini-2.5-flash">Gemini 2.5 Flash (Default)</option>
+                        <option value="gemini-3-flash-preview">Gemini 3 Flash Preview (Default)</option>
+                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
                         <option value="gemini-2.5-pro">Gemini 2.5 Pro (Precision Trace)</option>
                         <option value="gemini-1.5-pro">Gemini 1.5 Pro (Deep Context)</option>
                       </select>
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="block font-mono font-bold text-zinc-650 uppercase tracking-wider text-[9.5px]">
+                      <label className="block font-mono font-bold text-zinc-600 uppercase tracking-wider text-[9.5px]">
                         Reasoning Temperature
                       </label>
                       <div className="flex items-center gap-3 bg-white border border-[#EAE6DF] p-2 rounded">
@@ -798,9 +907,104 @@ export function SettingsView() {
                     </div>
                   </div>
 
+                  <div className="bg-white border border-[#EAE6DF] rounded p-6 space-y-4">
+                    <div>
+                      <h3 className="text-md font-bold text-[#1E2522] font-display mb-1">
+                        Model Vendor Priority Pool
+                      </h3>
+                      <p className="text-xs text-[#717A75]">
+                        Route specialist and synthesis workloads through an ordered vendor pool. Premortem tries each enabled tier in sequence until a healthy endpoint responds.
+                      </p>
+                    </div>
+
+                    <ol className="space-y-3">
+                      {vendorRouting.map((tier, index) => (
+                        <li
+                          key={tier.id}
+                          className="border border-[#EAE6DF] rounded p-4 bg-[#FAF8F5] flex flex-col md:flex-row md:items-center gap-4"
+                        >
+                          <div className="flex items-start gap-3 flex-1 min-w-0">
+                            <span className="shrink-0 w-6 h-6 rounded-full bg-emerald-950 text-white text-[10px] font-mono font-bold flex items-center justify-center">
+                              {index + 1}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold font-display text-[#1E2522]">{tier.label}</p>
+                              <p className="text-[11px] text-[#5C6560] mt-1">{tier.description}</p>
+                              {tier.kind === 'custom' ? (
+                                <select
+                                  value={tier.providerRef}
+                                  onChange={(e) => {
+                                    const next = vendorRouting.map((entry) =>
+                                      entry.id === tier.id
+                                        ? { ...entry, providerRef: e.target.value }
+                                        : entry
+                                    );
+                                    setVendorRouting(next);
+                                  }}
+                                  className="mt-2 w-full max-w-xs p-2 text-[11px] bg-white border border-[#EAE6DF] rounded font-mono"
+                                >
+                                  <option value="">Select custom provider</option>
+                                  {customProviders.map((provider) => (
+                                    <option key={provider.name} value={provider.name}>
+                                      {provider.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <p className="mt-2 text-[10px] font-mono uppercase tracking-wide text-[#8A958F]">
+                                  Target · {tier.providerRef}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = vendorRouting.map((entry) =>
+                                entry.id === tier.id ? { ...entry, enabled: !entry.enabled } : entry
+                              );
+                              setVendorRouting(next);
+                            }}
+                            className={`shrink-0 px-3 py-1.5 rounded text-[10px] font-mono font-bold uppercase tracking-wide border transition-colors cursor-pointer ${
+                              tier.enabled
+                                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                : 'bg-zinc-100 border-zinc-200 text-zinc-600'
+                            }`}
+                          >
+                            {tier.enabled ? 'Enabled' : 'Disabled'}
+                          </button>
+                        </li>
+                      ))}
+                    </ol>
+
+                    <div className="flex justify-end border-t border-[#EAE6DF]/60 pt-4">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await patchLlm({ vendorRouting });
+                            showToast('Vendor priority pool saved for this workspace.');
+                          } catch (err) {
+                            alert(err instanceof Error ? err.message : 'Failed to save vendor pool.');
+                          }
+                        }}
+                        className="py-2 px-5 bg-emerald-950 hover:bg-emerald-900 text-white font-bold rounded shadow transition-all cursor-pointer font-mono uppercase tracking-wide text-[10px]"
+                      >
+                        Save Vendor Pool
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="flex justify-end border-t border-[#EAE6DF]/60 pt-4">
                     <button
-                      onClick={() => showToast('Gemini active model token bounds saved successfully.')}
+                      onClick={async () => {
+                        try {
+                          await patchLlm({ selectedGeminiModel, maxTokens, temperature, customProviders, vendorRouting });
+                          showToast('Gemini model settings saved to organization runtime.');
+                        } catch (err) {
+                          alert(err instanceof Error ? err.message : 'Failed to save LLM settings.');
+                        }
+                      }}
                       className="py-2 px-5 bg-emerald-950 hover:bg-emerald-900 text-white font-bold rounded shadow transition-all cursor-pointer font-mono uppercase tracking-wide text-[10px]"
                     >
                       Save Primary Agent Configuration
@@ -892,7 +1096,7 @@ export function SettingsView() {
                                 showToast(`Custom LLM provider status toggled.`);
                               }}
                               className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                prov.active ? 'bg-emerald-50 text-emerald-800' : 'bg-zinc-100 text-zinc-650'
+                                prov.active ? 'bg-emerald-50 text-emerald-800' : 'bg-zinc-100 text-zinc-600'
                               }`}
                             >
                               {prov.active ? "DISCONNECT" : "RE-PING"}
@@ -924,7 +1128,7 @@ export function SettingsView() {
                     Registered custom LLM Providers run directly within client VPC environments. Premortem agent engines do not cache nor transit private parameters outside restricted scopes.
                   </p>
 
-                  <div className="p-3 bg-zinc-150 bg-zinc-100 border border-zinc-200 text-[#717A75] rounded flex gap-2 font-sans">
+                  <div className="flex gap-2 rounded border border-zinc-200 bg-zinc-100 p-3 font-sans text-[#5C6560]">
                     <Info className="text-neutral-700 shrink-0 mt-0.5" size={14} />
                     <p className="text-[10.5px]">
                       Ensure local endpoints set appropriate CORS parameters (<code className="font-mono bg-zinc-200 px-1 font-semibold rounded text-zinc-800 text-[10px]">Access-Control-Allow-Origin</code>) to connect to the platform.
@@ -952,19 +1156,28 @@ export function SettingsView() {
                         Subscription Allocation
                       </h3>
                       <p className="text-xs text-[#717A75]">
-                        You are currently subscribed to the enterprise workspace plan. Modify billing cycles or swap tiers.
+                        Current plan: <span className="font-semibold capitalize">{workspace.billing.plan}</span>
+                        {workspace.billing.billingStatus ? ` (${workspace.billing.billingStatus})` : ''}.
+                        {workspace.billing.stripeTestMode
+                          ? ' Stripe test mode: plan tiers apply in-app without Checkout until you add a test business name in the Stripe dashboard.'
+                          : workspace.billing.stripeConfigured
+                            ? ' Stripe billing is configured.'
+                            : workspace.billing.stripeBillingConfigured
+                              ? ' Stripe keys are set; connect a customer to enable Checkout.'
+                              : ' Stripe is not configured for this workspace.'}
                       </p>
                     </div>
                     
-                    <span className="p-1 px-2.5 bg-emerald-950 text-[#FAF8F5] rounded font-mono font-bold text-[9px] uppercase tracking-wider shadow-sm select-none">
-                      Active Enterprise Tier
+                    <span className="p-1 px-2.5 bg-emerald-950 text-[#FAF8F5] rounded font-mono font-bold text-[9px] uppercase tracking-wider shadow-sm select-none capitalize">
+                      {activeTier} tier
                     </span>
                   </div>
 
                   {/* Switch cycles buttons */}
                   <div className="flex gap-2 p-1 bg-[#FAF8F5] border border-[#EAE6DF] rounded w-60 text-xs">
                     <button
-                      onClick={() => { setBillingCycle('monthly'); showToast('Subscription billing frequency matched to monthly cycle.'); }}
+                      type="button"
+                      onClick={() => setBillingCycle('monthly')}
                       className={`flex-1 py-1.5 rounded font-semibold text-center cursor-pointer transition-all ${
                         billingCycle === 'monthly' ? 'bg-white shadow border border-[#EAE6DF] text-zinc-900 font-bold' : 'text-[#5C6560]'
                       }`}
@@ -972,7 +1185,8 @@ export function SettingsView() {
                       Monthly Sync
                     </button>
                     <button
-                      onClick={() => { setBillingCycle('yearly'); showToast('Subscription billing frequency matched to yearly cycle with 20% discount.'); }}
+                      type="button"
+                      onClick={() => setBillingCycle('yearly')}
                       className={`flex-1 py-1.5 rounded font-semibold text-center cursor-pointer transition-all ${
                         billingCycle === 'yearly' ? 'bg-white shadow border border-[#EAE6DF] text-zinc-900 font-bold' : 'text-[#5C6560]'
                       }`}
@@ -994,7 +1208,14 @@ export function SettingsView() {
                         <div className="text-lg font-bold text-neutral-900 pt-2 font-display">$0/mo</div>
                       </div>
                       <button
-                        onClick={() => { setActiveTier('free'); showToast('Requested subscription change to sandbox free tier.'); }}
+                        onClick={async () => {
+                          try {
+                            await patchBillingPlan('free');
+                            showToast('Plan updated to Free tier.');
+                          } catch (err) {
+                            alert(err instanceof Error ? err.message : 'Failed to update plan.');
+                          }
+                        }}
                         className="w-full py-1.5 border border-zinc-300 rounded font-bold uppercase tracking-wide tracking-wider text-[9px] font-mono hover:bg-zinc-50 cursor-pointer text-zinc-700"
                       >
                         {activeTier === 'free' ? 'Currently Selected' : 'Downgrade'}
@@ -1007,13 +1228,31 @@ export function SettingsView() {
                     }`}>
                       <div className="space-y-1">
                         <span className="font-bold text-[#1E2522] block font-display">Swarm Professional</span>
-                        <span className="text-zinc-650 block font-mono text-[11px]">Up to 5 agents</span>
+                        <span className="text-zinc-600 block font-mono text-[11px]">Up to 5 agents</span>
                         <div className="text-lg font-bold text-neutral-900 pt-2 font-display">
                           {billingCycle === 'monthly' ? '$49/mo' : '$39/mo'}
                         </div>
+                        {billingCycle === 'yearly' ? (
+                          <span className="text-[10px] text-[#717A75] font-mono">$468 billed yearly</span>
+                        ) : null}
                       </div>
                       <button
-                        onClick={() => { setActiveTier('pro'); showToast('Successfully updated plan allocation to Swarm Professional.'); }}
+                        onClick={async () => {
+                          try {
+                            if (workspace?.billing.stripeConfigured) {
+                              await startCheckout('pro', billingCycle);
+                            } else {
+                              await patchBillingPlan('pro');
+                              showToast(
+                                workspace?.billing.stripeTestMode
+                                  ? 'Pro tier applied (Stripe test mode, no Checkout).'
+                                  : 'Plan updated to Pro tier.'
+                              );
+                            }
+                          } catch (err) {
+                            alert(err instanceof Error ? err.message : 'Failed to update plan.');
+                          }
+                        }}
                         className="w-full py-1.5 border border-zinc-300 rounded font-bold uppercase tracking-wide tracking-wider text-[9px] font-mono hover:bg-zinc-50 cursor-pointer text-zinc-700"
                       >
                         {activeTier === 'pro' ? 'Currently Selected' : 'Select Pro'}
@@ -1022,7 +1261,7 @@ export function SettingsView() {
 
                     {/* Tier C: Enterprise Swarm */}
                     <div className={`p-4 rounded border-2 flex flex-col justify-between space-y-3 bg-white ${
-                      activeTier === 'swarm-enterprise' ? 'border-emerald-950 bg-emerald-50/10 shadow-sm' : 'border-[#EAE6DF]'
+                      activeTier === 'enterprise' || activeTier === 'team' ? 'border-emerald-950 bg-emerald-50/10 shadow-sm' : 'border-[#EAE6DF]'
                     }`}>
                       <div className="space-y-1">
                         <span className="font-bold text-[#1E2522] block font-display">Enterprise Core</span>
@@ -1030,12 +1269,30 @@ export function SettingsView() {
                         <div className="text-lg font-bold text-neutral-900 pt-2 font-display">
                           {billingCycle === 'monthly' ? '$249/mo' : '$199/mo'}
                         </div>
+                        {billingCycle === 'yearly' ? (
+                          <span className="text-[10px] text-[#717A75] font-mono">$2,388 billed yearly</span>
+                        ) : null}
                       </div>
                       <button
-                        onClick={() => { setActiveTier('swarm-enterprise'); showToast('Subscription locked on Swarm Enterprise Core.'); }}
+                        onClick={async () => {
+                          try {
+                            if (workspace?.billing.stripeConfigured) {
+                              await startCheckout('team', billingCycle);
+                            } else {
+                              await patchBillingPlan('team');
+                              showToast(
+                                workspace?.billing.stripeTestMode
+                                  ? 'Team tier applied (Stripe test mode, no Checkout).'
+                                  : 'Plan updated to Team tier.'
+                              );
+                            }
+                          } catch (err) {
+                            alert(err instanceof Error ? err.message : 'Failed to update plan.');
+                          }
+                        }}
                         className="w-full py-1.5 bg-emerald-950 text-[#FAF8F5] rounded font-bold uppercase tracking-wide tracking-wider text-[9px] font-mono hover:opacity-90 cursor-pointer"
                       >
-                        {activeTier === 'swarm-enterprise' ? 'Current Active Tier' : 'Upgrade'}
+                        {activeTier === 'enterprise' || activeTier === 'team' ? 'Current Active Tier' : 'Upgrade'}
                       </button>
                     </div>
 
@@ -1050,7 +1307,12 @@ export function SettingsView() {
                   </div>
 
                   <div className="divide-y divide-[#EAE6DF]/60">
-                    {invoices.map((inv) => (
+                    {invoices.length === 0 ? (
+                      <p className="py-3 text-xs text-zinc-500 italic">
+                        No Stripe invoices yet. Billing plan and usage are synced from the runtime database.
+                      </p>
+                    ) : (
+                      (invoices as Array<{ id: string; date?: string; amount?: number; status?: string; method?: string }>).map((inv) => (
                       <div key={inv.id} className="py-3 flex justify-between items-center text-xs">
                         <div className="space-y-0.5">
                           <span className="font-bold text-neutral-900 font-mono tracking-wider">{inv.id}</span>
@@ -1058,7 +1320,7 @@ export function SettingsView() {
                         </div>
                         
                         <div className="flex items-center gap-4">
-                          <span className="font-bold text-neutral-900 font-display">${inv.amount.toFixed(2)}</span>
+                          <span className="font-bold text-neutral-900 font-display">${(inv.amount ?? 0).toFixed(2)}</span>
                           <span className="px-1.5 py-0.2 bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold rounded font-mono text-[9px] text-center uppercase tracking-wide">
                             {inv.status}
                           </span>
@@ -1071,7 +1333,8 @@ export function SettingsView() {
                           </OsIconButton>
                         </div>
                       </div>
-                    ))}
+                    ))
+                    )}
                   </div>
                 </div>
 
@@ -1171,9 +1434,23 @@ export function SettingsView() {
                       </div>
                       
                       <button
-                        onClick={() => {
-                          setIsSlackConnected(!isSlackConnected);
-                          showToast(`Slack notification channel connection state is now: ${!isSlackConnected ? 'ON' : 'OFF'}`);
+                        type="button"
+                        onClick={async () => {
+                          const next = !isSlackConnected;
+                          setIsSlackConnected(next);
+                          try {
+                            await patchNotifications({
+                              slackWebhook,
+                              slackChannel,
+                              isSlackConnected: next,
+                              alertEmails,
+                              alertSeverity
+                            });
+                            showToast(`Slack notifications ${next ? 'enabled' : 'disabled'}.`);
+                          } catch (err) {
+                            setIsSlackConnected(!next);
+                            alert(err instanceof Error ? err.message : 'Failed to update Slack status.');
+                          }
                         }}
                         className={`px-2 py-0.5 border rounded uppercase font-bold text-[9px] font-mono cursor-pointer ${
                           isSlackConnected ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'
@@ -1207,7 +1484,20 @@ export function SettingsView() {
 
                     <div className="flex justify-end pt-1">
                       <button
-                        onClick={() => showToast('Slack payload target parameters saved and matched.')}
+                        onClick={async () => {
+                          try {
+                            await patchNotifications({
+                              slackWebhook,
+                              slackChannel,
+                              isSlackConnected,
+                              alertEmails,
+                              alertSeverity
+                            });
+                            showToast('Slack notification settings saved.');
+                          } catch (err) {
+                            alert(err instanceof Error ? err.message : 'Failed to save notifications.');
+                          }
+                        }}
                         className="py-1.5 px-3 border border-[#EAE6DF] bg-[#FAF8F5] text-zinc-800 text-xs font-semibold rounded hover:bg-[#FAF8F5]/80 transition-all cursor-pointer"
                       >
                         Update Webhook Parameters
@@ -1254,7 +1544,14 @@ export function SettingsView() {
 
                     <div className="flex justify-end pt-1">
                       <button
-                        onClick={() => showToast('Alert emails dispatch thresholds matched.')}
+                        onClick={async () => {
+                          try {
+                            await patchNotifications({ alertEmails, alertSeverity, isSlackConnected, slackWebhook, slackChannel });
+                            showToast('Alert email thresholds saved.');
+                          } catch (err) {
+                            alert(err instanceof Error ? err.message : 'Failed to save alert settings.');
+                          }
+                        }}
                         className="py-1.5 px-4 bg-emerald-950 text-white font-bold text-xs rounded hover:bg-emerald-900 transition-all cursor-pointer"
                       >
                         Save Email Alert Settings

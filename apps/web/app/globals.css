@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+@import '@xyflow/react/dist/style.css';
+
+@layer components {
+  .premortem-workflow-flow,
+  .premortem-repo-graph-flow {
+    --xy-background-color: #faf8f5;
+    --xy-node-border-radius: 0.5rem;
+  }
+
+  .premortem-workflow-flow .react-flow__edge-text,
+  .premortem-repo-graph-flow .react-flow__edge-text {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

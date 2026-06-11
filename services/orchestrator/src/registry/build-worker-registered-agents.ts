@@ -1,5 +1,7 @@
 import type { RegisteredAgent } from '@premortem/agent-kit';
+import { isProductionMode } from '@premortem/domain';
 import { createDefaultExecutors } from '../executors/default-executors';
+import { createLlmExecutors, type LlmExecutorConfig } from '../executors/llm-executors';
 
 const WORKER_AGENT_DEFINITIONS = [
   {
@@ -188,8 +190,39 @@ Reject issue candidates that are vague, duplicative, weakly evidenced, not testa
   Pick<RegisteredAgent, 'name' | 'description' | 'runMode' | 'promptPath' | 'prompt' | 'mergeOwnerPriority'>
 >;
 
-export function buildWorkerRegisteredAgents(): RegisteredAgent[] {
-  const executors = createDefaultExecutors();
+function resolveExecutors(llmConfig?: LlmExecutorConfig) {
+  const mode =
+    process.env.PREMORTEM_EXECUTOR ??
+    (process.env.GEMINI_API_KEY || process.env.AZURE_OPENAI_API_KEY ? 'llm' : 'mock');
+
+  if (mode === 'mock' && isProductionMode()) {
+    throw new Error(
+      'PREMORTEM_PRODUCTION_MODE=1 requires a real LLM executor. Configure GEMINI_API_KEY or Azure OpenAI and unset PREMORTEM_EXECUTOR=mock.'
+    );
+  }
+
+  if (mode === 'llm') {
+    if (process.env.PREMORTEM_SMOKE_SKIP_LLM_SPECIALISTS === '1') {
+      return createDefaultExecutors();
+    }
+
+    const promptByAgent = Object.fromEntries(
+      WORKER_AGENT_DEFINITIONS.map((definition) => [definition.name, definition.prompt])
+    );
+    const llmExecutors = createLlmExecutors(promptByAgent, llmConfig);
+    const defaultExecutors = createDefaultExecutors();
+    return {
+      ...llmExecutors,
+      issue_memory_agent: defaultExecutors.issue_memory_agent,
+      finding_synthesizer_agent: defaultExecutors.finding_synthesizer_agent,
+      issue_validator_agent: defaultExecutors.issue_validator_agent
+    };
+  }
+  return createDefaultExecutors();
+}
+
+export function buildWorkerRegisteredAgents(llmConfig?: LlmExecutorConfig): RegisteredAgent[] {
+  const executors = resolveExecutors(llmConfig);
 
   return WORKER_AGENT_DEFINITIONS.map((definition) => {
     const executor = executors[definition.name];

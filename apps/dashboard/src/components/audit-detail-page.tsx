@@ -107,7 +107,7 @@ export function AuditDetailPage({ auditRun }: { auditRun: AuditRunSnapshot }) {
             and the final publish gate.
           </p>
           <div style={{ display: 'grid', gap: 10 }}>
-            {auditRun.events.map((event) => (
+            {auditRun.events.map((event: AuditRunSnapshot['events'][number]) => (
               <div
                 key={`${event.eventType}-${event.createdAt}`}
                 style={{
@@ -129,7 +129,7 @@ export function AuditDetailPage({ auditRun }: { auditRun: AuditRunSnapshot }) {
         <section style={{ ...sectionCardStyle(), display: 'grid', gap: 16 }}>
           <h2 style={{ margin: 0, fontSize: 24 }}>Review Queue</h2>
           <div style={{ display: 'grid', gap: 14 }}>
-            {auditRun.issueCandidates.map((issue) => (
+            {auditRun.issueCandidates.map((issue: AuditRunSnapshot['issueCandidates'][number]) => (
               <article
                 key={issue.id}
                 style={{
@@ -161,7 +161,7 @@ export function AuditDetailPage({ auditRun }: { auditRun: AuditRunSnapshot }) {
             </p>
           ) : (
             <div style={{ display: 'grid', gap: 12 }}>
-              {auditRun.rejectedIssueCandidates.map((issue) => (
+              {auditRun.rejectedIssueCandidates.map((issue: AuditRunSnapshot['rejectedIssueCandidates'][number]) => (
                 <article
                   key={issue.id}
                   style={{

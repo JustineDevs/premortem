@@ -53,7 +53,15 @@ const config: Config = {
         },
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
-        ring: 'hsl(var(--ring))'
+        ring: 'hsl(var(--ring))',
+        pm: {
+          ink: '#1E2522',
+          muted: '#5C6560',
+          subtle: '#717A75',
+          surface: '#FAF8F5',
+          line: '#EAE6DF',
+          accent: '#064E3B'
+        }
       }
     }
   },

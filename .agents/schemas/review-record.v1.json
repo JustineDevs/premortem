@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://premortem.dev/schemas/review-record.v1.json",
+  "title": "Premortem Review Record v1",
+  "type": "object",
+  "required": ["id", "issue_candidate_id", "action", "reviewer", "timestamp"],
+  "properties": {
+    "id": { "type": "string" },
+    "issue_candidate_id": { "type": "string" },
+    "action": { "enum": ["approve", "reject", "edit", "merge", "split", "publish"] },
+    "reviewer": { "type": "string" },
+    "notes": { "type": "string" },
+    "version_before": { "type": "integer" },
+    "version_after": { "type": "integer" },
+    "timestamp": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": true
+}

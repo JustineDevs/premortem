@@ -16,7 +16,12 @@ export interface Project {
 }
 
 export type SeverityType = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
-export type IssueStatusType = 'OPEN' | 'CONFIRMED' | 'DISMISSED' | 'RESOLVED';
+export type IssueStatusType =
+  | 'OPEN'
+  | 'CONFIRMED'
+  | 'DISMISSED'
+  | 'RESOLVED'
+  | 'PUBLISHED';
 
 export interface TraceStep {
   step: number;
@@ -48,18 +53,44 @@ export interface Finding {
   mergedIntoId?: string;
 }
 
+export interface RuntimeAgentRun {
+  id: string;
+  agentName: string;
+  status: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+}
+
+export interface RuntimeLineageEntry {
+  stage: string;
+  id: string;
+  label: string;
+  parentId?: string;
+}
+
+export interface RuntimeGraphSnapshot {
+  id: string;
+  nodeCount: number;
+  edgeCount: number;
+  metadata?: unknown;
+}
+
 export interface AuditRun {
   id: string;
   projectId: string;
   projectName: string;
   score: number;
-  status: 'COMPLETED' | 'FAILED' | 'RUNNING';
+  status: 'COMPLETED' | 'FAILED' | 'RUNNING' | 'PAUSED';
   date: string;
   criticalCount: number;
   highCount: number;
   mediumCount: number;
   lowCount: number;
   findings: Finding[];
+  agentRuns?: RuntimeAgentRun[];
+  lineage?: RuntimeLineageEntry[];
+  graphSnapshot?: RuntimeGraphSnapshot | null;
+  runtimeEventTypes?: string[];
 }
 
 export interface RiskCluster {
@@ -69,4 +100,9 @@ export interface RiskCluster {
   severity: SeverityType;
   findingsCount: number;
   projectIds: string[];
+  /** Audit run that produced this cluster (for dashboard Open navigation). */
+  auditRunId?: string;
 }
+
+export type { ConsoleReviewActionValue } from '@premortem/domain';
+export { ConsoleReviewAction } from '@premortem/domain';

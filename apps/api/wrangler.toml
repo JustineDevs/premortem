@@ -21,3 +21,25 @@ dead_letter_queue = "premortem-audit-jobs-dlq-dev"
 [[routes]]
 pattern = "api.premortem.dev/*"
 zone_name = "premortem.dev"
+
+[env.production]
+name = "premortem-api"
+workers_dev = false
+
+[env.production.vars]
+APP_ENV = "production"
+
+[[env.production.queues.producers]]
+binding = "AUDIT_QUEUE"
+queue = "premortem-audit-jobs"
+
+[[env.production.queues.consumers]]
+queue = "premortem-audit-jobs"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "premortem-audit-jobs-dlq"
+
+[[env.production.routes]]
+pattern = "api.premortem.dev/*"
+zone_name = "premortem.dev"

@@ -1,12 +1,17 @@
 import { NextResponse } from 'next/server';
-import { getAuditById } from '@/lib/premortem-os/store';
 
-export async function GET(_request: Request, context: { params: { id: string } }) {
-  const audit = getAuditById(context.params.id);
+import { fetchRuntimeAuditSnapshot } from '@/lib/premortem-api/client';
+import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
 
-  if (!audit) {
-    return NextResponse.json({ error: 'Audit not found' }, { status: 404 });
+export async function GET(request: Request, { params }: { params: { id: string } }) {
+  try {
+    const context = await resolveRequestActorContext(request);
+    const auditRun = await fetchRuntimeAuditSnapshot(params.id, actorHeaders(context));
+    return NextResponse.json({ auditRun, snapshot: auditRun });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to load audit' },
+      { status: 502 }
+    );
   }
-
-  return NextResponse.json(audit);
 }

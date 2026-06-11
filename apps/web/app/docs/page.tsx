@@ -1,22 +1,26 @@
-import { MarketingDocHub } from '@/components/landing/blocks';
+import {
+  MarketingDocAudienceCards,
+  MarketingDocHub,
+  MarketingStructuredDocPage
+} from '@/components/landing/blocks';
 import { MarketingParagraph } from '@/components/landing/marketing-content';
 import { MarketingPageLayout } from '@/components/landing/marketing-page-layout';
-import { docsHubCards } from '@/content/marketing/docs-index';
+import { docsHubCards, docsHubIntro } from '@/content/marketing/docs-index';
 
 export const metadata = {
   title: 'Documentation | Premortem',
-  description: 'Premortem documentation hub for setup, architecture, integrations, and releases.'
+  description: docsHubIntro.lead
 };
 
 export default function DocsHubPage() {
   return (
-    <MarketingPageLayout
-      title="Documentation"
-      description="Setup guides, product flows, architecture, GitLab integration, and release notes, aligned with the Premortem landing and product shell."
-    >
+    <MarketingPageLayout title="Documentation" description={docsHubIntro.lead}>
       <MarketingParagraph>
-        Start with getting started for local development, then explore product flows and architecture. External contributors can also read the repository README on GitHub.
+        Documentation is organized by intent: not by dashboard tabs. Pick a bucket below, or jump
+        straight to your role.
       </MarketingParagraph>
+      <MarketingDocAudienceCards cards={docsHubIntro.audiences} />
+      <MarketingDocHub cards={docsHubIntro.diataxis} />
       <MarketingDocHub cards={docsHubCards} />
     </MarketingPageLayout>
   );

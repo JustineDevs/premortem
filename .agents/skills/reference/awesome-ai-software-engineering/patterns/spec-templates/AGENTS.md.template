@@ -1,0 +1,171 @@
+# AGENTS.md
+
+Configuration for multi-agent development workflows.
+
+## Project Overview
+
+**Project:** [Project Name]
+**Repository:** [repo-url]
+**Primary Language:** [language]
+
+---
+
+## Agent Roles
+
+### Architect Agent
+
+**Purpose:** Design system structure and make architectural decisions
+
+**Responsibilities:**
+- Review PRDs and create technical designs
+- Define module boundaries and interfaces
+- Ensure patterns are consistent
+- Approve significant structural changes
+
+**Access:**
+- Read: All files
+- Write: docs/architecture/, ARCHITECTURE.md
+
+**Invocation:**
+```
+@architect Review this PRD and propose a technical design.
+```
+
+---
+
+### Developer Agent
+
+**Purpose:** Implement features according to specifications
+
+**Responsibilities:**
+- Write code following existing patterns
+- Create unit tests for new code
+- Fix bugs and handle edge cases
+- Refactor when directed
+
+**Access:**
+- Read: All files
+- Write: src/, tests/
+
+**Invocation:**
+```
+@developer Implement [feature] according to [PRD link].
+```
+
+---
+
+### Reviewer Agent
+
+**Purpose:** Check code quality and catch issues
+
+**Responsibilities:**
+- Review code changes for bugs
+- Verify adherence to patterns
+- Check security concerns
+- Suggest improvements
+
+**Access:**
+- Read: All files
+- Write: None (comments only)
+
+**Invocation:**
+```
+@reviewer Review the changes in [files/PR].
+```
+
+---
+
+### Tester Agent
+
+**Purpose:** Create and maintain test coverage
+
+**Responsibilities:**
+- Write integration tests
+- Create test fixtures and mocks
+- Identify edge cases
+- Verify acceptance criteria
+
+**Access:**
+- Read: All files
+- Write: tests/, fixtures/
+
+**Invocation:**
+```
+@tester Write tests for [feature] covering [scenarios].
+```
+
+---
+
+## Workflow
+
+### Feature Development
+
+```
+1. PRD created and reviewed
+2. @architect creates technical design
+3. @developer implements in phases
+4. @reviewer checks each phase
+5. @tester adds test coverage
+6. Final review and merge
+```
+
+### Bug Fixing
+
+```
+1. Bug report received
+2. @developer investigates and proposes fix
+3. @reviewer validates fix doesn't introduce regressions
+4. @tester adds regression test
+5. Merge and deploy
+```
+
+---
+
+## Communication Protocols
+
+### Handoffs
+
+When handing off to another agent:
+- Summarize what was done
+- Note any open questions
+- Point to relevant files
+- State expected next action
+
+### Escalation
+
+Escalate to human when:
+- Security concerns identified
+- Architectural decision needed
+- Requirements unclear
+- Significant scope change
+
+---
+
+## Context Files
+
+| File | Purpose | Updated By |
+|------|---------|------------|
+| CONTEXT.md | Current project state | All agents |
+| ARCHITECTURE.md | System design | Architect |
+| CHANGELOG.md | Recent changes | Developer |
+| TODO.md | Pending tasks | All agents |
+
+---
+
+## Constraints
+
+### All Agents
+- Follow existing code patterns
+- Don't modify files outside assigned scope
+- Document significant decisions
+- Ask for clarification when uncertain
+
+### Security
+- Never commit secrets
+- Validate all inputs
+- Follow OWASP guidelines
+- Flag security concerns immediately
+
+---
+
+*Last updated: [DATE]*

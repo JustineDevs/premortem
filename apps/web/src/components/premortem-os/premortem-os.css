@@ -29,3 +29,121 @@
 .premortem-os-root ::-webkit-scrollbar-thumb:hover {
   background: #c4c2bc;
 }
+
+/* Continuous audit lock toggle: Premortem live runtime indicator */
+.continuous-audit-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c4c2bc;
+  flex-shrink: 0;
+  transition: background-color 0.25s ease;
+}
+
+.continuous-audit-live-dot.on {
+  background: #059669;
+  animation: continuous-audit-live-breathe 1.2s ease-in-out infinite;
+}
+
+@keyframes continuous-audit-live-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgb(5 150 105 / 45%);
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 0.75;
+    box-shadow: 0 0 0 4px rgb(5 150 105 / 0%);
+  }
+}
+
+.continuous-audit-radio-on {
+  animation: continuous-audit-radio-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes continuous-audit-radio-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.continuous-audit-lock-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #8a958f;
+  transition:
+    color 0.25s ease,
+    transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.continuous-audit-lock-icon.is-locked {
+  color: #047857;
+}
+
+.continuous-audit-lock-icon.is-unlocked {
+  color: #9ca3af;
+}
+
+.continuous-audit-lock-icon.locking {
+  animation: continuous-audit-lock-close 0.42s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.continuous-audit-lock-icon.unlocking {
+  animation: continuous-audit-lock-open 0.42s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+@keyframes continuous-audit-lock-close {
+  0% {
+    transform: rotate(-12deg) scale(0.92);
+    color: #9ca3af;
+  }
+  55% {
+    transform: rotate(6deg) scale(1.08);
+    color: #059669;
+  }
+  100% {
+    transform: rotate(0deg) scale(1);
+    color: #047857;
+  }
+}
+
+@keyframes continuous-audit-lock-open {
+  0% {
+    transform: rotate(0deg) scale(1);
+    color: #047857;
+  }
+  45% {
+    transform: rotate(-10deg) scale(1.06);
+    color: #059669;
+  }
+  100% {
+    transform: rotate(-12deg) scale(0.96);
+    color: #9ca3af;
+  }
+}
+
+.group:hover .continuous-audit-lock-icon {
+  transform: scale(1.06);
+}
+
+.process-bar-indeterminate {
+  width: 35% !important;
+  animation: audit-pipeline-scan 1.4s ease-in-out infinite;
+}
+
+@keyframes audit-pipeline-scan {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+

@@ -1,16 +1,11 @@
-import { MarketingDocLayout } from '@/components/landing/blocks';
-import { MarketingBulletList } from '@/components/landing/marketing-content';
+import { MarketingStructuredDocPage } from '@/components/landing/blocks';
 import { productFlowsDoc } from '@/content/marketing/docs-index';
 
 export const metadata = {
   title: 'Product flows | Premortem Docs',
-  description: 'Onboarding, review, publish, and traceability flows.'
+  description: productFlowsDoc.lead
 };
 
 export default function ProductFlowsDocPage() {
-  return (
-    <MarketingDocLayout title={productFlowsDoc.title} description={productFlowsDoc.description}>
-      <MarketingBulletList items={productFlowsDoc.bullets} />
-    </MarketingDocLayout>
-  );
+  return <MarketingStructuredDocPage doc={productFlowsDoc} />;
 }

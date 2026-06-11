@@ -1,73 +1,121 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { Sidebar } from './Sidebar';
 import { DashboardView } from './DashboardView';
 import { ProjectsView } from './ProjectsView';
 import { AuditsView } from './AuditsView';
 import { AdHocSandboxView } from './AdHocSandboxView';
 import { SettingsView } from './SettingsView';
-import { WorkflowCanvasView } from './WorkflowCanvasView';
 import { AuditHistoryView } from './AuditHistoryView';
-import { Project, AuditRun, ProviderType, Finding } from '@/lib/premortem-os/types';
+import { Project, AuditRun, ProviderType, Finding, RiskCluster } from '@/lib/premortem-os/types';
+import { ConsoleReviewAction, consoleStatusAfterReviewAction, ConsoleIssueStatus } from '@premortem/domain';
+import type { ConsoleReviewActionValue } from '@premortem/domain';
 import { premortemBrand } from '@/lib/premortem-os/branding';
 import { AlertCircle } from 'lucide-react';
 
+import { useWorkspace } from '@/hooks/use-workspace';
+import { useOsConsoleData, useAuditMutations } from '@/hooks/use-os-console-data';
+import { useContinuousAuditCycle } from '@/hooks/use-continuous-audit-cycle';
+import { OsAnalyticsIdentity, OsPageAnalytics } from './os-analytics';
 import { OsLoadingScreen } from './os-loading-screen';
+import { resolveGitLabAccessState } from '@/lib/provider-access';
+
+const WorkflowCanvasView = dynamic(
+  () => import('./WorkflowCanvasView').then((module) => module.WorkflowCanvasView),
+  {
+    loading: () => (
+      <div className="flex flex-1 items-center justify-center p-8 font-mono text-xs text-[#5C6560]">
+        Loading workflow canvas…
+      </div>
+    ),
+    ssr: false
+  }
+);
 
 export function PremortemOsApp() {
+  const { workspace, patchRuntime, reload: reloadWorkspace, resumeAudit, stopAllRuntime } = useWorkspace();
+  const {
+    projects,
+    audits: loadedAudits,
+    riskClusters: loadedRiskClusters,
+    isLoading: consoleLoading,
+    error: consoleError,
+    apiHealthy,
+    refetchAudits,
+    refetchProjects
+  } = useOsConsoleData();
   const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsState, setProjects] = useState<Project[]>([]);
   const [audits, setAudits] = useState<AuditRun[]>([]);
+  const [riskClusters, setRiskClusters] = useState<RiskCluster[]>([]);
   const [selectedAuditId, setSelectedAuditId] = useState<string | null>(null);
+  const [focusCluster, setFocusCluster] = useState<RiskCluster | null>(null);
   
-  // Loading and interaction states
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const {
+    registerProject,
+    triggerAudit,
+    reviewIssue,
+    persistFindingFields: persistFindingFieldsMutation,
+    deployPatch
+  } = useAuditMutations();
   const [isPatching, setIsPatching] = useState<boolean>(false);
+  const [isTogglingContinuousAudit, setIsTogglingContinuousAudit] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [systemScore, setSystemScore] = useState<number>(0);
 
-  // Compute aggregate system compliance score based on recent audits
-  const [systemScore, setSystemScore] = useState<number>(72);
-
-  // 1. Load initial payload
-  useEffect(() => {
-    async function bootstrapWorkspace() {
-      setIsLoading(true);
-      setErrorMessage(null);
-      try {
-        const [projRes, audRes] = await Promise.all([
-          fetch('/api/projects'),
-          fetch('/api/audits')
-        ]);
-
-        if (!projRes.ok || !audRes.ok) {
-          throw new Error("Failure loading security metrics from full-stack api.");
-        }
-
-        const projData = await projRes.json();
-        const audData = await audRes.json();
-
-        setProjects(projData);
-        setAudits(audData);
-
-        if (audData.length > 0) {
-          setSelectedAuditId(audData[0].id);
-          // Calculate average score of latest audits
-          const avgScore = Math.round(audData.reduce((sum: number, current: any) => sum + current.score, 0) / audData.length);
-          setSystemScore(avgScore);
-        }
-      } catch (err: any) {
-        console.error("Bootstrap workspace failed:", err);
-        setErrorMessage(err.message || "Failed to establish socket connection with backend server.");
-      } finally {
-        setIsLoading(false);
-      }
+  const handleOpenRiskCluster = useCallback((cluster: RiskCluster) => {
+    if (cluster.id === 'runtime-empty') {
+      setActiveTab('audits');
+      return;
     }
-
-    bootstrapWorkspace();
+    if (!cluster.auditRunId) return;
+    setSelectedAuditId(cluster.auditRunId);
+    setFocusCluster(cluster);
+    setActiveTab('audits');
   }, []);
 
-  // 2. Refresh scores on audits change
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    if (tab === 'settings' || tab === 'history' || tab === 'projects' || tab === 'audits' || tab === 'dashboard') {
+      setActiveTab(tab);
+    }
+    const notice = params.get('integration_notice');
+    if (notice === 'gitlab_connected') {
+      setActiveTab('projects');
+      if (!params.has('discover')) {
+        params.set('discover', '1');
+      }
+      params.delete('integration_notice');
+      params.delete('integration_detail');
+      const nextUrl = `${window.location.pathname}?${params.toString()}`;
+      window.history.replaceState({}, '', nextUrl);
+      void reloadWorkspace();
+      void refetchProjects();
+    }
+  }, [reloadWorkspace, refetchProjects]);
+
+  useEffect(() => {
+    setProjects(projects);
+  }, [projects]);
+
+  useEffect(() => {
+    setAudits(loadedAudits);
+    setRiskClusters(loadedRiskClusters as RiskCluster[]);
+    if (loadedAudits.length > 0 && !selectedAuditId) {
+      setSelectedAuditId(loadedAudits[0].id);
+    }
+  }, [loadedAudits, loadedRiskClusters, selectedAuditId]);
+
+  useEffect(() => {
+    if (consoleError) {
+      setErrorMessage(consoleError instanceof Error ? consoleError.message : 'Failed to connect to Premortem runtime API.');
+    }
+  }, [consoleError]);
+
   useEffect(() => {
     if (audits.length > 0) {
       const avgScore = Math.round(audits.reduce((sum, current) => sum + current.score, 0) / audits.length);
@@ -75,7 +123,29 @@ export function PremortemOsApp() {
     }
   }, [audits]);
 
-  // 3. Register a new repository asset
+  const handleAuditHydrated = (auditId: string, hydratedAudit: AuditRun) => {
+    setAudits((prev) =>
+      prev.map((audit) => (audit.id === auditId ? { ...audit, ...hydratedAudit } : audit))
+    );
+  };
+
+  const fetchAuditDetail = async (auditId: string): Promise<AuditRun | null> => {
+    try {
+      const res = await fetch(`/api/audits/${auditId}`);
+      if (!res.ok) return null;
+      const payload = await res.json();
+      const project = projectsState.find((item) => item.id === payload.snapshot?.projectId);
+      const { mapSnapshotToAuditRun } = await import('@/lib/premortem-api/map-runtime-to-console');
+      const hydrated = mapSnapshotToAuditRun(
+        payload.snapshot,
+        project?.name ?? payload.snapshot?.projectId ?? auditId
+      );
+      handleAuditHydrated(auditId, hydrated);
+      return hydrated;
+    } catch {
+      return null;
+    }
+  };
   const handleRegisterProject = async (newProjPayload: {
     name: string;
     repoUrl: string;
@@ -84,49 +154,28 @@ export function PremortemOsApp() {
     scanCodeSnippet?: string;
   }) => {
     try {
-      const res = await fetch('/api/projects', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(newProjPayload),
-      });
-
-      if (!res.ok) {
-        throw new Error("Unable to register repository resource.");
-      }
-
-      const registered = await res.json();
+      const registered = await registerProject.mutateAsync(newProjPayload);
       setProjects((prev) => [...prev, registered]);
-    } catch (err: any) {
-      alert("Error registering repository: " + err.message);
+    } catch (err: unknown) {
+      alert(`Error registering repository: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
   // 4. Trigger active continuous run
-  const handleTriggerScan = async (projectId: string) => {
+  const handleTriggerScan = async (projectId: string, options?: { silent?: boolean }) => {
     // Set matching project to scanning state
     setProjects((prev) =>
       prev.map((p) => (p.id === projectId ? { ...p, status: 'SCANNING' } : p))
     );
     
-    // Auto-navigate to Audits list to observe progress
-    setActiveTab('audits');
+    // Auto-navigate to Audits list to observe progress (manual triggers only)
+    if (!options?.silent) {
+      setActiveTab('audits');
+    }
 
     try {
-      const res = await fetch('/api/audits/run', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ projectId }),
-      });
+      const result = await triggerAudit.mutateAsync({ projectId });
 
-      if (!res.ok) {
-        throw new Error("Vulnerability scanner crash on live endpoint compile.");
-      }
-
-      const result = await res.json();
       if (result.success && result.audit) {
         const newAuditRecord: AuditRun = result.audit;
         setAudits((prev) => [newAuditRecord, ...prev]);
@@ -155,6 +204,7 @@ export function PremortemOsApp() {
           })
         );
       }
+      void refetchAudits();
     } catch (err: any) {
       alert("AI Security Scan Failed: " + err.message);
       // Reset scanning state back to normal warning level on exception
@@ -166,33 +216,23 @@ export function PremortemOsApp() {
 
   // 5. Update Finding action (confirm / dismiss false positives)
   const handleUpdateFindingStatus = async (
-    auditId: string, 
-    issueId: string, 
-    action: 'CONFIRMED' | 'DISMISSED' | 'RESOLVED'
+    auditId: string,
+    issueId: string,
+    action: ConsoleReviewActionValue
   ) => {
     try {
-      const res = await fetch(`/api/audits/${auditId}/issues/${issueId}/action`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ action }),
-      });
+      const data = await reviewIssue.mutateAsync({ auditId, issueId, action });
 
-      if (!res.ok) {
-        throw new Error("Failed to change severity findings logs.");
-      }
-
-      const data = await res.json();
       if (data.success) {
+        const nextStatus = consoleStatusAfterReviewAction(action);
         setAudits((prev) =>
           prev.map((audit) => {
             if (audit.id === auditId) {
               return {
                 ...audit,
                 findings: audit.findings.map((f) =>
-                  f.id === issueId ? { ...f, status: action } : f
-                ),
+                  f.id === issueId && nextStatus ? { ...f, status: nextStatus } : f
+                )
               };
             }
             return audit;
@@ -204,7 +244,7 @@ export function PremortemOsApp() {
     }
   };
 
-  // 5b. Synthesized issue update handler
+  // 5b. Synthesized issue field edits (local optimistic state while editing)
   const handleUpdateFindingFields = (
     auditId: string,
     findingId: string,
@@ -225,82 +265,121 @@ export function PremortemOsApp() {
     );
   };
 
-  // 6. Deploy Code Patch and create virtual PR
+  const handlePersistFindingFields = async (
+    auditId: string,
+    findingId: string,
+    fields: Partial<Finding>
+  ) => {
+    handleUpdateFindingFields(auditId, findingId, fields);
+
+    const payload = {
+      title: fields.title,
+      whyItMatters: fields.whyItMatters,
+      description: fields.description,
+      recommendedActionSummary: fields.recommendation
+    };
+
+    const hasPayload = Object.values(payload).some(
+      (value) => typeof value === 'string' && value.length > 0
+    );
+    if (!hasPayload) return;
+
+    await persistFindingFieldsMutation.mutateAsync({
+      auditId,
+      findingId,
+      fields: {
+        title: fields.title,
+        whyItMatters: fields.whyItMatters,
+        description: fields.description,
+        recommendation: fields.recommendation
+      }
+    });
+  };
   const handleDeployPatch = async (auditId: string, issueId: string) => {
     setIsPatching(true);
     try {
-      const res = await fetch(`/api/audits/${auditId}/patch`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ issueId }),
-      });
-
-      if (!res.ok) {
-        throw new Error("Patch deployment request failure.");
-      }
-
-      const data = await res.json();
+      const data = await deployPatch.mutateAsync({ auditId, issueId });
       if (data.success) {
         setAudits((prev) =>
           prev.map((audit) => {
             if (audit.id === auditId) {
-              return {
-                ...audit,
-                score: data.auditScore,
-                findings: audit.findings.map((f) =>
-                  f.id === issueId ? { ...f, status: 'RESOLVED', patchApplied: true } : f
-                ),
-              };
+              const updatedFindings = audit.findings.map((f) =>
+                f.id === issueId
+                  ? { ...f, status: ConsoleIssueStatus.RESOLVED, patchApplied: true }
+                  : f
+              );
+              return { ...audit, findings: updatedFindings };
             }
             return audit;
           })
         );
-
-        // Update local projects table as well
-        const targetAudit = audits.find(a => a.id === auditId);
-        if (targetAudit) {
-          setProjects(prev => prev.map(p => {
-            if (p.id === targetAudit.projectId) {
-              return {
-                ...p,
-                status: 'COMPLIANT',
-                lastAuditScore: data.auditScore
-              };
-            }
-            return p;
-          }));
-        }
       }
-    } catch (err: any) {
-      alert("Patch deployment failed during git push routing: " + err.message);
+    } catch (err: unknown) {
+      alert(`Patch deployment failed during git push routing: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setIsPatching(false);
     }
   };
 
-  // 7. General Custom Snippets scanning inside Playground
   const handleAnalyzeSnippet = async (customSnippet: string) => {
     try {
-      const res = await fetch('/api/audits/run', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ customSnippet }),
-      });
-      if (!res.ok) {
-        const errPayload = await res.json();
-        throw new Error(errPayload.error || "Unable to invoke security sandbox.");
-      }
-      return await res.json();
-    } catch (err: any) {
-      return { success: false, error: err.message || "Auditing exception." };
+      return await triggerAudit.mutateAsync({ customSnippet });
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : 'Auditing exception.' };
     }
   };
 
-  if (isLoading) {
+  const continuousAuditEnabled = workspace?.runtime.continuousAuditEnabled ?? false;
+
+  const handleTriggerScanForCycle = useCallback(
+    (projectId: string) => handleTriggerScan(projectId, { silent: true }),
+    [triggerAudit]
+  );
+
+  const { pipelineActive: continuousAuditPipelineActive } = useContinuousAuditCycle({
+    enabled: continuousAuditEnabled,
+    projects: projectsState,
+    audits,
+    onTriggerScan: handleTriggerScanForCycle,
+    refetchAudits,
+    refetchWorkspace: reloadWorkspace
+  });
+
+  const handleToggleContinuousAudit = async () => {
+    setIsTogglingContinuousAudit(true);
+    try {
+      await patchRuntime(!continuousAuditEnabled);
+      await reloadWorkspace();
+    } catch (err: unknown) {
+      alert(
+        `Failed to update continuous audit: ${err instanceof Error ? err.message : 'Unknown error'}`
+      );
+    } finally {
+      setIsTogglingContinuousAudit(false);
+    }
+  };
+
+  const handleStopAllRuntime = useCallback(async () => {
+    await stopAllRuntime.mutateAsync();
+    await Promise.all([refetchAudits(), reloadWorkspace()]);
+  }, [stopAllRuntime, refetchAudits, reloadWorkspace]);
+
+  const handleResumeAudit = useCallback(
+    async (auditRunId: string) => {
+      await resumeAudit.mutateAsync(auditRunId);
+      await refetchAudits();
+    },
+    [resumeAudit, refetchAudits]
+  );
+
+  const runtimeStopAllVisible =
+    continuousAuditEnabled ||
+    (workspace?.runtime.runningAudits ?? 0) > 0 ||
+    audits.some((audit) => audit.status === 'RUNNING' || audit.status === 'PAUSED');
+
+  const gitLabAccess = resolveGitLabAccessState(workspace?.integrations);
+
+  if (consoleLoading) {
     return <OsLoadingScreen />;
   }
 
@@ -330,31 +409,56 @@ export function PremortemOsApp() {
 
   return (
     <div id="layout-view" className="flex h-screen w-screen overflow-hidden bg-[#FBFBFA] text-[#1E2522]">
+      <OsAnalyticsIdentity workspace={workspace} />
+      <Suspense fallback={null}>
+        <OsPageAnalytics />
+      </Suspense>
       {/* Primary Sidebar Left Menu Navigation Row */}
-      <Sidebar 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
-        systemScore={systemScore} 
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        systemScore={systemScore}
+        workspaceName={workspace?.organization.name}
+        workspaceSlug={workspace?.organization.slug}
+        runningAudits={workspace?.runtime.runningAudits}
       />
 
       {/* Main View Work Content Panel */}
       <main id="workspace-main" className="flex-1 overflow-hidden flex flex-col h-full bg-[#FBFBFA]">
         {activeTab === 'dashboard' && (
           <DashboardView 
-            projects={projects}
+            projects={projectsState}
             audits={audits}
+            riskClusters={riskClusters}
             onTriggerScan={handleTriggerScan}
             onSelectAudit={(auditId) => {
               setSelectedAuditId(auditId);
               setActiveTab('audits');
             }}
+            onOpenRiskCluster={handleOpenRiskCluster}
+            onNavigateTab={setActiveTab}
             systemScore={systemScore}
+            apiHealthy={apiHealthy}
+            runningAudits={workspace?.runtime.runningAudits ?? 0}
+            isLoading={consoleLoading}
+            continuousAuditEnabled={continuousAuditEnabled}
+            onToggleContinuousAudit={handleToggleContinuousAudit}
+            isTogglingContinuousAudit={isTogglingContinuousAudit}
+            continuousAuditPipelineActive={continuousAuditPipelineActive}
+            onStopAllRuntime={handleStopAllRuntime}
+            onResumeAudit={handleResumeAudit}
+            showStopAll={runtimeStopAllVisible}
+            isStopAllPending={stopAllRuntime.isPending}
+            isResumePending={resumeAudit.isPending}
           />
         )}
 
         {activeTab === 'projects' && (
           <ProjectsView
-            projects={projects}
+            projects={projectsState}
+            gitlabIntegration={gitLabAccess.integration}
+            gitlabAccessPhase={gitLabAccess.phase}
+            onProjectsChanged={() => void refetchProjects()}
             onTriggerScan={handleTriggerScan}
             onRegisterProject={handleRegisterProject}
           />
@@ -364,12 +468,21 @@ export function PremortemOsApp() {
           <AuditsView
             audits={audits}
             selectedAuditId={selectedAuditId}
+            focusCluster={focusCluster}
+            onFocusClusterComplete={() => setFocusCluster(null)}
             onSelectAudit={setSelectedAuditId}
             onUpdateFindingStatus={handleUpdateFindingStatus}
             onUpdateFindingFields={handleUpdateFindingFields}
+            onPersistFindingFields={handlePersistFindingFields}
+            onAuditHydrated={handleAuditHydrated}
             onDeployPatch={handleDeployPatch}
             isPatching={isPatching}
             onTriggerScan={handleTriggerScan}
+            onStopAllRuntime={handleStopAllRuntime}
+            onResumeAudit={handleResumeAudit}
+            showStopAll={runtimeStopAllVisible}
+            isStopAllPending={stopAllRuntime.isPending}
+            isResumePending={resumeAudit.isPending}
           />
         )}
 
@@ -381,7 +494,7 @@ export function PremortemOsApp() {
 
         {activeTab === 'canvas' && (
           <WorkflowCanvasView
-            projects={projects}
+            projects={projectsState}
             audits={audits}
             onTriggerScan={handleTriggerScan}
             setActiveTab={setActiveTab}
@@ -391,6 +504,7 @@ export function PremortemOsApp() {
         {activeTab === 'history' && (
           <AuditHistoryView
             audits={audits}
+            onFetchAuditDetail={fetchAuditDetail}
             onSelectAudit={(auditId) => {
               setSelectedAuditId(auditId);
               setActiveTab('audits');
@@ -400,7 +514,7 @@ export function PremortemOsApp() {
         )}
 
         {activeTab === 'settings' && (
-          <SettingsView />
+          <SettingsView projects={projectsState} />
         )}
       </main>
     </div>

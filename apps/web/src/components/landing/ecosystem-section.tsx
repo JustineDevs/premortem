@@ -2,7 +2,7 @@ import { assets } from './assets';
 import { body14, learnMore } from './text-styles';
 
 const ecosystemLinks = {
-  googleCloud: 'https://cloud.google.com/products/agent-builder',
+  googleCloud: 'https://ai.google.dev/',
   gemini: 'https://ai.google.dev/gemini-api/docs',
   gitlab: 'https://docs.gitlab.com/user/gitlab_duo/model_context_protocol/',
   github: 'https://docs.github.com/en'
@@ -36,7 +36,7 @@ export function EcosystemSection() {
           style={{ objectFit: 'contain' }}
         />
         <p className="framer-1miso45 landing-ecosystem-body" style={body14}>
-          Agent orchestration and multi-step reasoning via Agent Builder.
+          Gemini models and orchestrator swarm execution for multi-lens repository audits.
         </p>
         <a
           className="framer-1tay0ew landing-ecosystem-link"

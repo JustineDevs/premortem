@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://premortem.dev/schemas/prediction-outcome.v1.json",
+  "title": "Premortem Prediction Outcome v1",
+  "description": "Structured predicted outcome from a specialist or synthesis stage. Required when context supports prediction.",
+  "type": "object",
+  "required": [
+    "outcome",
+    "probability",
+    "impact",
+    "evidence",
+    "why_it_might_happen",
+    "what_to_do_next"
+  ],
+  "properties": {
+    "outcome": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short label for the likely outcome (e.g. likely deploy instability)"
+    },
+    "probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Estimated likelihood given available evidence"
+    },
+    "impact": {
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Pointers to ingest, graph, CI, or log artifacts"
+    },
+    "why_it_might_happen": {
+      "type": "string",
+      "minLength": 1
+    },
+    "what_to_do_next": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": ["ok", "insufficient_context", "refused", "error"],
+      "default": "ok"
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}

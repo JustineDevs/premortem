@@ -13,10 +13,10 @@ import {
   RotateCw, 
   Flame, 
   Search,
-  CheckCircle,
   AlertTriangle,
   ArrowUpRight,
-  Info
+  Info,
+  Download
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -25,26 +25,57 @@ import {
   XAxis, 
   YAxis, 
   Tooltip, 
-  CartesianGrid 
+  CartesianGrid,
+  Legend
 } from 'recharts';
+import { OsChartTooltip } from './chart-tooltip';
+import { OsToast } from './os-toast';
 
 interface AuditHistoryViewProps {
   audits: AuditRun[];
+  onFetchAuditDetail: (auditId: string) => Promise<AuditRun | null>;
   onSelectAudit: (auditId: string) => void;
   setActiveTab: (tab: string) => void;
 }
 
-export function AuditHistoryView({ audits, onSelectAudit, setActiveTab }: AuditHistoryViewProps) {
+export function AuditHistoryView({ audits, onFetchAuditDetail, onSelectAudit, setActiveTab }: AuditHistoryViewProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<string>('ALL');
   const [comparisonRunAId, setComparisonRunAId] = useState<string>('');
   const [comparisonRunBId, setComparisonRunBId] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [showComparison, setShowComparison] = useState<boolean>(false);
+  const [comparisonAudits, setComparisonAudits] = useState<{ runA?: AuditRun; runB?: AuditRun }>({});
+  const [isComparing, setIsComparing] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 3050);
+  };
+
+  const exportHistoryCsv = () => {
+    const header = ['id', 'project', 'date', 'score', 'critical', 'high', 'medium', 'low'];
+    const rows = filteredAudits.map((a) => [
+      a.id,
+      a.projectName,
+      new Date(a.date).toISOString(),
+      String(a.score),
+      String(a.criticalCount ?? 0),
+      String(a.highCount ?? 0),
+      String(a.mediumCount ?? 0),
+      String(a.lowCount ?? 0)
+    ]);
+    const csv = [header, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `premortem-audit-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast('Audit history exported as CSV.');
   };
 
   // Filter historical audits based on project selection & search term
@@ -74,8 +105,8 @@ export function AuditHistoryView({ audits, onSelectAudit, setActiveTab }: AuditH
   const projectsList = Array.from(uniqueProjectsMap.entries()).map(([id, name]) => ({ id, name }));
 
   // Run comparative audit calculations
-  const runA = audits.find(a => a.id === comparisonRunAId);
-  const runB = audits.find(a => a.id === comparisonRunBId);
+  const runA = comparisonAudits.runA ?? audits.find(a => a.id === comparisonRunAId);
+  const runB = comparisonAudits.runB ?? audits.find(a => a.id === comparisonRunBId);
 
   // Perform audit comparison math
   let comparisonResults = null;
@@ -118,7 +149,7 @@ export function AuditHistoryView({ audits, onSelectAudit, setActiveTab }: AuditH
     };
   }
 
-  const triggerComparison = () => {
+  const triggerComparison = async () => {
     if (!comparisonRunAId || !comparisonRunBId) {
       showToast('Error: Please select two different audit target records to start comparison.');
       return;
@@ -127,8 +158,24 @@ export function AuditHistoryView({ audits, onSelectAudit, setActiveTab }: AuditH
       showToast('Error: Comparison targets must represent distinct historical audit milestones.');
       return;
     }
-    setShowComparison(true);
-    showToast('Analytical comparative algorithm successfully executed.');
+
+    setIsComparing(true);
+    try {
+      const [hydratedA, hydratedB] = await Promise.all([
+        onFetchAuditDetail(comparisonRunAId),
+        onFetchAuditDetail(comparisonRunBId)
+      ]);
+      setComparisonAudits({
+        runA: hydratedA ?? undefined,
+        runB: hydratedB ?? undefined
+      });
+      setShowComparison(true);
+      showToast('Loaded runtime snapshots for comparative trace.');
+    } catch {
+      showToast('Failed to load audit snapshots for comparison.');
+    } finally {
+      setIsComparing(false);
+    }
   };
 
   const getSeverityStyle = (severity: SeverityType) => {
@@ -190,45 +237,66 @@ export function AuditHistoryView({ audits, onSelectAudit, setActiveTab }: AuditH
               </p>
             </div>
             
-            <div className="flex items-center gap-1.5 text-xs text-emerald-805 text-emerald-800 font-mono font-bold bg-emerald-50 border border-emerald-100 p-1 px-2.5 rounded">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={exportHistoryCsv}
+                className="flex cursor-pointer items-center gap-1 rounded border border-[#EAE6DF] bg-white px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#5C6560] hover:border-[#8A958F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-950"
+              >
+                <Download size={11} aria-hidden />
+                Export CSV
+              </button>
+              <div className="flex items-center gap-1.5 text-xs text-emerald-800 font-mono font-bold bg-emerald-50 border border-emerald-100 p-1 px-2.5 rounded">
               <TrendingUp size={12} />
               <span>Continuous checks enabled</span>
             </div>
+            </div>
           </div>
 
-          <div className="h-60 w-full pt-4">
+          <div className="flex flex-wrap items-center gap-4 pb-1 text-[10px] font-mono text-[#5C6560]">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-0.5 w-4 bg-[#064E3B]" aria-hidden />
+              Compliance Rating (0–100)
+            </span>
+          </div>
+
+          <div className="relative z-10 h-60 w-full pt-4">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+              <LineChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F1EFE9" />
                 <XAxis 
                   dataKey="date" 
-                  stroke="#8A958F" 
+                  stroke="#5C6560" 
+                  tick={{ fill: '#5C6560', fontSize: 10 }}
                   fontSize={10}
                   fontFamily="JetBrains Mono, monospace"
                 />
                 <YAxis 
-                  stroke="#8A958F" 
+                  stroke="#5C6560" 
+                  tick={{ fill: '#5C6560', fontSize: 10 }}
                   fontSize={10} 
                   fontFamily="JetBrains Mono, monospace"
                   domain={[0, 100]}
                 />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: '#1E2522', 
-                    borderRadius: '4px', 
-                    border: 'none', 
-                    color: '#FAF8F5', 
-                    fontSize: '11px',
-                    fontFamily: 'Inter, sans-serif'
-                  }} 
+                <Tooltip
+                  content={<OsChartTooltip />}
+                  wrapperStyle={{ zIndex: 50, outline: 'none' }}
+                  cursor={{ stroke: '#064E3B', strokeWidth: 1, strokeDasharray: '4 4' }}
                 />
                 <Line 
                   type="monotone" 
                   dataKey="score" 
                   stroke="#064E3B" 
                   strokeWidth={2.5}
-                  activeDot={{ r: 6 }} 
+                  activeDot={{ r: 6, fill: '#064E3B', stroke: '#FAF8F5', strokeWidth: 2 }} 
                   name="Compliance Rating"
+                />
+                <Legend
+                  verticalAlign="bottom"
+                  height={28}
+                  formatter={() => (
+                    <span className="text-[10px] font-mono text-[#5C6560]">Compliance Rating</span>
+                  )}
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -294,11 +362,12 @@ export function AuditHistoryView({ audits, onSelectAudit, setActiveTab }: AuditH
 
           <div>
             <button
-              onClick={triggerComparison}
-              className="w-full p-2.5 text-center bg-emerald-950 font-bold hover:bg-emerald-900 text-[#FAF8F5] rounded transition-all cursor-pointer uppercase font-mono tracking-wider text-[11px] h-[38px] flex items-center justify-center gap-2 select-none"
+              onClick={() => void triggerComparison()}
+              disabled={isComparing}
+              className="w-full p-2.5 text-center bg-emerald-950 font-bold hover:bg-emerald-900 text-[#FAF8F5] rounded transition-all cursor-pointer uppercase font-mono tracking-wider text-[11px] h-[38px] flex items-center justify-center gap-2 select-none disabled:opacity-50"
             >
-              <RotateCw size={12} className="shrink-0" />
-              <span>Execute Comparative Trace</span>
+              <RotateCw size={12} className={`shrink-0 ${isComparing ? 'animate-spin' : ''}`} />
+              <span>{isComparing ? 'Loading Snapshots…' : 'Execute Comparative Trace'}</span>
             </button>
           </div>
 
@@ -365,7 +434,7 @@ export function AuditHistoryView({ audits, onSelectAudit, setActiveTab }: AuditH
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start text-xs">
               
               {/* Box A: SECURED ADDRESSMENTS */}
-              <div className="border border-emerald-250 border-emerald-200 bg-emerald-50/5 rounded-lg overflow-hidden flex flex-col h-full min-h-[300px]">
+              <div className="border border-emerald-200 bg-emerald-50/5 rounded-lg overflow-hidden flex flex-col h-full min-h-[300px]">
                 <div className="p-4 bg-emerald-950 text-white font-mono flex items-center justify-between shrink-0 font-bold uppercase text-[9.5px]">
                   <span className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-[#72C8AF]" /> SECURED VULNERABILITIES ({comparisonResults.securedVulnerabilities.length})</span>
                   <span className="bg-emerald-900 border border-emerald-800 text-[8.5px] px-1.5 py-0.2 rounded text-emerald-300 font-bold">REMEDIATED SUCCESS</span>
@@ -396,7 +465,7 @@ export function AuditHistoryView({ audits, onSelectAudit, setActiveTab }: AuditH
               <div className="border border-rose-200 bg-rose-50/5 rounded-lg overflow-hidden flex flex-col h-full min-h-[300px]">
                 <div className="p-4 bg-rose-950 text-white font-mono flex items-center justify-between shrink-0 font-bold uppercase text-[9.5px]">
                   <span className="flex items-center gap-1.5"><ShieldAlert size={14} className="text-rose-400 animate-pulse" /> NEWLY DETECTED ALARMS ({comparisonResults.newVulnerabilitiesIntroduced.length})</span>
-                  <span className="bg-rose-900 border border-rose-801 text-[8.5px] px-1.5 py-0.2 rounded text-rose-300 font-bold animate-pulse">ATTENTION REQUIRED</span>
+                  <span className="bg-rose-900 border border-rose-800 text-[8.5px] px-1.5 py-0.2 rounded text-rose-300 font-bold animate-pulse">ATTENTION REQUIRED</span>
                 </div>
 
                 <div className="flex-1 p-4 overflow-y-auto space-y-3">
@@ -406,7 +475,7 @@ export function AuditHistoryView({ audits, onSelectAudit, setActiveTab }: AuditH
                     </div>
                   ) : (
                     comparisonResults.newVulnerabilitiesIntroduced.map((v, idx) => (
-                      <div key={idx} className="border border-rose-150 border-rose-100 bg-white p-3.5 rounded shadow-xs space-y-1.5 relative overflow-hidden group">
+                      <div key={idx} className="border border-rose-200 bg-white p-3.5 rounded shadow-xs space-y-1.5 relative overflow-hidden group">
                         <div className="flex justify-between items-center font-mono text-[9px]">
                           <span className={`${getSeverityStyle(v.severity)} font-bold px-1.5 border py-0.2 rounded`}>{v.severity}</span>
                           <span className="text-zinc-400 select-text bg-zinc-50 border px-1 rounded">{v.filepath}:{v.line}</span>
@@ -519,12 +588,7 @@ export function AuditHistoryView({ audits, onSelectAudit, setActiveTab }: AuditH
         </div>
       </div>
 
-      {toastMsg && (
-        <div className="fixed bottom-6 right-6 z-50 bg-emerald-950 border border-emerald-800 text-[#FAF8F5] p-3 px-5 rounded text-xs flex items-center gap-2 shadow-xl font-mono uppercase tracking-wider animate-fadeIn">
-          <CheckCircle size={14} className="text-emerald-450" />
-          <span>{toastMsg}</span>
-        </div>
-      )}
+      <OsToast message={toastMsg ?? ''} />
 
     </div>
   );

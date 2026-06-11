@@ -1,30 +1,33 @@
-import { MarketingDocLayout } from '@/components/landing/blocks';
-import { MarketingBulletList, MarketingParagraph, MarketingSectionHeading, MarketingTextLink } from '@/components/landing/marketing-content';
+import {
+  MarketingDocArticle,
+  MarketingDocLayout,
+  MarketingDocSection
+} from '@/components/landing/blocks';
+import { MarketingBulletList, MarketingParagraph } from '@/components/landing/marketing-content';
 import { releasesDoc } from '@/content/marketing/docs-index';
-import { marketingLinks } from '@/lib/marketing-links';
 
 export const metadata = {
   title: 'Release notes | Premortem Docs',
-  description: 'Premortem v0.1.0 release notes and known limits.'
+  description: releasesDoc.lead
 };
 
 export default function ReleasesDocPage() {
   return (
-    <MarketingDocLayout title={releasesDoc.title} description={releasesDoc.description}>
-      <MarketingParagraph>{releasesDoc.summary}</MarketingParagraph>
-
-      <MarketingSectionHeading>Included</MarketingSectionHeading>
-      <MarketingBulletList items={releasesDoc.included} />
-
-      <MarketingSectionHeading>Known limits</MarketingSectionHeading>
-      <MarketingBulletList items={releasesDoc.limits} />
-
-      <MarketingSectionHeading>Upgrade notes</MarketingSectionHeading>
-      <MarketingBulletList items={releasesDoc.upgradeNotes} />
-
-      <MarketingTextLink href={marketingLinks.releases} external>
-        Read full release notes on GitHub
-      </MarketingTextLink>
+    <MarketingDocLayout title={releasesDoc.title} description={releasesDoc.lead} toc={releasesDoc.toc}>
+      <MarketingDocArticle lead={releasesDoc.lead} relatedLinks={releasesDoc.relatedLinks} toc={releasesDoc.toc}>
+        <MarketingDocSection id="summary" title="Summary">
+          <MarketingParagraph>{releasesDoc.summary}</MarketingParagraph>
+        </MarketingDocSection>
+        <MarketingDocSection id="included" title="Included">
+          <MarketingBulletList items={releasesDoc.included} />
+        </MarketingDocSection>
+        <MarketingDocSection id="limits" title="Known limits">
+          <MarketingBulletList items={releasesDoc.limits} />
+        </MarketingDocSection>
+        <MarketingDocSection id="upgrade" title="Upgrade notes">
+          <MarketingBulletList items={releasesDoc.upgradeNotes} />
+        </MarketingDocSection>
+      </MarketingDocArticle>
     </MarketingDocLayout>
   );
 }

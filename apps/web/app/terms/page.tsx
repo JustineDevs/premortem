@@ -49,8 +49,8 @@ export default function TermsPage() {
       <MarketingSectionHeading>Contact</MarketingSectionHeading>
       <MarketingParagraph>
         For terms questions, contact{' '}
-        <MarketingTextLink href={marketingLinks.maintainer} external>
-          @Justindevs
+        <MarketingTextLink href={marketingLinks.contactEmail}>
+          justinedevs@jstn.site
         </MarketingTextLink>
         . Read our <MarketingTextLink href={marketingLinks.privacy}>Privacy Policy</MarketingTextLink>.
       </MarketingParagraph>

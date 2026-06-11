@@ -1,0 +1,125 @@
+# PRD: [Feature Name]
+
+## Overview
+
+### Problem Statement
+<!-- What problem does this solve? Why does it matter? -->
+
+### Proposed Solution
+<!-- Brief description of the solution approach -->
+
+### Success Metrics
+<!-- How will we measure if this is successful? -->
+
+---
+
+## Context
+
+### Background
+<!-- What context does someone need to understand this feature? -->
+
+### Current State
+<!-- What exists today? What are users doing now? -->
+
+### Related Systems
+<!-- What other parts of the system does this interact with? -->
+
+---
+
+## Requirements
+
+### Functional Requirements
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-1 | | Must Have |
+| FR-2 | | Must Have |
+| FR-3 | | Nice to Have |
+
+### Non-Functional Requirements
+
+| ID | Requirement | Target |
+|----|-------------|--------|
+| NFR-1 | Performance | |
+| NFR-2 | Security | |
+| NFR-3 | Scalability | |
+
+---
+
+## Design
+
+### User Experience
+<!-- How will users interact with this? Include flows if helpful -->
+
+### Technical Approach
+<!-- High-level technical design. Reference existing patterns -->
+
+### Data Model
+<!-- Any new data structures or changes to existing ones -->
+
+### API Changes
+<!-- New endpoints or changes to existing ones -->
+
+---
+
+## Constraints
+
+### Technical Constraints
+<!-- What technical limitations must we work within? -->
+
+### Business Constraints
+<!-- Timeline, resources, dependencies on other teams -->
+
+### Non-Goals
+<!-- What are we explicitly NOT doing? Important for scope -->
+
+---
+
+## Implementation
+
+### Phases
+<!-- Break into phases if appropriate -->
+
+#### Phase 1: [Name]
+- Task 1
+- Task 2
+
+#### Phase 2: [Name]
+- Task 3
+- Task 4
+
+### Dependencies
+<!-- What needs to exist before this can be built? -->
+
+### Risks
+<!-- What could go wrong? How do we mitigate? -->
+
+---
+
+## Acceptance Criteria
+
+- [ ] Criterion 1
+- [ ] Criterion 2
+- [ ] Criterion 3
+- [ ] Criterion 4
+
+---
+
+## Open Questions
+
+- [ ] Question 1
+- [ ] Question 2
+
+---
+
+## References
+
+- Related PRD: [link]
+- Design doc: [link]
+- Previous discussion: [link]
+
+---
+
+*Last updated: [DATE]*
+*Author: [NAME]*
+*Status: Draft | In Review | Approved | Implemented*

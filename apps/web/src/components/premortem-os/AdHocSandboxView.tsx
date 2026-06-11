@@ -12,6 +12,7 @@ import {
   Radio,
   FileCode
 } from 'lucide-react';
+import { OsStepper, type OsStep } from './os-stepper';
 
 interface AdHocSandboxViewProps {
   onAnalyzeSnippet: (code: string) => Promise<any>;
@@ -118,6 +119,34 @@ export function initializeS3() {
     }
   };
 
+  const scanSteps: OsStep[] = [
+    {
+      id: 'edit',
+      label: 'Edit snippet',
+      status: code.trim()
+        ? isLoading || scanResult || errorWord
+          ? 'done'
+          : 'active'
+        : 'pending'
+    },
+    {
+      id: 'scan',
+      label: 'Run analyzer',
+      status: errorWord
+        ? 'error'
+        : isLoading
+          ? 'active'
+          : scanResult
+            ? 'done'
+            : 'pending'
+    },
+    {
+      id: 'review',
+      label: 'Review findings',
+      status: scanResult ? 'active' : 'pending'
+    }
+  ];
+
   return (
     <div className="flex-1 overflow-y-auto p-8 font-sans max-w-7xl mx-auto w-full space-y-8 animate-fadeIn">
       {/* Title Header */}
@@ -133,8 +162,11 @@ export function initializeS3() {
         </p>
 
         {/* Explain the API config key environment */}
-        <div className="p-3 bg-amber-50 border border-amber-200/60 rounded text-[11px] text-amber-900 leading-relaxed max-w-2xl">
-          <span className="font-bold">Real-time Analysis Indicator:</span> This playground utilizes server-side connections. If no <span className="font-mono">GEMINI_API_KEY</span> is active in your <span className="font-semibold">Settings &gt; Secrets</span> workspace dashboard panel, the session runs safely using a contextual telemetry simulation.
+        <div className="p-3 bg-emerald-50 border border-emerald-200/60 rounded text-[11px] text-emerald-900 leading-relaxed max-w-2xl">
+          <span className="font-bold">Static pattern scanner:</span> This playground runs the Premortem static security analyzer against pasted code. Full orchestrator audits run from Projects or Audits tabs.
+        </div>
+        <div className="mt-4">
+          <OsStepper steps={scanSteps} />
         </div>
       </div>
 

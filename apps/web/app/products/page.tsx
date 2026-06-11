@@ -1,6 +1,7 @@
 import {
   MarketingFeatureList,
   MarketingLinkGrid,
+  MarketingPricingTable,
   MarketingProductMap,
   MarketingScopeTable
 } from '@/components/landing/blocks';
@@ -22,6 +23,9 @@ export default function ProductsPage() {
   return (
     <MarketingPageLayout title={productsPage.title} description={productsPage.description}>
       <MarketingParagraph>{productsPage.intro}</MarketingParagraph>
+
+      <MarketingSectionHeading>Pricing</MarketingSectionHeading>
+      <MarketingPricingTable />
 
       <MarketingSectionHeading>Product map</MarketingSectionHeading>
       <MarketingProductMap tiles={productMapTiles} />

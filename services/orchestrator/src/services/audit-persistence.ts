@@ -1,3 +1,4 @@
+import { AuditEvent } from '@premortem/domain';
 import {
   completeAgentRun,
   createAgentRun,
@@ -10,7 +11,9 @@ import {
   markAuditFailed,
   markAuditCompleted,
   markAuditRunning,
+  markAuditPaused,
   persistFindings,
+  persistGraphSnapshot,
   persistIssueCandidates,
   persistRejectedIssueCandidateArtifacts
 } from '@premortem/db';
@@ -31,7 +34,7 @@ export async function beginAudit(auditRunId: string) {
   await markAuditRunning(auditRunId);
   await createAuditRunEvent({
     auditRunId,
-    eventType: 'audit.started'
+    eventType: AuditEvent.STARTED
   });
 }
 
@@ -108,8 +111,8 @@ export async function saveClusters(input: {
       triggerSignature: cluster.triggerSignature,
       findings: cluster.sourceFindingIds.map((findingId) => ({
         findingId: input.findingIdMap.get(findingId) ?? findingId,
-        role: 'supporting',
-        similarityScore: 0.8
+        role: findingId === cluster.primaryFindingId ? 'primary' : 'supporting',
+        similarityScore: findingId === cluster.primaryFindingId ? 1 : 0.8
       }))
     }))
   });
@@ -201,11 +204,23 @@ export async function saveRejectedIssueArtifacts(input: {
   });
 }
 
+export async function saveGraphSnapshot(input: {
+  organizationId: string;
+  projectId: string;
+  auditRunId: string;
+  nodeCount: number;
+  edgeCount: number;
+  metadata?: Record<string, unknown>;
+  storageRef?: string;
+}) {
+  return persistGraphSnapshot(input);
+}
+
 export async function finishAudit(auditRunId: string, summary: Record<string, unknown>) {
   await markAuditCompleted(auditRunId, summary as never);
   await createAuditRunEvent({
     auditRunId,
-    eventType: 'audit.completed',
+    eventType: AuditEvent.COMPLETED,
     payload: summary
   });
 }
@@ -214,8 +229,17 @@ export async function failAudit(auditRunId: string, errorMessage: string) {
   await markAuditFailed(auditRunId, errorMessage);
   await createAuditRunEvent({
     auditRunId,
-    eventType: 'audit.failed',
+    eventType: AuditEvent.FAILED,
     payload: { errorMessage }
+  });
+}
+
+export async function pauseAudit(auditRunId: string, summary: Record<string, unknown>) {
+  await markAuditPaused(auditRunId, summary as never);
+  await createAuditRunEvent({
+    auditRunId,
+    eventType: AuditEvent.PAUSED,
+    payload: summary
   });
 }
 

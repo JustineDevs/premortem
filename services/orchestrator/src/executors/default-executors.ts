@@ -1,4 +1,4 @@
-import type { AgentExecutor } from '@premortem/agent-kit';
+import type { AgentExecutor, CanonicalFinding } from '@premortem/agent-kit';
 import { makeMockFinding, synthesizeMockIssues } from '@premortem/agent-kit';
 
 const specialistCategories: Record<string, string> = {
@@ -15,10 +15,104 @@ const specialistCategories: Record<string, string> = {
   issue_memory_agent: 'issue_memory'
 };
 
+interface GitLabIssueSummary {
+  iid: number;
+  title: string;
+  state: string;
+  labels: string[];
+  updatedAt: string;
+  webUrl: string;
+}
+
+interface GitLabCiHistorySummary {
+  pipelines: Array<{ id: number; status: string; failedJobs: Array<{ stage: string; name: string }> }>;
+  totals: { sampled: number; failed: number; success: number; successRate: number };
+  recentFailedStages: string[];
+}
+
+function issueMemoryFindings(payload: Record<string, unknown>): CanonicalFinding[] {
+  const existingIssues = (payload.existing_issues as GitLabIssueSummary[] | undefined) ?? [];
+  const ciHistory = payload.ci_history as GitLabCiHistorySummary | undefined;
+  const findings: CanonicalFinding[] = [];
+
+  for (const issue of existingIssues.slice(0, 5)) {
+    const base = makeMockFinding('issue_memory_agent', 'issue_memory', payload);
+    findings.push({
+      ...base,
+      finding_id: `issue_memory:gitlab-iid-${issue.iid}`,
+      predicted_failure: {
+        ...base.predicted_failure,
+        summary: `Open GitLab issue #${issue.iid} may recur: ${issue.title}`,
+        trigger_conditions: [
+          `Issue #${issue.iid} remains open with labels ${issue.labels.join(', ') || 'none'}.`,
+          `Last updated ${issue.updatedAt}.`
+        ]
+      },
+      evidence: [
+        {
+          kind: 'issue',
+          ref: issue.webUrl,
+          reason: 'Open GitLab issue matches current risk memory surface.'
+        },
+        {
+          kind: 'file',
+          ref: `gitlab://issues/${issue.iid}`,
+          reason: `Issue state ${issue.state} indicates unresolved delivery risk.`
+        }
+      ],
+      dedupe_keys: ['issue_memory', `gitlab-iid-${issue.iid}`, ...base.dedupe_keys],
+      tags: [...base.tags, 'gitlab-issue-memory']
+    });
+  }
+
+  const failedStages = ciHistory?.recentFailedStages ?? [];
+  if (failedStages.length > 0) {
+    const base = makeMockFinding('issue_memory_agent', 'issue_memory', payload);
+    const stageEvidence = failedStages.map((stage) => ({
+      kind: 'pipeline' as const,
+      ref: `ci-stage:${stage}`,
+      reason: 'Recent GitLab pipeline history shows repeated stage failures.'
+    }));
+    while (stageEvidence.length < 2) {
+      stageEvidence.push({
+        kind: 'pipeline',
+        ref: `ci-stage:${failedStages[0] ?? 'unknown'}-history`,
+        reason: 'Pipeline history sampling shows recurring instability in this stage.'
+      });
+    }
+    findings.push({
+      ...base,
+      finding_id: `issue_memory:ci-failures:${failedStages.join('|')}`,
+      predicted_failure: {
+        ...base.predicted_failure,
+        summary: `Recent CI failures repeat in stages: ${failedStages.join(', ')}.`,
+        blast_radius: 'pipeline'
+      },
+      evidence: stageEvidence,
+      dedupe_keys: ['issue_memory', 'ci-history', ...failedStages],
+      tags: [...base.tags, 'ci-history-memory']
+    });
+  }
+
+  if (findings.length === 0) {
+    return [makeMockFinding('issue_memory_agent', 'issue_memory', payload)];
+  }
+
+  return findings;
+}
+
 export function createDefaultExecutors(): Record<string, AgentExecutor> {
   const executors: Record<string, AgentExecutor> = {};
 
   for (const [agentName, category] of Object.entries(specialistCategories)) {
+    if (agentName === 'issue_memory_agent') {
+      executors[agentName] = {
+        kind: 'specialist',
+        run: async (context) => issueMemoryFindings(context.payload)
+      };
+      continue;
+    }
+
     executors[agentName] = {
       kind: 'specialist',
       run: async (context) => [makeMockFinding(agentName, category, context.payload)]
