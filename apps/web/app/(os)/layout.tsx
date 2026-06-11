@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono, Space_Grotesk } from 'next/font/google';
 
 import { OsProviders } from '@/providers/os-providers';
 import { premortemBrand } from '@/lib/premortem-os/branding';
+import { requireUserSession } from '@/lib/server/require-user-session';
 import '@/components/premortem-os/premortem-os.css';
 
 const inter = Inter({
@@ -28,7 +29,9 @@ export const metadata: Metadata = {
   description: `Run on your repo before it breaks production. ${premortemBrand.productName} reviewer console at ${premortemBrand.domain}.`
 };
 
-export default function PremortemOsLayout({ children }: { children: React.ReactNode }) {
+export default async function PremortemOsLayout({ children }: { children: React.ReactNode }) {
+  await requireUserSession('/app');
+
   return (
     <OsProviders>
       <div

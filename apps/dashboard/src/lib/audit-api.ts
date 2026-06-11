@@ -3,6 +3,7 @@ import type { AuditRunListItem, AuditRunSnapshot } from '@premortem/orchestrator
 export interface AuditApiClientOptions {
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
+  headers?: HeadersInit;
 }
 
 export async function loadAuditRunSnapshot(
@@ -13,7 +14,7 @@ export async function loadAuditRunSnapshot(
   const fetchImpl = options.fetchImpl ?? fetch;
   const response = await fetchImpl(`${baseUrl}/api/audits/${auditRunId}`, {
     method: 'GET',
-    headers: { accept: 'application/json' },
+    headers: { accept: 'application/json', ...(options.headers ?? {}) },
     cache: 'no-store'
   });
 
@@ -33,7 +34,7 @@ export async function loadRecentAuditRuns(
   const limit = options.limit ?? 12;
   const response = await fetchImpl(`${baseUrl}/api/audits?limit=${limit}`, {
     method: 'GET',
-    headers: { accept: 'application/json' },
+    headers: { accept: 'application/json', ...(options.headers ?? {}) },
     cache: 'no-store'
   });
 

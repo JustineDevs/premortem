@@ -9,6 +9,7 @@ loadPremortemLocalEnv(path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const monorepoRoot = path.resolve(appDir, '../..');
+process.env.NEXT_PRIVATE_OUTPUT_TRACE_ROOT ??= monorepoRoot;
 
 /** @type {import('next').NextConfig} */
 const workspacePackages = [
@@ -23,7 +24,6 @@ const workspacePackages = [
 ];
 
 const nextConfig = {
-  outputFileTracingRoot: monorepoRoot,
   experimental: {
     externalDir: true,
     instrumentationHook: true,

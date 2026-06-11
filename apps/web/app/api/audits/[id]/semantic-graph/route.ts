@@ -4,5 +4,5 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
-  return proxyPremortemApi(`/api/audits/${params.id}/graph`, undefined, request);
+  return proxyPremortemApi(`/api/audits/${params.id}/semantic-graph`, undefined, request);
 }

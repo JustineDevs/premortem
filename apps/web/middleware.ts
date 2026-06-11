@@ -1,54 +1,43 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { isLocalAuthBypassEnabled } from '@premortem/domain';
 
-import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { isSupabaseAuthConfigured } from '@/lib/supabase/config';
+import { getPublicAppOrigin } from '@/lib/runtime-config';
 
-const PROTECTED_PREFIXES = ['/app', '/audits'];
+function isLoopbackHostname(hostname: string) {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+}
+
+function canonicalHostRedirect(request: NextRequest): NextResponse | null {
+  const configuredOrigin = getPublicAppOrigin();
+  const requestOrigin = request.nextUrl.origin;
+
+  if (requestOrigin === configuredOrigin) {
+    return null;
+  }
+
+  const configuredHost = new URL(configuredOrigin).hostname;
+  const requestHost = request.nextUrl.hostname;
+
+  if (isLoopbackHostname(configuredHost) && isLoopbackHostname(requestHost)) {
+    return null;
+  }
+
+  const redirectUrl = new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, configuredOrigin);
+  return NextResponse.redirect(redirectUrl);
+}
 
 export async function middleware(request: NextRequest) {
-  if (isLocalAuthBypassEnabled()) {
-    return NextResponse.next();
-  }
-
   const pathname = request.nextUrl.pathname;
-  const isProtected = PROTECTED_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
-  );
 
-  if (!isProtected) {
-    return NextResponse.next();
+  if (pathname.startsWith('/api/integrations/')) {
+    const hostRedirect = canonicalHostRedirect(request);
+    if (hostRedirect) {
+      return hostRedirect;
+    }
   }
 
-  if (!isSupabaseAuthConfigured()) {
-    const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = '/login';
-    loginUrl.searchParams.set('next', pathname);
-    return NextResponse.redirect(loginUrl);
-  }
-
-  const supabase = createSupabaseServerClient();
-  if (!supabase) {
-    const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = '/login';
-    loginUrl.searchParams.set('next', pathname);
-    return NextResponse.redirect(loginUrl);
-  }
-
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (user) {
-    return NextResponse.next();
-  }
-
-  const loginUrl = request.nextUrl.clone();
-  loginUrl.pathname = '/login';
-  loginUrl.searchParams.set('next', pathname);
-  return NextResponse.redirect(loginUrl);
+  return NextResponse.next();
 }
 
 export const config = {
-  matcher: ['/app/:path*', '/audits/:path*']
+  matcher: ['/api/integrations/:path*']
 };

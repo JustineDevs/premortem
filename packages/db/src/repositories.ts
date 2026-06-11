@@ -10,6 +10,11 @@ function asJsonArray(value: unknown[]) {
   return value as Prisma.JsonArray;
 }
 
+const LOCAL_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 60_000
+} as const;
+
 export async function createAuditRun(input: {
   organizationId: string;
   projectId: string;
@@ -648,10 +653,6 @@ export async function recordReviewAction(input: {
   payload?: Record<string, unknown>;
 }) {
   return prisma.$transaction(async (tx) => {
-    const issue = await tx.issueCandidate.findUniqueOrThrow({
-      where: { id: input.issueCandidateId }
-    });
-
     const action = await tx.reviewAction.create({
       data: {
         issueCandidateId: input.issueCandidateId,
@@ -671,6 +672,7 @@ export async function recordReviewAction(input: {
           approvedAt: new Date()
         }
       });
+      return action;
     }
 
     if (input.actionType === ReviewAction.REJECT) {
@@ -678,7 +680,12 @@ export async function recordReviewAction(input: {
         where: { id: input.issueCandidateId },
         data: { reviewerStatus: 'rejected', reviewerNotes: input.notes }
       });
+      return action;
     }
+
+    const issue = await tx.issueCandidate.findUniqueOrThrow({
+      where: { id: input.issueCandidateId }
+    });
 
     if (input.actionType === ReviewAction.EDIT) {
       const isDeferred = input.payload?.deferred === true;
@@ -715,6 +722,7 @@ export async function recordReviewAction(input: {
               : issue.recommendedActionSummary
         }
       });
+      return action;
     }
 
     if (input.actionType === ReviewAction.MERGE) {
@@ -729,6 +737,7 @@ export async function recordReviewAction(input: {
               : 'Merged duplicate finding')
         }
       });
+      return action;
     }
 
     if (input.actionType === ReviewAction.SPLIT) {
@@ -740,36 +749,48 @@ export async function recordReviewAction(input: {
           reviewerNotes: input.notes ?? issue.reviewerNotes
         }
       });
+      return action;
     }
 
     return action;
-  });
+  }, LOCAL_TRANSACTION_OPTIONS);
 }
 
 export async function listRecentAuditRuns(limit = 12) {
   return prisma.auditRun.findMany({
     take: limit,
     orderBy: { createdAt: 'desc' },
-    include: {
-      issueCandidates: {
-        select: {
-          id: true,
-          reviewerStatus: true,
-          validationStatus: true
-        }
-      },
-      rejectedIssueCandidateArtifacts: {
-        select: {
-          id: true
-        }
-      },
-      events: {
-        orderBy: { createdAt: 'asc' },
-        select: {
-          eventType: true,
-          createdAt: true
-        }
-      }
+    include: listRecentAuditRunsInclude
+  });
+}
+
+const listRecentAuditRunsInclude = {
+  issueCandidates: {
+    select: {
+      id: true,
+      reviewerStatus: true,
+      validationStatus: true
     }
+  },
+  rejectedIssueCandidateArtifacts: {
+    select: {
+      id: true
+    }
+  },
+  events: {
+    orderBy: { createdAt: 'asc' as const },
+    select: {
+      eventType: true,
+      createdAt: true
+    }
+  }
+} as const;
+
+export async function listRecentAuditRunsForOrganization(organizationId: string, limit = 12) {
+  return prisma.auditRun.findMany({
+    where: { organizationId },
+    take: limit,
+    orderBy: { createdAt: 'desc' },
+    include: listRecentAuditRunsInclude
   });
 }

@@ -3,6 +3,9 @@ import { NextResponse } from 'next/server';
 import { getApiBaseUrl } from '@/lib/runtime-config';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 export async function POST(_request: Request, { params }: { params: { id: string } }) {
   try {
     const context = await resolveRequestActorContext();

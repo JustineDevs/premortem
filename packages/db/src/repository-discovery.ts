@@ -8,11 +8,18 @@ import type { Prisma } from '@prisma/client';
 
 import {
   AuditReadinessError,
+  probeGitLabIssueWriteAccess,
   verifyGitLabRegistrationAccess
 } from './audit-readiness';
 import { assertCanRegisterProject, EntitlementError } from './entitlements';
+import { ensureGitLabAccessTokenForConnection, GitLabTokenError } from './provider-tokens';
 import { prisma } from './client';
 import { slugifyProjectNameForRepo } from './repositories';
+
+const LOCAL_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 60_000
+} as const;
 
 export type DiscoveredRepositoryRow = GitLabDiscoveredProject & {
   enabled: boolean;
@@ -20,11 +27,7 @@ export type DiscoveredRepositoryRow = GitLabDiscoveredProject & {
   source: 'discovered' | 'public_watch' | 'manual';
 };
 
-function decodeStoredToken(encrypted?: string | null): string | null {
-  if (!encrypted) return null;
-  if (encrypted.startsWith('plain:')) return encrypted.slice('plain:'.length);
-  return encrypted;
-}
+export { GitLabTokenError };
 
 function resolveGitLabApiBaseUrl(baseUrl?: string | null) {
   return (baseUrl ?? process.env.GITLAB_BASE_URL ?? 'https://gitlab.com').replace(/\/$/, '');
@@ -52,10 +55,7 @@ async function getGitLabConnectionForOrg(input: {
     throw new Error('GitLab integration not found for this workspace.');
   }
 
-  const token = decodeStoredToken(connection.encryptedAccessToken);
-  if (!token) {
-    throw new Error('GitLab integration is missing an access token. Reconnect GitLab in Settings.');
-  }
+  const token = await ensureGitLabAccessTokenForConnection(connection.id);
 
   return { connection, token };
 }
@@ -141,60 +141,62 @@ async function createProjectFromDiscovery(input: {
     gitlabAccessLevel: input.discovered.accessLevel
   };
 
-  return prisma.$transaction(async (tx) => {
-    const existing = await tx.project.findFirst({
-      where: {
-        organizationId: input.organizationId,
+  const existing = await prisma.project.findFirst({
+    where: {
+      provider: 'gitlab',
+      externalProjectId: input.discovered.externalProjectId
+    },
+    select: { metadata: true }
+  });
+
+  const project = await prisma.project.upsert({
+    where: {
+      provider_externalProjectId: {
         provider: 'gitlab',
         externalProjectId: input.discovered.externalProjectId
       }
-    });
-
-    if (existing) {
-      return tx.project.update({
-        where: { id: existing.id },
-        data: {
-          connectionId: input.connectionId ?? null,
-          name: input.discovered.name,
-          repoUrl: input.discovered.repoUrl,
-          defaultBranch: input.discovered.defaultBranch,
-          visibility: input.discovered.visibility,
-          status: 'active',
-          metadata: {
-            ...(typeof existing.metadata === 'object' && existing.metadata !== null
-              ? (existing.metadata as Record<string, unknown>)
-              : {}),
-            ...metadata
-          } as Prisma.JsonObject,
-          connectedAt: new Date()
-        }
-      });
+    },
+    create: {
+      organizationId: input.organizationId,
+      connectionId: input.connectionId ?? null,
+      provider: 'gitlab',
+      externalProjectId: input.discovered.externalProjectId,
+      name: input.discovered.name,
+      slug,
+      repoUrl: input.discovered.repoUrl,
+      defaultBranch: input.discovered.defaultBranch,
+      visibility: input.discovered.visibility,
+      status: 'active',
+      createdById: input.createdById,
+      connectedAt: new Date(),
+      metadata: metadata as Prisma.JsonObject
+    },
+    update: {
+      organizationId: input.organizationId,
+      connectionId: input.connectionId ?? null,
+      name: input.discovered.name,
+      repoUrl: input.discovered.repoUrl,
+      defaultBranch: input.discovered.defaultBranch,
+      visibility: input.discovered.visibility,
+      status: 'active',
+      createdById: input.createdById ?? undefined,
+      connectedAt: new Date(),
+      metadata: {
+        ...(typeof existing?.metadata === 'object' && existing.metadata !== null
+          ? (existing.metadata as Record<string, unknown>)
+          : {}),
+        ...metadata
+      } as Prisma.JsonObject
     }
-
-    const project = await tx.project.create({
-      data: {
-        organizationId: input.organizationId,
-        connectionId: input.connectionId ?? null,
-        provider: 'gitlab',
-        externalProjectId: input.discovered.externalProjectId,
-        name: input.discovered.name,
-        slug,
-        repoUrl: input.discovered.repoUrl,
-        defaultBranch: input.discovered.defaultBranch,
-        visibility: input.discovered.visibility,
-        status: 'active',
-        createdById: input.createdById,
-        connectedAt: new Date(),
-        metadata: metadata as Prisma.JsonObject
-      }
-    });
-
-    await tx.projectSetting.create({
-      data: { projectId: project.id }
-    });
-
-    return project;
   });
+
+  await prisma.projectSetting.upsert({
+    where: { projectId: project.id },
+    update: {},
+    create: { projectId: project.id }
+  });
+
+  return project;
 }
 
 export async function enableDiscoveredRepositories(input: {
@@ -248,9 +250,21 @@ export async function enableDiscoveredRepositories(input: {
       }
       await verifyGitLabRegistrationAccess({
         organizationId: input.organizationId,
+        connectionId: connection.id,
         externalProjectId,
-        repoUrl: discovered.repoUrl
+        repoUrl: discovered.repoUrl,
+        baseUrl,
+        token,
+        requireIssueWrite: false
       });
+
+      const publishCapable =
+        discovered.canWriteIssues &&
+        (await probeGitLabIssueWriteAccess({
+          baseUrl,
+          token,
+          externalProjectId
+        }));
 
       const project = await createProjectFromDiscovery({
         organizationId: input.organizationId,
@@ -258,7 +272,7 @@ export async function enableDiscoveredRepositories(input: {
         createdById: input.createdById,
         discovered,
         source: 'discovered',
-        publishCapable: discovered.canWriteIssues
+        publishCapable
       });
 
       enabled.push({
