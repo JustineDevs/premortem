@@ -9,6 +9,9 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
+      DIRECT_URL: postgresql://ci:ci@127.0.0.1:5432/ci
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -17,11 +20,6 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Generate Prisma client
-        env:
-          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
-          DIRECT_URL: postgresql://ci:ci@127.0.0.1:5432/ci
-        run: pnpm --filter @premortem/db generate
       - run: bash scripts/release/check-migrations.sh
       - run: bash scripts/release/build-manifest.sh
       - name: Create GitHub Release
