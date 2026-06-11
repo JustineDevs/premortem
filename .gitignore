@@ -9,7 +9,6 @@ mcp.local.json
 .next
 coverage
 dist
-pnpm-lock.yaml
 *.log
 *.tsbuildinfo
 **/__pycache__/
