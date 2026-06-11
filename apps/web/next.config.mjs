@@ -8,11 +8,23 @@ import { loadPremortemLocalEnv } from '../../scripts/load-local-env.mjs';
 loadPremortemLocalEnv(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'));
 
 /** @type {import('next').NextConfig} */
+const workspacePackages = [
+  '@premortem/agent-kit',
+  '@premortem/db',
+  '@premortem/domain',
+  '@premortem/integrations',
+  '@premortem/llm',
+  '@premortem/observability',
+  '@premortem/orchestrator',
+  '@premortem/storage',
+];
+
 const nextConfig = {
   experimental: {
     externalDir: true,
-    instrumentationHook: true
-  }
+    instrumentationHook: true,
+    serverComponentsExternalPackages: workspacePackages,
+  },
 };
 
 export default withSentryConfig(nextConfig, {
