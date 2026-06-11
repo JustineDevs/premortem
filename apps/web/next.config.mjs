@@ -7,6 +7,9 @@ import { loadPremortemLocalEnv } from '../../scripts/load-local-env.mjs';
 
 loadPremortemLocalEnv(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'));
 
+const appDir = path.dirname(fileURLToPath(import.meta.url));
+const monorepoRoot = path.resolve(appDir, '../..');
+
 /** @type {import('next').NextConfig} */
 const workspacePackages = [
   '@premortem/agent-kit',
@@ -20,10 +23,18 @@ const workspacePackages = [
 ];
 
 const nextConfig = {
+  outputFileTracingRoot: monorepoRoot,
   experimental: {
     externalDir: true,
     instrumentationHook: true,
     serverComponentsExternalPackages: workspacePackages,
+  },
+  webpack: (config) => {
+    config.resolve.modules = [
+      path.join(monorepoRoot, 'node_modules'),
+      ...(config.resolve.modules ?? ['node_modules']),
+    ];
+    return config;
   },
 };
 
