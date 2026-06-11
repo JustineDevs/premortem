@@ -13,6 +13,7 @@
   "dependencies": {
     "@premortem/db": "workspace:*",
     "@premortem/domain": "workspace:*",
+    "@premortem/llm": "workspace:*",
     "@premortem/observability": "workspace:*",
     "@premortem/orchestrator": "workspace:*",
     "@premortem/storage": "workspace:*",
