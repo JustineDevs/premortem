@@ -11,7 +11,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "prisma generate && tsc -p tsconfig.json",
     "lint": "echo lint db",
     "test": "echo test db",
     "typecheck": "tsc -p tsconfig.json --noEmit",
