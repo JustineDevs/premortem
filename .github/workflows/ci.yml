@@ -22,6 +22,7 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec turbo build --concurrency=1
+      - name: Build workspace packages (web builds on Cloudflare Pages)
+        run: pnpm exec turbo build --filter=!@premortem/web --concurrency=1
       - run: pnpm lint
       - run: pnpm typecheck
