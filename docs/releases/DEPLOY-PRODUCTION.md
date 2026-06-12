@@ -32,7 +32,7 @@ Manual deploy:
 
 ```bash
 pnpm --filter @premortem/api build
-cd apps/api && npx wrangler deploy --env production
+cd apps/api && pnpm run deploy
 ```
 
 Set Worker secrets in Cloudflare (not in git):
@@ -49,7 +49,12 @@ npx wrangler secret put NEO4J_PASSWORD --env production
 npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --env production
 ```
 
-Create production queues in Cloudflare dashboard: `premortem-audit-jobs`, `premortem-audit-jobs-dlq`.
+Production queue bootstrap runs during deploy when `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are present. If you need to provision them manually, run:
+
+```bash
+cd apps/api
+node ../../scripts/cloudflare/ensure-queues.mjs production
+```
 
 ## 3. Web (Cloudflare Pages)
 

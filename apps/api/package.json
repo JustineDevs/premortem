@@ -6,7 +6,8 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/local-server.ts",
     "dev:worker": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "node ../../scripts/cloudflare/ensure-queues.mjs production && wrangler deploy --env production",
+    "deploy:dev": "node ../../scripts/cloudflare/ensure-queues.mjs dev && wrangler deploy --env dev",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "bash ../../scripts/smoke/run-audit-flow.sh",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -22,6 +23,6 @@
   },
   "devDependencies": {
     "typescript": "^5.6.3",
-    "wrangler": "^3.86.1"
+    "wrangler": "^4.100.0"
   }
 }

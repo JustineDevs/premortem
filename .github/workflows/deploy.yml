@@ -43,4 +43,4 @@ jobs:
             echo "::warning::Worker deploy skipped: add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to GitHub repo secrets (see docs/releases/DEPLOY-PRODUCTION.md)."
             exit 0
           fi
-          npx wrangler deploy --env production
+          pnpm run deploy

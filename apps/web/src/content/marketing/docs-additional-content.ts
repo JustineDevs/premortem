@@ -58,13 +58,13 @@ export const deployProductionGuideDoc: StructuredDoc = {
       heading: 'API Worker',
       bullets: [
         'Requires CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in GitHub secrets.',
-        'Create queues premortem-audit-jobs and premortem-audit-jobs-dlq in Cloudflare dashboard.',
+        'Queue bootstrap creates premortem-audit-jobs and premortem-audit-jobs-dlq during deploy when Cloudflare credentials are present.',
         'Set Worker secrets via wrangler (DATABASE_URL, GEMINI_API_KEY, GitLab OAuth, Neo4j, Supabase service role).'
       ],
       codeBlocks: [
         {
           title: 'Manual Worker deploy',
-          code: 'pnpm --filter @premortem/api build\ncd apps/api && npx wrangler deploy --env production'
+          code: 'pnpm --filter @premortem/api build\ncd apps/api && pnpm run deploy'
         }
       ]
     },
