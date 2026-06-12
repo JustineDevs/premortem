@@ -1,5 +1,4 @@
 import { AuditEvent, AuditCheckpointPhase, DEFAULT_GEMINI_MODEL, RUNTIME_LANE_AGENTS, STRUCTURE_LANE_AGENTS } from '@premortem/domain';
-import { bootstrapPremortemAgentMission } from '@premortem/agent-builder';
 import {
   assertCanRunAudit,
   assertAuditReadiness,
@@ -72,6 +71,13 @@ const SEVERITY_RANK: Record<CanonicalFinding['severity'], number> = {
   high: 2,
   critical: 3
 };
+
+interface AgentBuilderMissionTrace {
+  engine: 'orchestrator-inline-trace';
+  model: string;
+  gitlabMcpEnabled: boolean;
+  steps: Array<{ step: string; at: string; detail?: Record<string, unknown> }>;
+}
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
@@ -475,6 +481,73 @@ function tagActiveSpanWithAuditRun(auditRunId: string) {
   trace.getActiveSpan()?.setAttribute('premortem.audit_run_id', auditRunId);
 }
 
+function createAgentBuilderMissionTrace(input: {
+  auditRunId: string;
+  projectId: string;
+  branch: string;
+  ingestionSource: 'local' | 'gitlab';
+  model: string;
+}): AgentBuilderMissionTrace {
+  const traceSteps: AgentBuilderMissionTrace['steps'] = [
+    {
+      step: 'mission.start',
+      at: new Date().toISOString(),
+      detail: {
+        auditRunId: input.auditRunId,
+        projectId: input.projectId,
+        branch: input.branch,
+        ingestionSource: input.ingestionSource
+      }
+    }
+  ];
+
+  if (input.ingestionSource === 'gitlab') {
+    traceSteps.push({
+      step: 'agent_builder.root_agent.ready',
+      at: new Date().toISOString(),
+      detail: {
+        gitlabMcpUrl: `${process.env.GITLAB_BASE_URL?.trim().replace(/\/$/, '') || 'https://gitlab.com'}/api/v4/mcp`,
+        toolPrefix: 'premortem'
+      }
+    });
+  } else {
+    traceSteps.push({
+      step: 'agent_builder.root_agent.local_mode',
+      at: new Date().toISOString(),
+      detail: {
+        reason: 'gitlab credentials unavailable or local ingest forced'
+      }
+    });
+  }
+
+  traceSteps.push(
+    {
+      step: 'mission.ingest.delegated',
+      at: new Date().toISOString(),
+      detail: {
+        orchestrator: '@premortem/orchestrator'
+      }
+    },
+    {
+      step: 'observability.phoenix',
+      at: new Date().toISOString(),
+      detail: {
+        enabled: false,
+        projectName: 'premortem',
+        mcpBaseUrl: 'http://127.0.0.1:3210',
+        mcpConfigured: false
+      }
+    }
+  );
+
+  return {
+    engine: 'orchestrator-inline-trace',
+    model: input.model,
+    gitlabMcpEnabled: input.ingestionSource === 'gitlab',
+    steps: traceSteps
+  };
+}
+
 async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditExecutionResult> {
   tagActiveSpanWithAuditRun(input.job.id);
   const prepared = await prepareAuditExecution(input.job, { rootDir: input.rootDir });
@@ -485,11 +558,12 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
     input.registryAgents ?? prepared.agents,
     prepared.projectSettings.enabledAgents
   );
-  const agentBuilderMission = await bootstrapPremortemAgentMission({
+  const agentBuilderMission = createAgentBuilderMissionTrace({
     auditRunId: input.job.id,
     projectId: input.job.projectId,
     branch: input.job.branch,
-    ingestionSource: prepared.ingestionSource
+    ingestionSource: prepared.ingestionSource,
+    model: prepared.llmConfig.model ?? DEFAULT_GEMINI_MODEL
   });
   ingestion.metadata = {
     ...ingestion.metadata,
