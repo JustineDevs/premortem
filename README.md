@@ -4,7 +4,7 @@
   <a href="https://github.com/JustineDevs/premortem/releases"><img src="https://img.shields.io/badge/version-v0.1.0-111111?style=for-the-badge" alt="Version"></a>
   <a href="https://github.com/JustineDevs/premortem"><img src="https://img.shields.io/badge/apps-web%20%7C%20api%20%7C%20orchestrator-111111?style=for-the-badge" alt="Packages"></a>
   <a href="https://github.com/JustineDevs/premortem"><img src="https://img.shields.io/badge/stack-next.js%20%7C%20supabase%20%7C%20cloudflare-111111?style=for-the-badge" alt="Tech Stack"></a>
-  <a href="https://premortem.dev"><img src="https://img.shields.io/badge/website-premortem.dev-111111?style=for-the-badge" alt="Website"></a>
+  <a href="https://premortem.jstn.site"><img src="https://img.shields.io/badge/website-premortem.jstn.site-111111?style=for-the-badge" alt="Website"></a>
   <a href="https://github.com/sponsors/JustineDevs"><img src="https://img.shields.io/badge/sponsor-JustineDevs-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor JustineDevs"></a>
 </p>
 
