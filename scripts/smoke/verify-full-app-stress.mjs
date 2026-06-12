@@ -16,6 +16,7 @@ import { ConsoleReviewAction, LOCAL_DEV_FIXTURE } from '@premortem/domain';
 
 import { loadSmokeEnv } from './load-smoke-env.mjs';
 import { createSupabaseSmokeSession } from './smoke-supabase-session.mjs';
+import { smokeReviewEditPayload } from './smoke-review-edit.mjs';
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -191,13 +192,24 @@ const docsRoutes = [
   '/docs/product/flows',
   '/docs/concepts/audit-model',
   '/docs/concepts/data-flow',
+  '/docs/concepts/security',
   '/docs/guides/connect-gitlab',
   '/docs/guides/run-audit',
   '/docs/guides/review-and-publish',
+  '/docs/guides/deploy-production',
+  '/docs/guides/workflow-canvas',
+  '/docs/guides/audit-history',
+  '/docs/guides/ai-playground',
+  '/docs/guides/workspace-settings',
+  '/docs/guides/auth-sessions',
   '/docs/tutorials/first-audit',
+  '/docs/tutorials/publish-gitlab-issue',
   '/docs/integrations/gitlab',
   '/docs/reference/api',
-  '/docs/reference/environment'
+  '/docs/reference/environment',
+  '/docs/reference/billing-plans',
+  '/docs/reference/neo4j-graph',
+  '/docs/reference/observability'
 ];
 
 await Promise.all(
@@ -274,7 +286,7 @@ for (const index of [0, 1]) {
   await executeAuditJob({
     job: submitted.job,
     rootDir: ROOT_DIR,
-    registryAgents: buildWorkerRegisteredAgents()
+    registryAgents: buildWorkerRegisteredAgents(ROOT_DIR)
   });
 
   parallelAudits.push(submitted.auditRunId);
@@ -302,6 +314,7 @@ const snapshotPayload = await expectJson('GET', `/api/audits/${lastAuditId}`, 'l
   headers
 });
 const issueId = snapshotPayload?.snapshot?.issueCandidates?.[0]?.id;
+const issueCandidate = snapshotPayload?.snapshot?.issueCandidates?.[0];
 
 if (issueId) {
   await expectJson(
@@ -316,7 +329,7 @@ if (issueId) {
 
   await expectJson('POST', `/api/audits/${lastAuditId}/issues/${issueId}/edit`, 'review edit', {
     headers,
-    body: { title: 'Full stress edited title', whyItMatters: 'Stress test edit' }
+    body: smokeReviewEditPayload(issueCandidate)
   });
 
   const publishPayload = await expectJson('POST', `/api/issues/${issueId}/publish`, 'publish issue', {

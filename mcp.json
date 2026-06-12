@@ -68,6 +68,15 @@
         "shadcn@latest",
         "mcp"
       ]
+    },
+    "Phoenix": {
+      "command": "bash",
+      "args": [
+        "./scripts/mcp/run-phoenix-mcp.sh"
+      ]
+    },
+    "Phoenix Docs": {
+      "url": "https://arizeai-433a7140.mintlify.app/mcp"
     }
   }
 }

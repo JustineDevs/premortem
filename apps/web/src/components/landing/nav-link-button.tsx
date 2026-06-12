@@ -42,9 +42,10 @@ type DocsNavLinkProps = {
   href: string;
   children: ReactNode;
   matchPrefix?: boolean;
+  scroll?: boolean;
 };
 
-export function DocsNavLink({ href, children, matchPrefix = false }: DocsNavLinkProps) {
+export function DocsNavLink({ href, children, matchPrefix = false, scroll }: DocsNavLinkProps) {
   const pathname = usePathname();
   const isActive =
     pathname === href || (matchPrefix && href !== '/' && pathname.startsWith(`${href}/`));
@@ -52,6 +53,7 @@ export function DocsNavLink({ href, children, matchPrefix = false }: DocsNavLink
   return (
     <Link
       href={href}
+      scroll={scroll}
       className={`landing-doc-nav__link${isActive ? ' landing-doc-nav__link--active' : ''}`}
       aria-current={isActive ? 'page' : undefined}
     >

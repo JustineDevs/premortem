@@ -33,25 +33,22 @@ export default function SolutionsPage() {
 
         <div className="landing-solutions-main">
           <div className="landing-solutions-mid">
-            <div className="landing-solutions-mid__col">
+            <div className="landing-solutions-mid__col landing-solutions-mid__col--workflow">
               <MarketingSectionHeading>Workflow</MarketingSectionHeading>
               <MarketingCallout title="Audit → Review → Publish" body={solutionsPage.workflowSummary} />
               <MarketingFeatureList items={premortemFeatures} />
+              <MarketingSectionHeading>Ecosystem</MarketingSectionHeading>
+              <MarketingEcosystemStrip layout="grid" />
             </div>
-            <div className="landing-solutions-mid__col">
+            <div className="landing-solutions-mid__col landing-solutions-mid__col--preview">
               <MarketingSectionHeading>Console preview</MarketingSectionHeading>
               <MarketingScreenshot
                 src={howItWorksPage.screenshot.src}
                 alt={howItWorksPage.screenshot.alt}
-                crop="preview"
+                crop="console"
                 caption="Reviewer console: approve structured findings before GitLab sync."
               />
             </div>
-          </div>
-
-          <div className="landing-solutions-ecosystem">
-            <MarketingSectionHeading>Ecosystem</MarketingSectionHeading>
-            <MarketingEcosystemStrip />
           </div>
         </div>
 

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getApiBaseUrl } from '@/lib/runtime-config';
+import { bffErrorResponse, readUpstreamJson } from '@/lib/server/bff-errors';
 import { actorHeaders, resolveRequestActorContext, type RequestActorContext } from '@/lib/server/request-context';
 
 async function proxyApi(path: string, init?: RequestInit, context?: RequestActorContext) {
@@ -14,7 +15,7 @@ async function proxyApi(path: string, init?: RequestInit, context?: RequestActor
     },
     cache: 'no-store'
   });
-  const payload = await response.json();
+  const payload = await readUpstreamJson(response);
   const requestId = response.headers.get('x-request-id');
   return NextResponse.json(payload, {
     status: response.status,
@@ -27,9 +28,6 @@ export async function GET(request: Request) {
     const context = await resolveRequestActorContext(request);
     return await proxyApi('/api/workspace', undefined, context);
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to load workspace' },
-      { status: 401 }
-    );
+    return bffErrorResponse(error, 'Failed to load workspace');
   }
 }

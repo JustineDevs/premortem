@@ -41,7 +41,7 @@ export async function provisionStrangerSmokeWorkspace(input: {
   const baseUrl = (process.env.GITLAB_BASE_URL ?? 'https://gitlab.com').replace(/\/$/, '');
   const profile = await resolveGitLabProfile(baseUrl, token);
   const profileId = randomUUID();
-  const email = `smoke-stranger-${Date.now()}@premortem.dev`;
+  const email = `smoke-stranger-${Date.now()}@premortem.jstn.site`;
   const username = `smoke_${profile.username}_${Date.now().toString(36)}`;
 
   const organizationId = await createPersonalWorkspaceForProfile(profileId, {

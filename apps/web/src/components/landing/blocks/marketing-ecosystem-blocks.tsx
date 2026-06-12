@@ -12,9 +12,16 @@ const assetMap = {
   geminiIcon: assets.geminiIcon
 } as const;
 
-export function MarketingEcosystemStrip() {
+type EcosystemStripLayout = 'strip' | 'grid';
+
+export function MarketingEcosystemStrip({ layout = 'strip' }: { layout?: EcosystemStripLayout }) {
+  const stripClass =
+    layout === 'grid'
+      ? 'landing-block-ecosystem-strip landing-block-ecosystem-strip--grid'
+      : 'landing-block-ecosystem-strip';
+
   return (
-    <div className="landing-block-ecosystem-strip" aria-label="Ecosystem integrations">
+    <div className={stripClass} aria-label="Ecosystem integrations">
       {ecosystemCards.map((card) => (
         <article key={card.id} className="landing-block-ecosystem-strip__card" data-border="true">
           <div className="landing-block-ecosystem-strip__logo-row">

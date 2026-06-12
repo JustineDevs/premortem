@@ -76,6 +76,14 @@ export interface WorkspaceBundle {
     maxRepos: number;
     invoices: unknown[];
   };
+  apiKeys: Array<{
+    id: string;
+    label: string;
+    keyPrefix: string;
+    lastUsedAt: string | null;
+    revokedAt: string | null;
+    createdAt: string;
+  }>;
   usage: {
     scans: { used: number; limit: number };
     repos: { used: number; limit: number };

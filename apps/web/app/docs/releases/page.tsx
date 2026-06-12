@@ -1,5 +1,6 @@
 import {
   MarketingDocArticle,
+  MarketingDocCodeBlock,
   MarketingDocLayout,
   MarketingDocSection
 } from '@/components/landing/blocks';
@@ -26,6 +27,19 @@ export default function ReleasesDocPage() {
         </MarketingDocSection>
         <MarketingDocSection id="upgrade" title="Upgrade notes">
           <MarketingBulletList items={releasesDoc.upgradeNotes} />
+        </MarketingDocSection>
+        <MarketingDocSection id="verify" title="Verification (2026-06-11)">
+          <MarketingBulletList
+            items={[
+              'pnpm run smoke:production-readiness: stranger self-serve, publish, Neo4j graph.',
+              'pnpm run smoke:full-app-stress: marketing, docs, auth, billing guards, audits.',
+              'Stripe test catalog wired (Premortem Starter / Premortem Growth price IDs).'
+            ]}
+          />
+          <MarketingDocCodeBlock
+            title="Local verification"
+            code={'pnpm run dev\npnpm run smoke:full-app-stress'}
+          />
         </MarketingDocSection>
       </MarketingDocArticle>
     </MarketingDocLayout>

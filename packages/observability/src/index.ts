@@ -4,3 +4,8 @@ export * from './events';
 export * from './feature-flags';
 export * from './langfuse';
 export * from './phoenix';
+export * from './phoenix-client-config';
+export * from './phoenix-code-evaluator';
+export * from './phoenix-datasets';
+export * from './phoenix-prompts';
+export * from './phoenix-semantic-graph';

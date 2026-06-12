@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { authLinks, type AuthMode, type AuthProvider } from '@/lib/auth-links';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { getPublicAppOrigin } from '@/lib/runtime-config';
+import { createRouteHandlerSupabaseClient } from '@/lib/supabase/route-handler';
 
 const providers: Record<AuthProvider, 'gitlab' | 'github'> = {
   gitlab: 'gitlab',
@@ -32,39 +33,32 @@ export async function GET(
   const modeParam = request.nextUrl.searchParams.get('mode');
   const mode: AuthMode = isAuthMode(modeParam) ? modeParam : 'login';
   const next = safeNextPath(request.nextUrl.searchParams.get('next'));
+  const origin = getPublicAppOrigin(request.nextUrl.origin);
   const fallbackPath = mode === 'signup' ? authLinks.signup : authLinks.login;
 
-  if (provider === 'github') {
-    const redirectUrl = new URL(fallbackPath, request.url);
-    redirectUrl.searchParams.set('notice', 'github-soon');
-    return NextResponse.redirect(redirectUrl);
-  }
-
-  const supabase = createSupabaseServerClient();
-  if (!supabase) {
-    const redirectUrl = new URL(fallbackPath, request.url);
+  const authClient = createRouteHandlerSupabaseClient(request);
+  if (!authClient) {
+    const redirectUrl = new URL(fallbackPath, origin);
     redirectUrl.searchParams.set('error', 'config');
     return NextResponse.redirect(redirectUrl);
   }
 
-  const origin = request.nextUrl.origin;
   const callbackParams = new URLSearchParams({ next, mode });
   const redirectTo = `${origin}${authLinks.callback}?${callbackParams.toString()}`;
 
-  const { data, error } = await supabase.auth.signInWithOAuth({
+  const { data, error } = await authClient.supabase.auth.signInWithOAuth({
     provider: providers[provider],
     options: {
       redirectTo,
-      // GitLab login only needs read_user (Supabase docs). Repo/API access uses GITLAB_TOKEN separately.
-      scopes: 'read_user'
+      scopes: provider === 'github' ? 'read:user repo' : 'read_user api read_repository'
     }
   });
 
   if (error || !data.url) {
-    const redirectUrl = new URL(fallbackPath, request.url);
+    const redirectUrl = new URL(fallbackPath, origin);
     redirectUrl.searchParams.set('error', 'oauth');
-    return NextResponse.redirect(redirectUrl);
+    return authClient.attachCookies(NextResponse.redirect(redirectUrl));
   }
 
-  return NextResponse.redirect(data.url);
+  return authClient.attachCookies(NextResponse.redirect(data.url));
 }

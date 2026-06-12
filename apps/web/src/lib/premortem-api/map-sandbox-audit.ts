@@ -32,6 +32,7 @@ export function mapSandboxScanToAuditRun(customSnippet: string): AuditRun {
 
   return {
     id: auditId,
+    isSandbox: true,
     projectId: 'sandbox',
     projectName: 'Ad-hoc Sandbox',
     score: overallScore,

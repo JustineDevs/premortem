@@ -1,10 +1,9 @@
 import {
   MarketingDocAudienceCards,
   MarketingDocHub,
-  MarketingStructuredDocPage
+  MarketingDocLayout
 } from '@/components/landing/blocks';
 import { MarketingParagraph } from '@/components/landing/marketing-content';
-import { MarketingPageLayout } from '@/components/landing/marketing-page-layout';
 import { docsHubCards, docsHubIntro } from '@/content/marketing/docs-index';
 
 export const metadata = {
@@ -14,7 +13,8 @@ export const metadata = {
 
 export default function DocsHubPage() {
   return (
-    <MarketingPageLayout title="Documentation" description={docsHubIntro.lead}>
+    <MarketingDocLayout title="Documentation" description={docsHubIntro.lead}>
+      <MarketingParagraph>{docsHubIntro.lead}</MarketingParagraph>
       <MarketingParagraph>
         Documentation is organized by intent: not by dashboard tabs. Pick a bucket below, or jump
         straight to your role.
@@ -22,6 +22,6 @@ export default function DocsHubPage() {
       <MarketingDocAudienceCards cards={docsHubIntro.audiences} />
       <MarketingDocHub cards={docsHubIntro.diataxis} />
       <MarketingDocHub cards={docsHubCards} />
-    </MarketingPageLayout>
+    </MarketingDocLayout>
   );
 }

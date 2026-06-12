@@ -9,7 +9,46 @@ export function resolveRequestId(request: Request): string {
   return request.headers.get('x-request-id')?.trim() || crypto.randomUUID();
 }
 
-export function checkRateLimit(key: string): boolean {
+async function checkRateLimitWithDurableObject(
+  env: { RATE_LIMITER?: { idFromName(name: string): unknown; get(id: unknown): { fetch(request: Request): Promise<Response> } } },
+  key: string
+): Promise<boolean | null> {
+  if (!env.RATE_LIMITER) return null;
+
+  const limiterId = env.RATE_LIMITER.idFromName(key);
+  const response = await env.RATE_LIMITER.get(limiterId).fetch(
+    new Request('https://premortem.internal/rate-limit/check', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        key,
+        limit: RATE_LIMIT,
+        windowMs: RATE_WINDOW_MS
+      })
+    })
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = (await response.json().catch(() => null)) as { allowed?: boolean } | null;
+  if (typeof payload?.allowed === 'boolean') {
+    return payload.allowed;
+  }
+
+  return null;
+}
+
+export async function checkRateLimit(
+  key: string,
+  env?: { RATE_LIMITER?: { idFromName(name: string): unknown; get(id: unknown): { fetch(request: Request): Promise<Response> } } }
+): Promise<boolean> {
+  const durableObjectDecision = await checkRateLimitWithDurableObject(env ?? {}, key);
+  if (typeof durableObjectDecision === 'boolean') {
+    return durableObjectDecision;
+  }
+
   const now = Date.now();
   const entry = buckets.get(key);
   if (!entry || now > entry.resetAt) {

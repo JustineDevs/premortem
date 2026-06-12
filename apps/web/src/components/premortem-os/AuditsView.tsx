@@ -5,6 +5,7 @@ import { mapSnapshotToAuditRun } from '@/lib/premortem-api/map-runtime-to-consol
 import { ConsoleReviewAction, ConsoleIssueStatus } from '@premortem/domain';
 import { AuditsInvestigationsPanel } from './audits-investigations-panel';
 import { AuditRuntimeConsole } from './audit-runtime-console';
+import { FindingSourceEvidence } from './finding-source-evidence';
 import { SwarmDualLanePanel } from './swarm-dual-lane-panel';
 import { OsTabs } from './os-tabs';
 import {
@@ -14,13 +15,13 @@ import {
   type SwarmLaneAgent
 } from '@/lib/premortem-os/swarm-lanes';
 import { ProviderIcon } from './ProviderIcon';
+import { isPublishedIssueUrl } from '@/lib/premortem-os/publish-links';
 import { 
   ShieldAlert, 
   ChevronRight, 
   GitBranch, 
   RotateCw, 
   HelpCircle,
-  FileCode,
   CornerDownRight,
   TrendingDown,
   ArrowRight,
@@ -117,13 +118,14 @@ export function AuditsView({
       void fetch(`/api/audits/${selectedAudit.id}`)
         .then((response) => response.json())
         .then((payload) => {
-          if (cancelled || !payload.snapshot) return;
-          setRuntimeSnapshot(payload.snapshot);
-          if (payload.snapshot.agentRuns?.[0]?.id && !activeAgentId) {
-            setActiveAgentId(payload.snapshot.agentRuns[0].id);
+          const snapshot = payload.snapshot ?? payload.auditRun;
+          if (cancelled || !snapshot) return;
+          setRuntimeSnapshot(snapshot);
+          if (snapshot.agentRuns?.[0]?.id && !activeAgentId) {
+            setActiveAgentId(snapshot.agentRuns[0].id);
           }
 
-          const hydrated = mapSnapshotToAuditRun(payload.snapshot, selectedAudit.projectName);
+          const hydrated = mapSnapshotToAuditRun(snapshot, selectedAudit.projectName);
           onAuditHydrated(selectedAudit.id, hydrated);
         })
         .catch(() => {
@@ -262,16 +264,9 @@ export function AuditsView({
     }
   };
 
-  // GitLab publish via runtime API (requires prior reviewer confirmation)
+  // GitLab publish via runtime API (approve first, then publish)
   const handlePushToGitLab = async () => {
-    if (!activeFinding) return;
-    if (
-      activeFinding.status !== ConsoleIssueStatus.CONFIRMED &&
-      activeFinding.status !== ConsoleIssueStatus.RESOLVED
-    ) {
-      alert('Confirm this finding before publishing to GitLab.');
-      return;
-    }
+    if (!activeFinding || !selectedAudit) return;
     setIsSyncingToGitLab(true);
     try {
       await onPersistFindingFields(selectedAudit.id, activeFinding.id, {
@@ -280,25 +275,91 @@ export function AuditsView({
         whyItMatters: activeFinding.whyItMatters ?? '',
         recommendation: activeFinding.recommendation
       });
+
+      if (
+        activeFinding.status !== ConsoleIssueStatus.CONFIRMED &&
+        activeFinding.status !== ConsoleIssueStatus.RESOLVED &&
+        activeFinding.status !== ConsoleIssueStatus.PUBLISHED
+      ) {
+        const approveResponse = await fetch(
+          `/api/audits/${selectedAudit.id}/issues/${activeFinding.id}/action`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: ConsoleReviewAction.CONFIRM })
+          }
+        );
+        if (!approveResponse.ok) {
+          const errPayload = await approveResponse.json().catch(() => ({}));
+          throw new Error(
+            typeof errPayload.error === 'string' ? errPayload.error : 'Failed to approve finding.'
+          );
+        }
+        onUpdateFindingStatus(selectedAudit.id, activeFinding.id, ConsoleReviewAction.CONFIRM);
+      }
+
       const publishResponse = await fetch(`/api/issues/${activeFinding.id}/publish`, { method: 'POST' });
       if (!publishResponse.ok) {
         const errPayload = await publishResponse.json().catch(() => ({}));
-        throw new Error(errPayload.error || 'Publish failed');
+        const message =
+          typeof errPayload.error === 'string'
+            ? errPayload.error
+            : `Publish failed (${publishResponse.status})`;
+        if (errPayload.code === 'feature_locked') {
+          throw new Error(`${message} Upgrade to Starter in Settings → Billing to publish to GitLab.`);
+        }
+        if (errPayload.code === 'publish_not_approved') {
+          throw new Error(message);
+        }
+        throw new Error(message);
       }
-      const publishResult = await publishResponse.json();
+
+      const publishResult = await publishResponse.json() as {
+        dryRun?: boolean;
+        publishedIssue?: { id?: string; url?: string | null };
+        error?: string;
+        code?: string;
+      };
+
+      if (publishResult.dryRun) {
+        alert(
+          'Publish dry-run only: no GitLab issue was created. Remove PREMORTEM_PUBLISH_DRY_RUN from .env.local and restart dev to create real GitLab issues.'
+        );
+        return;
+      }
+
+      const publishedUrlFromApi = publishResult.publishedIssue?.url ?? null;
+      if (publishedUrlFromApi && isPublishedIssueUrl(publishedUrlFromApi)) {
+        onUpdateFindingFields(selectedAudit.id, activeFinding.id, {
+          gitlabIssueId: publishedUrlFromApi,
+          status: ConsoleIssueStatus.PUBLISHED
+        });
+        return;
+      }
+
       const publishRes = await fetch(`/api/audits/${selectedAudit.id}`);
+      if (!publishRes.ok) {
+        throw new Error(`Publish succeeded but audit refresh failed (${publishRes.status}). Check GitLab for the new issue.`);
+      }
       const publishPayload = await publishRes.json();
       const published = publishPayload.snapshot?.issueCandidates?.find(
         (issue: { id: string }) => issue.id === activeFinding.id
       );
-      const publishedUrl =
-        published?.publishedUrl ?? publishResult.publishedIssue?.url ?? null;
-      if (publishedUrl) {
+      const publishedUrl = published?.publishedUrl ?? publishedUrlFromApi;
+      if (isPublishedIssueUrl(publishedUrl)) {
         onUpdateFindingFields(selectedAudit.id, activeFinding.id, {
           gitlabIssueId: publishedUrl,
           status: ConsoleIssueStatus.PUBLISHED
         });
+      } else {
+        throw new Error(
+          publishResult.publishedIssue?.id
+            ? 'Issue publish completed but no GitLab URL was returned. Verify GitLab connection and project publish access.'
+            : 'Publish did not return a GitLab issue URL.'
+        );
       }
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Failed to publish to GitLab.');
     } finally {
       setIsSyncingToGitLab(false);
     }
@@ -602,11 +663,11 @@ export function AuditsView({
                         <div className="flex items-center justify-between mt-3 text-[9px] font-mono">
                           <span className="text-[#8A958F] truncate">{f.category}</span>
                           <div className="flex items-center gap-1.5">
-                            {f.gitlabIssueId && (
+                            {isPublishedIssueUrl(f.gitlabIssueId) ? (
                               <span className="px-1 py-0.2 bg-orange-100 text-orange-700 font-bold rounded text-[8px] uppercase">
                                 Sync
                               </span>
-                            )}
+                            ) : null}
                             <span className={`px-1.5 rounded text-[8.5px] ${getStatusBadge(f.status)}`}>
                               {f.status}
                             </span>
@@ -620,7 +681,7 @@ export function AuditsView({
 
               {/* Right Column - workspace container */}
               {activeFinding ? (
-                <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-white h-full relative">
+                <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-6 space-y-6 bg-white h-full relative">
                   
                   {/* Mode Toggler Pill */}
                   <div className="flex justify-between items-center border-b border-zinc-100 pb-3 gap-4 shrink-0">
@@ -706,27 +767,7 @@ export function AuditsView({
                       </div>
 
                       {/* Code Snippet block */}
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center text-[11px] font-mono text-[#8A958F]">
-                          <span className="font-bold uppercase flex items-center gap-1.5">
-                            <FileCode size={12} />
-                            SOURCE CODE EVIDENCE
-                          </span>
-                          <span className="text-[10px] tracking-tight">{activeFinding.filepath}:{activeFinding.line}</span>
-                        </div>
-                        
-                        <div className="bg-neutral-900 rounded overflow-hidden shadow-inner border border-neutral-800">
-                          <div className="p-2 border-b border-neutral-800 bg-neutral-950/80 flex items-center gap-1.5 font-mono text-[9px] text-zinc-500">
-                            <span className="w-2.5 h-2.5 rounded-full bg-[#E15A5A]"/>
-                            <span className="w-2.5 h-2.5 rounded-full bg-[#E88B5D]"/>
-                            <span className="w-2.5 h-2.5 rounded-full bg-[#7AB355]"/>
-                            <span className="ml-1 select-none font-bold text-[#A6BCB4]">VIOLATION SEGMENT</span>
-                          </div>
-                          <pre className="p-4 overflow-x-auto text-[11px] font-mono text-zinc-300 bg-neutral-950/90 leading-relaxed select-text">
-                            <code>{activeFinding.evidence}</code>
-                          </pre>
-                        </div>
-                      </div>
+                      <FindingSourceEvidence finding={activeFinding} title="Source code evidence" />
 
                       {/* Active Trace flow steps */}
                       {((activeFinding.trace && activeFinding.trace.length > 0) || lineageEntries.length > 0) && (
@@ -911,10 +952,10 @@ export function AuditsView({
                           </p>
                         </div>
 
-                        {activeFinding.gitlabIssueId ? (
+                        {isPublishedIssueUrl(activeFinding.gitlabIssueId) ? (
                           <div className="p-2.5 bg-emerald-955 text-white bg-emerald-950 rounded flex items-center gap-2 text-xs font-mono font-bold shadow-sm">
                             <CheckSquare size={14} className="text-emerald-400" />
-                            <span>CREATED AS {activeFinding.gitlabIssueId}</span>
+                            <span className="truncate">CREATED AS {activeFinding.gitlabIssueId}</span>
                           </div>
                         ) : (
                           <div className="p-2 px-3 bg-orange-100 ring-1 ring-orange-200 text-orange-850 font-bold font-mono text-[9.5px] rounded animate-pulse self-start md:self-auto">
@@ -1029,11 +1070,11 @@ export function AuditsView({
                           The orchestrator clusters related problems. Select similar risks yielded inside this audit to combine into this single parent issue task.
                         </p>
 
-                        <div className="flex flex-col sm:flex-row gap-2 mt-3 text-xs">
+                        <div className="mt-3 space-y-2 text-xs">
                           <select
                             value={mergeTargetId}
                             onChange={(e) => setMergeTargetId(e.target.value)}
-                            className="flex-1 p-2 border border-[#EAE6DF] rounded bg-white font-sans focus:outline-none focus:border-emerald-950 text-neutral-800"
+                            className="w-full min-w-0 p-2 border border-[#EAE6DF] rounded bg-white font-sans focus:outline-none focus:border-emerald-950 text-neutral-800"
                           >
                             <option value="">-- Choose overlapping duplicate finding to merge --</option>
                             {findings
@@ -1044,15 +1085,17 @@ export function AuditsView({
                                 </option>
                               ))}
                           </select>
-                          
-                          <button
-                            type="button"
-                            onClick={handleMergeFindings}
-                            disabled={!mergeTargetId}
-                            className="px-4 py-2 bg-emerald-950 hover:bg-emerald-900 border border-emerald-950 text-white rounded font-bold transition-all cursor-pointer text-xs disabled:opacity-40"
-                          >
-                            Merge Selected
-                          </button>
+
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={handleMergeFindings}
+                              disabled={!mergeTargetId}
+                              className="shrink-0 whitespace-nowrap px-4 py-2 bg-emerald-950 hover:bg-emerald-900 border border-emerald-950 text-white rounded font-bold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              Merge Selected
+                            </button>
+                          </div>
                         </div>
                       </div>
 
@@ -1068,29 +1111,31 @@ export function AuditsView({
                           </p>
                         </div>
 
-                        <div className="flex flex-col sm:flex-row gap-2">
+                        <div className="space-y-2">
                           <input
                             type="text"
                             value={splitTitle}
                             onChange={(e) => setSplitTitle(e.target.value)}
                             placeholder={`${activeFinding.title} (Follow-up)`}
-                            className="flex-1 p-2 border border-[#EAE6DF] rounded bg-white font-sans focus:outline-none focus:border-emerald-950 text-neutral-800"
+                            className="w-full min-w-0 p-2 border border-[#EAE6DF] rounded bg-white font-sans focus:outline-none focus:border-emerald-950 text-neutral-800"
                           />
-                          <button
-                            type="button"
-                            onClick={handleSplitFinding}
-                            disabled={isSplitting}
-                            className="py-2 px-3 border border-[#EAE6DF] rounded font-bold hover:bg-[#FAF8F5] text-zinc-700 hover:text-zinc-950 cursor-pointer block text-center shrink-0 disabled:opacity-40"
-                          >
-                            {isSplitting ? 'Splitting...' : 'Split Into Separate Task'}
-                          </button>
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={handleSplitFinding}
+                              disabled={isSplitting}
+                              className="shrink-0 whitespace-nowrap py-2 px-3 border border-[#EAE6DF] rounded font-bold hover:bg-[#FAF8F5] text-zinc-700 hover:text-zinc-950 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {isSplitting ? 'Splitting...' : 'Split Into Separate Task'}
+                            </button>
+                          </div>
                         </div>
                       </div>
 
                       {/* APPROVE & PUSH TO GITLAB INTEGRATION */}
                       <div className="border-t border-zinc-250 pt-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
                         <div className="text-xs text-[#5C6560]">
-                          {activeFinding.gitlabIssueId ? (
+                          {isPublishedIssueUrl(activeFinding.gitlabIssueId) ? (
                             <span className="text-emerald-700 font-bold flex items-center gap-1.5 uppercase font-mono">
                               <CheckSquare size={14} className="text-emerald-600 animate-pulse" />
                               Issue successfully created and synchronized with GitLab.
@@ -1102,7 +1147,7 @@ export function AuditsView({
                           )}
                         </div>
 
-                        {activeFinding.gitlabIssueId ? (
+                        {isPublishedIssueUrl(activeFinding.gitlabIssueId) ? (
                           <a
                             href={activeFinding.gitlabIssueId}
                             target="_blank"

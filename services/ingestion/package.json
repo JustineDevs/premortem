@@ -5,8 +5,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
-    "lint": "echo lint ingestion",
-    "test": "echo test ingestion",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

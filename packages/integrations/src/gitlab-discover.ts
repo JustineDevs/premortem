@@ -1,3 +1,5 @@
+import { gitLabAuthHeaders } from './gitlab-auth';
+
 export interface GitLabDiscoveredProject {
   externalProjectId: string;
   name: string;
@@ -23,11 +25,7 @@ interface GitLabProjectApiRow {
 }
 
 async function gitlabApiGet(baseUrl: string, token: string | undefined, apiPath: string) {
-  const headers: Record<string, string> = {};
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-    headers['PRIVATE-TOKEN'] = token;
-  }
+  const headers: Record<string, string> = token ? gitLabAuthHeaders(token) : {};
 
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/v4${apiPath}`, { headers });
   if (!response.ok) {

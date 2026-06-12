@@ -14,6 +14,9 @@ export interface PreparedAuditContext {
   agents: RegisteredAgent[];
   llmConfig: LlmExecutorConfig;
   ingestionSource: 'local' | 'gitlab';
+  projectSettings: {
+    enabledAgents: string[];
+  };
 }
 
 export async function prepareAuditExecution(
@@ -29,6 +32,13 @@ export async function prepareAuditExecution(
   };
 
   const project = await prisma.project.findUnique({ where: { id: job.projectId } });
+  const projectSetting = await prisma.projectSetting.findUnique({
+    where: { projectId: job.projectId },
+    select: { enabledAgents: true }
+  });
+  const enabledAgents = Array.isArray(projectSetting?.enabledAgents)
+    ? projectSetting.enabledAgents.filter((agent): agent is string => typeof agent === 'string' && agent.length > 0)
+    : [];
   const forceLocal = allowsForceLocalIngest();
 
   if (!forceLocal && project?.provider === 'gitlab' && project.externalProjectId) {
@@ -47,7 +57,10 @@ export async function prepareAuditExecution(
         rootDir: fallbackRoot,
         agents: buildRegisteredAgents(fallbackRoot, llmConfig),
         llmConfig,
-        ingestionSource: 'gitlab'
+        ingestionSource: 'gitlab',
+        projectSettings: {
+          enabledAgents
+        }
       };
     }
 
@@ -75,6 +88,9 @@ export async function prepareAuditExecution(
     rootDir: fallbackRoot,
     agents: buildRegisteredAgents(fallbackRoot, llmConfig),
     llmConfig,
-    ingestionSource: 'local'
+    ingestionSource: 'local',
+    projectSettings: {
+      enabledAgents
+    }
   };
 }

@@ -4,8 +4,8 @@ Premortem v0.1.0 splits runtime across:
 
 | Surface | Target | Route |
 | --- | --- | --- |
-| Web (Next.js BFF + marketing + `/app`) | Cloudflare Pages | `premortem.dev`, `www.premortem.dev` |
-| API (audit orchestration) | Cloudflare Worker | `api.premortem.dev` |
+| Web (Next.js BFF + marketing + `/app`) | Cloudflare Pages | `premortem.jstn.site` |
+| API (audit orchestration) | Cloudflare Worker | `api.premortem.jstn.site` |
 | Database + Auth | Supabase | Postgres pooler + Auth |
 | Graph | Neo4j Aura or self-hosted | Bolt URI |
 | Billing | Stripe | Checkout + webhooks |
@@ -61,14 +61,14 @@ Recommended monorepo settings:
 | --- | --- |
 | Production branch | `main` |
 | Root directory | `/` (repo root) |
-| Build command | `pnpm install && pnpm --filter @premortem/web build` |
+| Build command | `pnpm install --frozen-lockfile && pnpm run build:pages` |
 | Build output | Use Cloudflare **Next.js** preset (dashboard auto-detect) or OpenNext adapter when added |
 
 Pages environment variables (production):
 
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `NEXT_PUBLIC_APP_URL` = `https://premortem.dev`
-- `PREMORTEM_API_BASE_URL` = `https://api.premortem.dev`
+- `NEXT_PUBLIC_APP_URL` = `https://premortem.jstn.site`
+- `PREMORTEM_API_BASE_URL` = `https://api.premortem.jstn.site`
 - `DATABASE_URL`, `DIRECT_URL` (server routes / Prisma)
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
 - `STRIPE_PRICE_PRO`, `STRIPE_PRICE_TEAM`, `STRIPE_PRICE_PRO_ANNUAL`, `STRIPE_PRICE_TEAM_ANNUAL`
@@ -76,7 +76,7 @@ Pages environment variables (production):
 - `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`
 - Do **not** set `PREMORTEM_AUTH_DISABLED` in production
 
-Stripe webhook endpoint: `https://premortem.dev/api/webhooks/stripe`
+Stripe webhook endpoint: `https://premortem.jstn.site/api/webhooks/stripe`
 
 ## 4. Stripe (verified)
 
@@ -95,8 +95,8 @@ Live mode (`sk_live_…`): Checkout + webhooks drive entitlements.
 
 ```bash
 PREMORTEM_WEB_PORT=443 PREMORTEM_API_PORT=443 \
-PREMORTEM_WEB_BASE=https://premortem.dev \
-PREMORTEM_API_BASE=https://api.premortem.dev \
+PREMORTEM_WEB_BASE=https://premortem.jstn.site \
+PREMORTEM_API_BASE=https://api.premortem.jstn.site \
 pnpm run smoke:production-readiness
 ```
 

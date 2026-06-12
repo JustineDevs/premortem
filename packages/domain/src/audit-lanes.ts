@@ -50,13 +50,13 @@ export type WorkflowCanvasViewMode = 'graph' | 'split' | 'workbench';
 export const WORKFLOW_CANVAS_STEPS = [
   { id: 'node-connect-vcs', index: 0, defaultViewMode: 'split' as WorkflowCanvasViewMode },
   { id: 'node-scan-repo', index: 1, defaultViewMode: 'split' as WorkflowCanvasViewMode },
-  { id: 'node-run-audit', index: 2, defaultViewMode: 'workbench' as WorkflowCanvasViewMode },
+  { id: 'node-run-audit', index: 2, defaultViewMode: 'split' as WorkflowCanvasViewMode },
   { id: 'node-cluster-risks', index: 3, defaultViewMode: 'workbench' as WorkflowCanvasViewMode },
   { id: 'node-review-approval', index: 4, defaultViewMode: 'workbench' as WorkflowCanvasViewMode },
   { id: 'node-publish-gitlab', index: 5, defaultViewMode: 'workbench' as WorkflowCanvasViewMode }
 ] as const;
 
 export function defaultViewModeForStep(stepIndex: number): WorkflowCanvasViewMode {
-  if (stepIndex <= 1) return 'split';
+  if (stepIndex <= 2) return 'split';
   return 'workbench';
 }

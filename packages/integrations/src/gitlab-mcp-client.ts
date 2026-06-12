@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
+import { gitLabAuthHeaders } from './gitlab-auth';
 import type { GitLabCiHistorySummary, GitLabIssueSummary } from './gitlab-context';
 import { EMPTY_CI_HISTORY } from './gitlab-context';
 
@@ -164,7 +165,7 @@ export async function withGitLabMcpClient<T>(
   fn: (client: Client, toolNames: string[]) => Promise<T>
 ): Promise<T> {
   const headers: Record<string, string> = {
-    'PRIVATE-TOKEN': options.token
+    ...gitLabAuthHeaders(options.token)
   };
   if (options.toolPrefix) {
     headers['X-Gitlab-Mcp-Server-Tool-Name-Prefix'] = options.toolPrefix;

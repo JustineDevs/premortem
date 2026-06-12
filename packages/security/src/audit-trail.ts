@@ -9,15 +9,18 @@ export interface AuditTrailStep {
   timestamp: string;
 }
 
+export type AuditTrailPersistFn = (entry: AuditTrailStep) => Promise<void> | void;
+
 const auditLog: AuditTrailStep[] = [];
 
-export function recordAuditStep(
+export async function recordAuditStep(
   runId: string,
   step: string,
   userId: string,
   status: AuditTrailStatus,
-  detail?: string
-): AuditTrailStep {
+  detail?: string,
+  persist?: AuditTrailPersistFn
+): Promise<AuditTrailStep> {
   const entry: AuditTrailStep = {
     runId,
     step,
@@ -26,14 +29,21 @@ export function recordAuditStep(
     detail,
     timestamp: new Date().toISOString()
   };
-  auditLog.push(entry);
+  if (process.env.NODE_ENV !== 'production') {
+    auditLog.push(entry);
+  }
+  if (persist) {
+    await persist(entry);
+  }
   return entry;
 }
 
 export function listAuditSteps(runId: string): AuditTrailStep[] {
+  if (process.env.NODE_ENV === 'production') return [];
   return auditLog.filter((entry) => entry.runId === runId);
 }
 
 export function clearAuditStepsForTests(): void {
+  if (process.env.NODE_ENV === 'production') return;
   auditLog.length = 0;
 }

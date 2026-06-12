@@ -30,6 +30,9 @@ export async function GET(
 
   if (provider === 'gitlab') {
     const params = new URLSearchParams({ next });
+    if (request.nextUrl.searchParams.get('discover') === '1') {
+      params.set('discover', '1');
+    }
     return NextResponse.redirect(new URL(`/api/integrations/connect/gitlab?${params.toString()}`, request.url));
   }
 

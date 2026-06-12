@@ -50,4 +50,4 @@ Skills: `.agents/skills/engineering/` (mattpocock), `frontend/react-best-practic
 
 ## Brand
 
-Product name: Premortem. Domain: premortem.dev. Do not reference external clone projects in user-facing strings.
+Product name: Premortem. Domain: premortem.jstn.site (temporary production host). Do not reference external clone projects in user-facing strings.

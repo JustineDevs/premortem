@@ -128,7 +128,7 @@ export function EcosystemSection() {
           style={{ objectFit: 'contain' }}
         />
         <p className="framer-1whxnzw landing-ecosystem-body" style={body14}>
-          Platform expansion (coming soon).
+          GitHub sign-in and publishing are available when configured.
         </p>
         <a
           className="framer-uxkj40 landing-ecosystem-link"
@@ -137,7 +137,7 @@ export function EcosystemSection() {
           target="_blank"
           rel="noopener noreferrer"
         >
-          GitHub (soon)
+          GitHub
         </a>
       </div>
     </div>

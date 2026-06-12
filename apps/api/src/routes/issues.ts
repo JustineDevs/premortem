@@ -1,38 +1,69 @@
 import {
+  AuditReadinessError,
   EntitlementError,
   PublishNotApprovedError,
   assertCanPublish,
+  assertGitLabPublishReadiness,
   assertIssueCandidateApprovedForPublish,
   recordReviewAction,
   splitIssueCandidate
 } from '@premortem/db';
-import { ReviewAction, ReviewStatus, allowsPublishDryRun, allowsReconcileDryRun } from '@premortem/domain';
+import { ReviewAction, ReviewStatus, allowsPublishDryRun, allowsReconcileDryRun, skipsPublishEntitlementCheck } from '@premortem/domain';
 import { publishIssueCandidate, reconcilePublishedIssues } from '@premortem/gitlab-sync';
 
 import { resolveApiActorContext } from '../lib/request-context';
 
+function isMissingIssueCandidateError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+
+  const record = error as Error & { code?: string };
+  return (
+    record.code === 'P2025' ||
+    /issue candidate .* not found/i.test(record.message) ||
+    /no issuecandidate found/i.test(record.message)
+  );
+}
+
+function issueCandidateNotFoundResponse(issueCandidateId: string) {
+  return Response.json({ error: `Issue candidate ${issueCandidateId} not found` }, { status: 404 });
+}
+
 export async function handleIssueApprove(request: Request, issueCandidateId: string) {
   const body = (await request.json().catch(() => ({}))) as { notes?: string };
-  const actor = await resolveApiActorContext(request);
-  const action = await recordReviewAction({
-    issueCandidateId,
-    actorId: actor.profileId,
-    actionType: ReviewAction.APPROVE,
-    notes: body.notes
-  });
-  return Response.json({ ok: true, action, reviewerStatus: ReviewStatus.APPROVED });
+  try {
+    const actor = await resolveApiActorContext(request);
+    const action = await recordReviewAction({
+      issueCandidateId,
+      actorId: actor.profileId,
+      actionType: ReviewAction.APPROVE,
+      notes: body.notes
+    });
+    return Response.json({ ok: true, action, reviewerStatus: ReviewStatus.APPROVED });
+  } catch (error) {
+    if (isMissingIssueCandidateError(error)) {
+      return issueCandidateNotFoundResponse(issueCandidateId);
+    }
+    throw error;
+  }
 }
 
 export async function handleIssueReject(request: Request, issueCandidateId: string) {
   const body = (await request.json().catch(() => ({}))) as { notes?: string };
-  const actor = await resolveApiActorContext(request);
-  const action = await recordReviewAction({
-    issueCandidateId,
-    actorId: actor.profileId,
-    actionType: ReviewAction.REJECT,
-    notes: body.notes
-  });
-  return Response.json({ ok: true, action, reviewerStatus: ReviewStatus.REJECTED });
+  try {
+    const actor = await resolveApiActorContext(request);
+    const action = await recordReviewAction({
+      issueCandidateId,
+      actorId: actor.profileId,
+      actionType: ReviewAction.REJECT,
+      notes: body.notes
+    });
+    return Response.json({ ok: true, action, reviewerStatus: ReviewStatus.REJECTED });
+  } catch (error) {
+    if (isMissingIssueCandidateError(error)) {
+      return issueCandidateNotFoundResponse(issueCandidateId);
+    }
+    throw error;
+  }
 }
 
 export async function handleIssueEdit(request: Request, issueCandidateId: string) {
@@ -43,19 +74,26 @@ export async function handleIssueEdit(request: Request, issueCandidateId: string
     recommendedActionSummary?: string;
     deferred?: boolean;
   };
-  const actor = await resolveApiActorContext(request);
-  const action = await recordReviewAction({
-    issueCandidateId,
-    actorId: actor.profileId,
-    actionType: ReviewAction.EDIT,
-    notes: body.notes,
-    payload: body.deferred ? { deferred: true } : body
-  });
-  return Response.json({
-    ok: true,
-    action,
-    reviewerStatus: body.deferred ? ReviewStatus.PENDING : ReviewStatus.EDITED
-  });
+  try {
+    const actor = await resolveApiActorContext(request);
+    const action = await recordReviewAction({
+      issueCandidateId,
+      actorId: actor.profileId,
+      actionType: ReviewAction.EDIT,
+      notes: body.notes,
+      payload: body.deferred ? { deferred: true } : body
+    });
+    return Response.json({
+      ok: true,
+      action,
+      reviewerStatus: body.deferred ? ReviewStatus.PENDING : ReviewStatus.EDITED
+    });
+  } catch (error) {
+    if (isMissingIssueCandidateError(error)) {
+      return issueCandidateNotFoundResponse(issueCandidateId);
+    }
+    throw error;
+  }
 }
 
 export async function handleIssueMerge(request: Request, issueCandidateId: string) {
@@ -71,15 +109,22 @@ export async function handleIssueMerge(request: Request, issueCandidateId: strin
     );
   }
 
-  const actor = await resolveApiActorContext(request);
-  const action = await recordReviewAction({
-    issueCandidateId,
-    actorId: actor.profileId,
-    actionType: ReviewAction.MERGE,
-    notes: body.notes,
-    payload: { mergedIntoIssueCandidateId: body.mergedIntoIssueCandidateId }
-  });
-  return Response.json({ ok: true, action, reviewerStatus: ReviewStatus.REJECTED });
+  try {
+    const actor = await resolveApiActorContext(request);
+    const action = await recordReviewAction({
+      issueCandidateId,
+      actorId: actor.profileId,
+      actionType: ReviewAction.MERGE,
+      notes: body.notes,
+      payload: { mergedIntoIssueCandidateId: body.mergedIntoIssueCandidateId }
+    });
+    return Response.json({ ok: true, action, reviewerStatus: ReviewStatus.REJECTED });
+  } catch (error) {
+    if (isMissingIssueCandidateError(error)) {
+      return issueCandidateNotFoundResponse(issueCandidateId);
+    }
+    throw error;
+  }
 }
 
 export async function handleIssueSplit(request: Request, issueCandidateId: string) {
@@ -96,23 +141,30 @@ export async function handleIssueSplit(request: Request, issueCandidateId: strin
     );
   }
 
-  const actor = await resolveApiActorContext(request);
-  const result = await splitIssueCandidate({
-    issueCandidateId,
-    actorId: actor.profileId,
-    title,
-    notes: body.notes
-  });
+  try {
+    const actor = await resolveApiActorContext(request);
+    const result = await splitIssueCandidate({
+      issueCandidateId,
+      actorId: actor.profileId,
+      title,
+      notes: body.notes
+    });
 
-  return Response.json({
-    ok: true,
-    action: result.action,
-    childIssueCandidate: {
-      id: result.child.id,
-      title: result.child.title,
-      reviewerStatus: result.child.reviewerStatus
+    return Response.json({
+      ok: true,
+      action: result.action,
+      childIssueCandidate: {
+        id: result.child.id,
+        title: result.child.title,
+        reviewerStatus: result.child.reviewerStatus
+      }
+    });
+  } catch (error) {
+    if (isMissingIssueCandidateError(error)) {
+      return issueCandidateNotFoundResponse(issueCandidateId);
     }
-  });
+    throw error;
+  }
 }
 
 export async function handleIssuePublish(request: Request, issueCandidateId: string) {
@@ -120,21 +172,36 @@ export async function handleIssuePublish(request: Request, issueCandidateId: str
 
   try {
     const { prisma } = await import('@premortem/db');
-    const candidate = await prisma.issueCandidate.findUniqueOrThrow({
+    const candidate = await prisma.issueCandidate.findUnique({
       where: { id: issueCandidateId },
-      select: { project: { select: { organizationId: true } } }
+      select: { projectId: true, project: { select: { organizationId: true } } }
     });
+    if (!candidate) {
+      return issueCandidateNotFoundResponse(issueCandidateId);
+    }
     await assertIssueCandidateApprovedForPublish(issueCandidateId);
-    await assertCanPublish(candidate.project.organizationId);
+    if (!skipsPublishEntitlementCheck()) {
+      await assertCanPublish(candidate.project.organizationId);
+    }
+    await assertGitLabPublishReadiness(candidate.projectId);
   } catch (error) {
     if (error instanceof EntitlementError) {
       return Response.json({ error: error.message, code: error.code }, { status: error.status });
+    }
+    if (error instanceof AuditReadinessError) {
+      return Response.json(
+        { error: error.message, code: error.code, field: error.field, system: error.system },
+        { status: 422 }
+      );
     }
     if (error instanceof PublishNotApprovedError) {
       return Response.json(
         { error: error.message, code: error.code, field: error.field },
         { status: error.status }
       );
+    }
+    if (isMissingIssueCandidateError(error)) {
+      return issueCandidateNotFoundResponse(issueCandidateId);
     }
     throw error;
   }

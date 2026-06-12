@@ -1,3 +1,5 @@
+import { gitLabAuthHeaders } from './gitlab-auth';
+
 export interface GitLabJobSummary {
   id: number;
   name: string;
@@ -47,7 +49,7 @@ export const EMPTY_CI_HISTORY: GitLabCiHistorySummary = {
 
 async function gitlabRequest(baseUrl: string, token: string, apiPath: string) {
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/v4${apiPath}`, {
-    headers: { 'PRIVATE-TOKEN': token }
+    headers: gitLabAuthHeaders(token)
   });
 
   if (!response.ok) {

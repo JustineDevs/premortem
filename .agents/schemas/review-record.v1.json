@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://premortem.dev/schemas/review-record.v1.json",
+  "$id": "https://premortem.jstn.site/schemas/review-record.v1.json",
   "title": "Premortem Review Record v1",
   "type": "object",
   "required": ["id", "issue_candidate_id", "action", "reviewer", "timestamp"],

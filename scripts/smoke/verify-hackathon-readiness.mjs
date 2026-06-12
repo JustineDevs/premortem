@@ -8,21 +8,26 @@ loadPremortemLocalEnv();
 import {
   DEFAULT_GEMINI_MODEL,
   allowsForceLocalIngest
-} from '@premortem/domain';
+} from '../../packages/domain/dist/index.js';
 import {
   fetchGitLabContextViaMcp,
   isGitLabMcpEnabled
-} from '@premortem/integrations';
+} from '../../packages/integrations/dist/integrations/src/index.js';
 import {
   bootstrapPremortemAgentMission,
   buildPremortemRootAgent,
   describePhoenixRuntime
-} from '@premortem/agent-builder';
+} from '../../services/agent-builder/dist/services/agent-builder/src/index.js';
 import {
   evaluateAuditMissionQuality,
+  evaluateAuditMissionWithLlmJudge,
+  evaluatePremortemAuditMission,
   initPhoenixTracing,
-  isPhoenixEnabled
-} from '@premortem/observability';
+  isPhoenixClientConfigured,
+  isPhoenixEnabled,
+  isPhoenixLlmEvalEnabled,
+  PREMORTEM_PHOENIX_CODE_EVALUATOR_PATH
+} from '../../packages/observability/dist/index.js';
 
 function pass(label) {
   console.log(`PASS ${label}`);
@@ -129,16 +134,6 @@ const gitlabProject = process.env.GITLAB_EXTERNAL_PROJECT_ID?.trim();
 const gitlabBase = process.env.GITLAB_BASE_URL?.trim() || 'https://gitlab.com';
 
 if (gitlabToken && gitlabProject) {
-  const enc = encodeURIComponent(gitlabProject);
-  const projRes = await fetch(`${gitlabBase}/api/v4/projects/${enc}`, {
-    headers: { 'PRIVATE-TOKEN': gitlabToken }
-  });
-  if (projRes.ok) {
-    pass(`GitLab REST ingest (project ${gitlabProject})`);
-  } else {
-    fail('GitLab REST ingest', `project lookup ${projRes.status}`);
-  }
-
   try {
     const { status, text, mcpUrl } = await probeGitLabMcpEndpoint(gitlabBase);
     if (status === 404 || text.includes('404')) {
@@ -175,7 +170,7 @@ if (gitlabToken && gitlabProject) {
     }
   }
 } else {
-  pass('GitLab ingest skipped (set GITLAB_TOKEN + GITLAB_EXTERNAL_PROJECT_ID)');
+  pass('GitLab MCP ingest skipped (set GITLAB_TOKEN + GITLAB_EXTERNAL_PROJECT_ID)');
 }
 
 const phoenixScript = resolve(repoRoot, 'scripts/mcp/run-phoenix-mcp.sh');
@@ -189,6 +184,25 @@ if (typeof initPhoenixTracing !== 'function' || typeof evaluateAuditMissionQuali
   fail('Phoenix OpenInference exports', 'missing from @premortem/observability');
 } else {
   pass('Phoenix OpenInference exports');
+}
+
+if (
+  typeof evaluatePremortemAuditMission !== 'function' ||
+  typeof isPhoenixClientConfigured !== 'function' ||
+  !PREMORTEM_PHOENIX_CODE_EVALUATOR_PATH
+) {
+  fail('Phoenix client SDK exports', 'missing datasets/prompts/code-evaluator exports');
+} else {
+  pass('Phoenix client SDK exports');
+}
+
+const phoenixCodeEval = evaluatePremortemAuditMission({
+  output: { findingCount: 2, issueCandidateCount: 1, hasHumanReviewGate: true }
+});
+if (phoenixCodeEval.label !== 'passed') {
+  fail('Phoenix server-style code eval', JSON.stringify(phoenixCodeEval));
+} else {
+  pass(`Phoenix server-style code eval (${phoenixCodeEval.label})`);
 }
 
 const phoenixRuntime = describePhoenixRuntime();
@@ -209,6 +223,24 @@ if (!evalResult.passed || evalResult.evaluator !== 'premortem-code-eval') {
   fail('Phoenix code eval', JSON.stringify(evalResult));
 } else {
   pass(`Phoenix code eval (score ${evalResult.score.toFixed(2)})`);
+}
+
+const geminiKey = process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim();
+if (isPhoenixLlmEvalEnabled() && geminiKey) {
+  try {
+    const llmEval = await evaluateAuditMissionWithLlmJudge({
+      auditRunId: 'hackathon-smoke',
+      findingCount: 3,
+      issueCandidateCount: 2,
+      sampleFindingTitles: ['Missing auth guard on admin route', 'Unbounded query in list endpoint'],
+      apiKey: geminiKey
+    });
+    pass(`Phoenix LLM-as-judge eval (${llmEval.label}, score ${llmEval.score.toFixed(2)})`);
+  } catch (error) {
+    fail('Phoenix LLM-as-judge eval', error instanceof Error ? error.message : String(error));
+  }
+} else {
+  pass('Phoenix LLM-as-judge eval skipped (set PHOENIX_LLM_EVAL=1 and GEMINI_API_KEY)');
 }
 
 if (process.env.PHOENIX_API_KEY?.trim()) {

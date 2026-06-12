@@ -1,4 +1,6 @@
 import { prisma, resolveGitHubCredentialsForProject } from '@premortem/db';
+import { createOrganizationNotifications } from '@premortem/db';
+import { recordUsageEvent } from '@premortem/db';
 import {
   createGitHubIssue,
   ensureGitHubLabels,
@@ -119,6 +121,40 @@ export async function publishIssueCandidateToGitHub(issue: PublishableIssue) {
       labels: attributes.labels,
       publishedAt: new Date(),
       lastSyncedAt: new Date()
+    }
+  });
+
+  await createOrganizationNotifications({
+    organizationId: issue.organizationId,
+    projectId: issue.projectId,
+    kind: 'issue_published',
+    title: `Published to GitHub: ${issue.title}`,
+    body: `Issue ${issue.id} was published to GitHub as #${created.number}.`,
+    url: created.html_url,
+    metadata: {
+      provider: 'github',
+      auditRunId: issue.auditRunId,
+      issueCandidateId: issue.id,
+      publishedIssueId: publishedIssue.id
+    }
+  }).catch((error) => {
+    console.warn(
+      '[publish-to-github] notification fanout failed:',
+      error instanceof Error ? error.message : error
+    );
+  });
+
+  await recordUsageEvent({
+    organizationId: issue.organizationId,
+    projectId: issue.projectId,
+    auditRunId: issue.auditRunId,
+    eventType: 'publish',
+    quantity: 1,
+    unit: 'issue',
+    metadata: {
+      provider: 'github',
+      issueCandidateId: issue.id,
+      externalIssueId: String(created.id)
     }
   });
 

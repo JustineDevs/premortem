@@ -110,6 +110,11 @@ async function main() {
     PREMORTEM_EXECUTOR:
       process.env.PREMORTEM_EXECUTOR ??
       (process.env.GEMINI_API_KEY || process.env.AZURE_OPENAI_API_KEY ? 'llm' : undefined),
+    ...(useFixtureDefaults
+      ? { PREMORTEM_PUBLISH_DRY_RUN: process.env.PREMORTEM_PUBLISH_DRY_RUN ?? '1' }
+      : process.env.PREMORTEM_PUBLISH_DRY_RUN
+        ? { PREMORTEM_PUBLISH_DRY_RUN: process.env.PREMORTEM_PUBLISH_DRY_RUN }
+        : {}),
     HOSTNAME: '127.0.0.1',
     PORT: webPort
   };

@@ -36,7 +36,7 @@ export function Sidebar({
     { id: 'audits', label: 'Audits & Tracing', icon: ShieldAlert, badge: runningAudits > 0 ? 'Active' : undefined },
     { id: 'canvas', label: 'Workflow Canvas', icon: Workflow },
     { id: 'history', label: 'Audit History Logs', icon: History },
-    { id: 'sandbox', label: 'AI Code Playground', icon: Terminal, highlight: true },
+    { id: 'sandbox', label: 'AI Code Playground', icon: Terminal },
     { id: 'settings', label: 'Integrations & Scope', icon: Settings2 }
   ];
 
@@ -81,9 +81,6 @@ export function Sidebar({
                 <span className="px-1.5 py-0.5 text-[9px] font-mono uppercase bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-sm">
                   {item.badge}
                 </span>
-              )}
-              {item.highlight && !isActive && (
-                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
               )}
             </button>
           );

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { bffErrorResponse } from '@/lib/server/bff-errors';
 import {
   fetchRuntimeAudits,
   fetchRuntimeProjects
@@ -18,7 +19,7 @@ export async function GET(request: Request) {
   const limit = Number(url.searchParams.get('limit') ?? '24');
 
   try {
-    const context = await resolveRequestActorContext();
+    const context = await resolveRequestActorContext(request);
     const headers = actorHeaders(context);
     const [auditRuns, projects] = await Promise.all([
       fetchRuntimeAudits(limit, headers),
@@ -47,9 +48,6 @@ export async function GET(request: Request) {
       riskClusters: hydrated.riskClusters
     });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to load audits' },
-      { status: error instanceof Error && error.message === 'Unauthorized' ? 401 : 502 }
-    );
+    return bffErrorResponse(error, 'Failed to load audits');
   }
 }

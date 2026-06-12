@@ -7,8 +7,10 @@
 import net from 'node:net';
 import { loadPremortemLocalEnv } from '../load-local-env.mjs';
 import { hasConfiguredRuntimeCredentials } from '../lib/configured-env.mjs';
+import { probePhoenixEndpoint } from '../../packages/observability/dist/index.js';
 
 const ROOT = loadPremortemLocalEnv();
+const DEFAULT_GITLAB_EXTERNAL_PROJECT_ID = 'jstn-studio/meta-architect';
 
 function env(name) {
   return process.env[name]?.trim() || '';
@@ -94,30 +96,9 @@ async function checkAzureOpenAI() {
   return row('Azure OpenAI', 'FAIL', `${res.status} ${errText.slice(0, 120)}`);
 }
 
-async function checkGitLab() {
-  const token = env('GITLAB_TOKEN');
-  const project = env('GITLAB_EXTERNAL_PROJECT_ID');
-  const base = env('GITLAB_BASE_URL') || 'https://gitlab.com';
-  if (!token) return row('GitLab REST', 'MISSING', 'GITLAB_TOKEN');
-  const res = await fetch(`${base}/api/v4/user`, {
-    headers: { 'PRIVATE-TOKEN': token }
-  });
-  if (!res.ok) return row('GitLab REST', 'FAIL', `${res.status}`);
-  let detail = 'token valid';
-  if (project) {
-    const enc = encodeURIComponent(project);
-    const proj = await fetch(`${base}/api/v4/projects/${enc}`, {
-      headers: { 'PRIVATE-TOKEN': token }
-    });
-    detail = proj.ok ? `project ${project}` : `project lookup ${proj.status}`;
-  }
-  return row('GitLab REST', 'OK', detail);
-}
-
 async function checkGitLabMcpServer() {
   const base = env('GITLAB_BASE_URL') || 'https://gitlab.com';
   const mcpUrl = `${base.replace(/\/$/, '')}/api/v4/mcp`;
-  const hasPat = Boolean(env('GITLAB_TOKEN'));
   const mcpRuntimeEnabled = env('PREMORTEM_GITLAB_MCP') !== '0';
 
   // GitLab documents MCP auth as OAuth 2.0 in MCP clients (Cursor), not PAT scope UI.
@@ -149,18 +130,12 @@ async function checkGitLabMcpServer() {
     );
   }
 
-  const restIngest = hasPat
-    ? 'Premortem runtime ingest uses GITLAB_TOKEN via REST (see GitLab REST row)'
-    : 'Set GITLAB_TOKEN for Premortem REST ingest';
-
   if (res.status === 401 || /unauthorized/i.test(text)) {
-    const runtime = mcpRuntimeEnabled
-      ? `${restIngest}; orchestrator may attempt MCP then REST fallback`
-      : `${restIngest}; PREMORTEM_GITLAB_MCP=0`;
+    const runtime = mcpRuntimeEnabled ? 'Orchestrator uses GitLab MCP for issue/pipeline context.' : 'PREMORTEM_GITLAB_MCP=0';
     return row(
       'GitLab MCP server',
       'OK',
-      `Endpoint reachable at ${mcpUrl}; connect Cursor via OAuth (not PAT). ${runtime}.`
+      `Endpoint reachable at ${mcpUrl}; connect Cursor via OAuth (not PAT). ${runtime}`
     );
   }
 
@@ -169,6 +144,49 @@ async function checkGitLabMcpServer() {
   }
 
   return row('GitLab MCP server', 'WARN', `${res.status} ${text.slice(0, 120)}`);
+}
+
+async function checkGitLab() {
+  const project = env('GITLAB_EXTERNAL_PROJECT_ID');
+  const base = env('GITLAB_BASE_URL') || 'https://gitlab.com';
+  const mcpUrl = `${base.replace(/\/$/, '')}/api/v4/mcp`;
+  if (!env('GITLAB_TOKEN') && !env('GITLAB_CLIENT_ID') && !env('GITLAB_CLIENT_SECRET')) {
+    return row('GitLab MCP usage', 'MISSING', 'GITLAB_TOKEN or GitLab OAuth credentials');
+  }
+
+  const res = await fetch(mcpUrl, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream'
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'premortem-verify', version: '1.0.0' }
+      }
+    })
+  });
+
+  const text = await res.text();
+  if (res.status === 404 || text.includes('404')) {
+    return row('GitLab MCP usage', 'WARN', 'POST /api/v4/mcp returned 404 — enable GitLab Duo + beta/experimental on your group');
+  }
+  if (res.status === 401 || /unauthorized/i.test(text) || (res.status >= 200 && res.status < 300)) {
+    if (project === DEFAULT_GITLAB_EXTERNAL_PROJECT_ID) {
+      return row(
+        'GitLab MCP usage',
+        'WARN',
+        `project ${project} is the local demo default; set GITLAB_EXTERNAL_PROJECT_ID to your real Premortem target`
+      );
+    }
+    return row('GitLab MCP usage', 'OK', `project ${project || 'n/a'} via ${mcpUrl}`);
+  }
+  return row('GitLab MCP usage', 'WARN', `${res.status} ${text.slice(0, 120)}`);
 }
 
 async function checkSupabase() {
@@ -198,8 +216,17 @@ async function checkPhoenix() {
     return row('Arize Phoenix', 'MISSING', 'PHOENIX_API_KEY');
   }
   const project = env('PHOENIX_PROJECT_NAME') || 'premortem';
-  const mcp = env('PHOENIX_MCP_BASE_URL') || env('PHOENIX_COLLECTOR_ENDPOINT');
-  return row('Arize Phoenix', 'OK', `project ${project}${mcp ? `; MCP ${mcp}` : ''}`);
+  const probe = await probePhoenixEndpoint();
+  if (probe.ok) {
+    const version = probe.serverVersion ? `; version ${probe.serverVersion}` : '';
+    const contentType = probe.contentType ? `; ${probe.contentType}` : '';
+    return row('Arize Phoenix', 'OK', `project ${project}; MCP ${probe.baseUrl}${version}${contentType}`);
+  }
+
+  const detail =
+    probe.error ||
+    `status ${probe.status}${probe.serverVersion ? `; version ${probe.serverVersion}` : ''}`;
+  return row('Arize Phoenix', 'FAIL', detail);
 }
 
 async function checkLangfuse() {

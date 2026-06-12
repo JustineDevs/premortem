@@ -2,20 +2,18 @@ import { NextResponse } from 'next/server';
 
 import { fetchRuntimeProjects } from '@/lib/premortem-api/client';
 import { mapRuntimeProject } from '@/lib/premortem-api/map-runtime-to-console';
+import { bffErrorResponse } from '@/lib/server/bff-errors';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
 import { proxyPremortemApiOrUnauthorized } from '@/lib/server/proxy-api';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const context = await resolveRequestActorContext();
+    const context = await resolveRequestActorContext(request);
     const headers = actorHeaders(context);
     const projects = await fetchRuntimeProjects(headers);
     return NextResponse.json(projects.map((project) => mapRuntimeProject(project as Record<string, unknown>)));
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to load projects' },
-      { status: error instanceof Error && error.message === 'Unauthorized' ? 401 : 502 }
-    );
+    return bffErrorResponse(error, 'Failed to load projects');
   }
 }
 

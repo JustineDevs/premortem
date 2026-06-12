@@ -114,7 +114,16 @@ At the system level, those responsibilities map to cooperating layers:
 <details open>
 <summary><strong>Quick Start</strong></summary>
 
-### 1. Prerequisites
+### Try the hosted app (recommended for judges and new users)
+
+1. Open **[premortem.jstn.site/signup](https://premortem.jstn.site/signup)** and sign in with GitLab.
+2. In **Settings → Integrations**, grant repository access (read_repository).
+3. In **Projects**, enable a repository or add a public GitLab repo, then run a scan from **Audits**.
+
+Source code: [github.com/JustineDevs/premortem](https://github.com/JustineDevs/premortem)
+
+### Run locally (developers)
+
 
 - Node.js 20+
 - pnpm 9.12+
@@ -323,7 +332,7 @@ Diátaxis docs hub (in app): `/docs` with tutorials, guides, reference, concepts
 | --- | --- |
 | Author | `@Justinedevs` |
 | Email | `justinedevs@jstn.site` |
-| Domain | `premortem.dev` |
+| Domain | `premortem.jstn.site` |
 | Repository | [github.com/JustineDevs/premortem](https://github.com/JustineDevs/premortem) |
 
 ---
@@ -366,9 +375,9 @@ Premortem is built on open source, managed services, and community projects. We 
 | Project | Role in Premortem |
 | --- | --- |
 | <a href="https://ai.google.dev/"><img src="https://cdn.simpleicons.org/googlegemini/8E75B2" alt="Google Gemini" width="28" height="28" align="middle" /></a> [Google Gemini API](https://ai.google.dev/) | Primary LLM executor for specialist swarm |
-| [@premortem/orchestrator](./services/orchestrator/) | Queue-backed audit pipeline, specialist swarm, clustering, and publish path (primary runtime) |
+| <a href="./services/orchestrator/"><img src="./public/logo/png/Premortem_abstract.png" alt="Premortem orchestrator" width="28" height="28" align="middle" /></a> [@premortem/orchestrator](./services/orchestrator/) | Queue-backed audit pipeline, specialist swarm, clustering, and publish path (primary runtime) |
 | [Optional `services/agent-builder`](./services/agent-builder/) | Mission trace bootstrap hooks used by the orchestrator; not the sole production runtime |
-| <a href="https://azure.microsoft.com/products/ai-services/openai-service"><img src="https://cdn.simpleicons.org/microsoftazure/0078D4" alt="Azure OpenAI" width="28" height="28" align="middle" /></a> [Azure OpenAI](https://azure.microsoft.com/products/ai-services/openai-service) | Optional alternate LLM backend |
+| <a href="https://azure.microsoft.com/products/ai-services/openai-service"><img src="https://cdn.simpleicons.org/microsoftazure/0078D4" alt="Microsoft Azure" width="28" height="28" align="middle" /></a> [Azure OpenAI](https://azure.microsoft.com/products/ai-services/openai-service) | Optional alternate LLM backend |
 | <a href="https://zod.dev/"><img src="https://cdn.simpleicons.org/zod/3E67B1" alt="Zod" width="28" height="28" align="middle" /></a> [Zod](https://zod.dev/) | Structured LLM and API output validation |
 | <a href="https://www.promptfoo.dev/"><img src="https://www.promptfoo.dev/favicon.ico" alt="promptfoo" width="28" height="28" align="middle" /></a> [promptfoo](https://www.promptfoo.dev/) | Canonical prompt evaluation gate (`pnpm run eval:prompts`) |
 
@@ -379,7 +388,7 @@ Premortem is built on open source, managed services, and community projects. We 
 | <a href="https://sentry.io/"><img src="https://cdn.simpleicons.org/sentry/362D59" alt="Sentry" width="28" height="28" align="middle" /></a> [Sentry](https://sentry.io/) | Error tracking (web + API) |
 | <a href="https://posthog.com/"><img src="https://cdn.simpleicons.org/posthog/000000" alt="PostHog" width="28" height="28" align="middle" /></a> [PostHog](https://posthog.com/) | Product analytics and funnel events |
 | <a href="https://langfuse.com/"><img src="https://langfuse.com/favicon.ico" alt="Langfuse" width="28" height="28" align="middle" /></a> [Langfuse](https://langfuse.com/) | LLM trace and prompt observability hooks |
-| <a href="https://phoenix.arize.com/"><img src="https://phoenix.arize.com/favicon.ico" alt="Arize Phoenix" width="28" height="28" align="middle" /></a> [Arize Phoenix](https://phoenix.arize.com/) + [OpenInference](https://github.com/Arize-ai/openinference) | Tracing, evals, and runtime introspection |
+| <a href="https://phoenix.arize.com/"><img src="https://phoenix.arize.com/favicon.ico" alt="Arize Phoenix" width="28" height="28" align="middle" /></a> [Arize Phoenix](https://phoenix.arize.com/) + [OpenInference](https://github.com/Arize-ai/openinference) | Tracing, evals, runtime MCP introspection ([guide](./docs/guides/phoenix-arize-track.md)) |
 
 #### Reviewer console UI
 
@@ -408,4 +417,4 @@ If we missed a dependency you rely on, please open an issue or PR to extend this
 
 ## License
 
-See the license file in the public release bundle on GitHub: [JustineDevs/premortem](https://github.com/JustineDevs/premortem/blob/main/LICENSE).
+[LICENSE](./LICENSE)

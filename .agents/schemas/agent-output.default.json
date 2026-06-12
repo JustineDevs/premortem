@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://premortem.dev/schemas/agent-output.default.json",
+  "$id": "https://premortem.jstn.site/schemas/agent-output.default.json",
   "title": "Premortem Default Agent Output",
   "type": "object",
   "required": ["status", "scope", "observations", "findings", "uncertainties", "recommended_next_actions"],

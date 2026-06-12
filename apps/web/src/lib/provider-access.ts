@@ -15,7 +15,7 @@ export function resolveGitLabAccessState(
 ): ProviderAccessState {
   const integration =
     integrations?.find(
-      (item) => item.provider === 'gitlab' && item.status !== 'disconnected'
+      (item) => item.provider === 'gitlab' && item.status === 'connected'
     ) ?? null;
 
   return {

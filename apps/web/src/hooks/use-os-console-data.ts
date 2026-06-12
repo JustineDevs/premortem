@@ -3,28 +3,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { WorkspaceBundle } from '@/hooks/workspace-types';
+import { bffFetchJson, isUnauthorizedBffError, readBffErrorMessage } from '@/lib/bff-client';
 import type { AuditRun, Project, ProviderType } from '@/lib/premortem-os/types';
 import { CanonicalEvents, trackOsEvent } from '@/providers/posthog-provider';
 import type { ConsoleReviewActionValue } from '@premortem/domain';
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
-  }
-  return response.json() as Promise<T>;
-}
-
 export function useOsConsoleData() {
   const projectsQuery = useQuery({
     queryKey: ['os', 'projects'],
-    queryFn: () => fetchJson<Project[]>('/api/projects')
+    queryFn: () => bffFetchJson<Project[]>('/api/projects')
   });
 
   const auditsQuery = useQuery({
     queryKey: ['os', 'audits'],
     queryFn: async () => {
-      const payload = await fetchJson<{ audits?: AuditRun[]; riskClusters?: unknown[] } | AuditRun[]>(
+      const payload = await bffFetchJson<{ audits?: AuditRun[]; riskClusters?: unknown[] } | AuditRun[]>(
         '/api/audits?hydrate=1&limit=12'
       );
       if (Array.isArray(payload)) {
@@ -46,16 +39,32 @@ export function useOsConsoleData() {
 
   const healthQuery = useQuery({
     queryKey: ['os', 'health'],
-    queryFn: () => fetchJson<{ apiHealthy?: boolean }>('/api/health'),
+    queryFn: () => bffFetchJson<{ apiHealthy?: boolean }>('/api/health'),
     staleTime: 60_000
   });
+
+  const projectsError = projectsQuery.error;
+  const auditsError = auditsQuery.error;
+  const authError =
+    isUnauthorizedBffError(projectsError) || isUnauthorizedBffError(auditsError)
+      ? projectsError ?? auditsError
+      : null;
+  const loadError =
+    projectsError && !isUnauthorizedBffError(projectsError)
+      ? projectsError
+      : auditsError && !isUnauthorizedBffError(auditsError)
+        ? auditsError
+        : null;
 
   return {
     projects: projectsQuery.data ?? [],
     audits: auditsQuery.data?.audits ?? [],
     riskClusters: auditsQuery.data?.riskClusters ?? [],
-    isLoading: projectsQuery.isLoading || auditsQuery.isLoading,
-    error: projectsQuery.error ?? auditsQuery.error,
+    isLoading: projectsQuery.isLoading,
+    isAuditsLoading: auditsQuery.isLoading,
+    error: authError ?? loadError,
+    authError,
+    loadError,
     apiHealthy: healthQuery.data?.apiHealthy ?? null,
     refetchAudits: auditsQuery.refetch,
     refetchProjects: projectsQuery.refetch
@@ -66,7 +75,7 @@ export function useWorkspaceQuery() {
   return useQuery({
     queryKey: ['os', 'workspace'],
     queryFn: async () => {
-      const payload = await fetchJson<{ workspace: WorkspaceBundle }>('/api/workspace');
+      const payload = await bffFetchJson<{ workspace: WorkspaceBundle }>('/api/workspace');
       return payload.workspace;
     }
   });
@@ -85,7 +94,9 @@ export function useWorkspaceMutations() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body)
     });
-    if (!response.ok) throw new Error(`Failed to save ${path}`);
+    if (!response.ok) {
+      throw new Error(await readBffErrorMessage(response, `Failed to save ${path}`));
+    }
     invalidate();
   };
 
@@ -104,6 +115,28 @@ export function useWorkspaceMutations() {
       patch('/api/workspace/organization', organization),
     patchBillingPlan: (plan: 'free' | 'pro' | 'team' | 'enterprise') =>
       patch('/api/workspace/billing', { plan }),
+    createApiKey: async (label: string) => {
+      const response = await fetch('/api/workspace/api-keys', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ label })
+      });
+      if (!response.ok) {
+        throw new Error(await readBffErrorMessage(response, 'Failed to create API key.'));
+      }
+      invalidate();
+      return response.json() as Promise<{ ok: true; apiKey: { apiKey: string; key: { id: string; label: string; keyPrefix: string } } }>;
+    },
+    revokeApiKey: async (keyId: string) => {
+      const response = await fetch(`/api/workspace/api-keys/${keyId}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok) {
+        throw new Error(await readBffErrorMessage(response, 'Failed to revoke API key.'));
+      }
+      invalidate();
+      return response.json() as Promise<{ ok: true }>;
+    },
     registerIntegration: async (input: {
       provider?: 'gitlab' | 'github';
       externalAccountName: string;
@@ -115,13 +148,17 @@ export function useWorkspaceMutations() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(input)
       });
-      if (!response.ok) throw new Error('Failed to register integration.');
+      if (!response.ok) {
+        throw new Error(await readBffErrorMessage(response, 'Failed to register integration.'));
+      }
       trackOsEvent(CanonicalEvents.integrationRegistered, { provider: input.provider ?? 'gitlab' });
       invalidate();
     },
     syncIntegration: async (integrationId: string) => {
       const response = await fetch(`/api/workspace/integrations/${integrationId}/sync`, { method: 'POST' });
-      if (!response.ok) throw new Error('Failed to sync integration.');
+      if (!response.ok) {
+        throw new Error(await readBffErrorMessage(response, 'Failed to sync integration.'));
+      }
       trackOsEvent(CanonicalEvents.integrationSynced, { integrationId });
       invalidate();
     },
@@ -146,7 +183,9 @@ export function useWorkspaceMutations() {
     reconcileIssues: useMutation({
       mutationFn: async () => {
         const response = await fetch('/api/issues/reconcile', { method: 'POST' });
-        if (!response.ok) throw new Error('Reconciliation failed.');
+        if (!response.ok) {
+          throw new Error(await readBffErrorMessage(response, 'Reconciliation failed.'));
+        }
         return response.json();
       },
       onSuccess: (result) => {
@@ -157,7 +196,9 @@ export function useWorkspaceMutations() {
     cancelAudit: useMutation({
       mutationFn: async (auditRunId: string) => {
         const response = await fetch(`/api/audits/${auditRunId}/cancel`, { method: 'POST' });
-        if (!response.ok) throw new Error('Failed to cancel audit.');
+        if (!response.ok) {
+          throw new Error(await readBffErrorMessage(response, 'Failed to cancel audit.'));
+        }
         return response.json();
       },
       onSuccess: () => {
@@ -168,7 +209,9 @@ export function useWorkspaceMutations() {
     pauseAudit: useMutation({
       mutationFn: async (auditRunId: string) => {
         const response = await fetch(`/api/audits/${auditRunId}/pause`, { method: 'POST' });
-        if (!response.ok) throw new Error('Failed to pause audit.');
+        if (!response.ok) {
+          throw new Error(await readBffErrorMessage(response, 'Failed to pause audit.'));
+        }
         return response.json();
       },
       onSuccess: () => {
@@ -179,7 +222,9 @@ export function useWorkspaceMutations() {
     resumeAudit: useMutation({
       mutationFn: async (auditRunId: string) => {
         const response = await fetch(`/api/audits/${auditRunId}/resume`, { method: 'POST' });
-        if (!response.ok) throw new Error('Failed to resume audit.');
+        if (!response.ok) {
+          throw new Error(await readBffErrorMessage(response, 'Failed to resume audit.'));
+        }
         return response.json();
       },
       onSuccess: () => {
@@ -190,7 +235,9 @@ export function useWorkspaceMutations() {
     stopAllRuntime: useMutation({
       mutationFn: async () => {
         const response = await fetch('/api/workspace/runtime/stop-all', { method: 'POST' });
-        if (!response.ok) throw new Error('Failed to stop runtime.');
+        if (!response.ok) {
+          throw new Error(await readBffErrorMessage(response, 'Failed to stop runtime.'));
+        }
         return response.json();
       },
       onSuccess: () => {
@@ -205,7 +252,7 @@ export function useReconciliationEvents() {
   return useQuery({
     queryKey: ['os', 'reconciliation'],
     queryFn: () =>
-      fetchJson<{ events: Array<{
+      bffFetchJson<{ events: Array<{
         id: string;
         status: string;
         driftFields: string[];
@@ -258,7 +305,10 @@ export function useRepositoryDiscoveryMutations() {
         );
         const payload = await response.json();
         if (!response.ok && !payload.enabled?.length) {
-          throw new Error(payload.error || 'Failed to enable repositories.');
+          const detail =
+            payload.errors?.map((entry: { error?: string }) => entry.error).filter(Boolean).join(' ') ||
+            payload.error;
+          throw new Error(detail || 'Failed to enable repositories.');
         }
         return payload as {
           enabled: Array<{ id: string; externalProjectId: string; name: string }>;
@@ -334,7 +384,9 @@ export function useAuditMutations() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(input)
         });
-        if (!response.ok) throw new Error('Unable to register repository resource.');
+        if (!response.ok) {
+          throw new Error(await readBffErrorMessage(response, 'Unable to register repository resource.'));
+        }
         return response.json() as Promise<Project>;
       },
       onSuccess: () => {
@@ -358,6 +410,7 @@ export function useAuditMutations() {
       },
       onSuccess: (_result, variables) => {
         trackOsEvent(CanonicalEvents.auditTriggered, variables);
+        if (variables.customSnippet?.trim()) return;
         invalidateAudits();
         invalidateProjects();
       }
@@ -373,7 +426,9 @@ export function useAuditMutations() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: input.action })
         });
-        if (!response.ok) throw new Error('Failed to update finding.');
+        if (!response.ok) {
+          throw new Error(await readBffErrorMessage(response, 'Failed to update finding.'));
+        }
         return response.json();
       },
       onSuccess: (_result, variables) => {
@@ -418,7 +473,9 @@ export function useAuditMutations() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ issueId: input.issueId })
         });
-        if (!response.ok) throw new Error('Patch deployment request failure.');
+        if (!response.ok) {
+          throw new Error(await readBffErrorMessage(response, 'Patch deployment request failed.'));
+        }
         return response.json();
       },
       onSuccess: () => invalidateAudits()

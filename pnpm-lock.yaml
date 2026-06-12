@@ -44,6 +44,9 @@ importers:
       '@premortem/orchestrator':
         specifier: workspace:*
         version: link:../../services/orchestrator
+      '@premortem/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       '@premortem/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
@@ -295,6 +298,9 @@ importers:
 
   packages/observability:
     dependencies:
+      '@arizeai/phoenix-client':
+        specifier: ^6.10.0
+        version: 6.10.0(@anthropic-ai/sdk@0.98.0(zod@4.4.3))(@opentelemetry/api@1.9.1)(@opentelemetry/semantic-conventions@1.41.1)(ai@6.0.200(zod@4.4.3))(openai@6.42.0(ws@8.21.0)(zod@4.4.3))
       '@arizeai/phoenix-otel':
         specifier: ^1.0.2
         version: 1.0.2(@opentelemetry/semantic-conventions@1.41.1)
@@ -549,6 +555,25 @@ packages:
     resolution: {integrity: sha512-iShJM8C+R959Ei9sUt8/2BE301W5Px06nYKY+7tCMbm7M0MjRPibrjLyZi6n+Hnd8U3zBE4vYXzAIdE0Z6ZTiQ==}
     peerDependencies:
       '@opentelemetry/api': '>=1.7.0 <2.0.0'
+
+  '@arizeai/phoenix-client@6.10.0':
+    resolution: {integrity: sha512-rKvvHyhBGT5Tksckt3VhDGdPiRoaG/GCgzS64IVCPLHLdQhEHoRd88MJyud8tHgwwQ4/XyJ/4cT43z26CNCPVg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@anthropic-ai/sdk': ^0.35.0
+      ai: ^6.0.90
+      openai: ^6.10.0
+    peerDependenciesMeta:
+      '@anthropic-ai/sdk':
+        optional: true
+      ai:
+        optional: true
+      openai:
+        optional: true
+
+  '@arizeai/phoenix-config@0.1.4':
+    resolution: {integrity: sha512-GBgPCQWW2GIHqsV067Uqc2YLCapQTHWX2wuYQYILAos6m39+sDX4hunP4qUqBixbF8tR5zdybCO8iGRV+tEcBg==}
+    engines: {node: '>=18'}
 
   '@arizeai/phoenix-otel@1.0.2':
     resolution: {integrity: sha512-lYUQN1buHJM+ZGSO9uEKuoihiOqjYcOIxfm1IzqyZ4Fk6o6YKGyEKYt6fgwzoaWr82x+mn9oPUFay7Ff8m0gAw==}
@@ -5198,6 +5223,7 @@ packages:
 
   libsql@0.5.29:
     resolution: {integrity: sha512-8lMP8iMgiBzzoNbAPQ59qdVcj6UaE/Vnm+fiwX4doX4Narook0a4GPKWBEv+CR8a1OwbfkgL18uBfBjWdF0Fzg==}
+    cpu: [x64, arm64, wasm32, arm]
     os: [darwin, linux, win32]
 
   lilconfig@3.1.3:
@@ -5737,11 +5763,17 @@ packages:
       zod:
         optional: true
 
+  openapi-fetch@0.17.0:
+    resolution: {integrity: sha512-PsbZR1wAPcG91eEthKhN+Zn92FMHxv+/faECIwjXdxfTODGSGegYv0sc1Olz+HYPvKOuoXfp+0pA2XVt2cI0Ig==}
+
   openapi-fetch@0.8.2:
     resolution: {integrity: sha512-4g+NLK8FmQ51RW6zLcCBOVy/lwYmFJiiT+ckYZxJWxUxH4XFhsNcX2eeqVMfVOi+mDNFja6qDXIZAz2c5J/RVw==}
 
   openapi-typescript-helpers@0.0.5:
     resolution: {integrity: sha512-MRffg93t0hgGZbYTxg60hkRIK2sRuEOHEtCUgMuLgbCC33TMQ68AmxskzUlauzZYD47+ENeGV/ElI7qnWqrAxA==}
+
+  openapi-typescript-helpers@0.1.0:
+    resolution: {integrity: sha512-OKTGPthhivLw/fHz6c3OPtg72vi86qaMlqbJuVJ23qOvQ+53uw1n7HdmkJFibloF7QEjDrDkzJiOJuockM/ljw==}
 
   opener@1.5.2:
     resolution: {integrity: sha512-ur5UIdyw5Y7yEj9wLzhqXiy6GZ3Mwx0yGI+5sMn2r0N0v3cKJvUmFH5yPP+WXh9e0xfyzyJX95D8l088DNFj7A==}
@@ -7292,6 +7324,27 @@ snapshots:
       '@opentelemetry/core': 1.30.1(@opentelemetry/api@1.9.1)
     transitivePeerDependencies:
       - '@opentelemetry/semantic-conventions'
+
+  '@arizeai/phoenix-client@6.10.0(@anthropic-ai/sdk@0.98.0(zod@4.4.3))(@opentelemetry/api@1.9.1)(@opentelemetry/semantic-conventions@1.41.1)(ai@6.0.200(zod@4.4.3))(openai@6.42.0(ws@8.21.0)(zod@4.4.3))':
+    dependencies:
+      '@arizeai/openinference-semantic-conventions': 2.5.0
+      '@arizeai/openinference-vercel': 2.7.7(@opentelemetry/api@1.9.1)(@opentelemetry/semantic-conventions@1.41.1)
+      '@arizeai/phoenix-config': 0.1.4
+      '@arizeai/phoenix-otel': 1.0.2(@opentelemetry/semantic-conventions@1.41.1)
+      async: 3.2.6
+      openapi-fetch: 0.17.0
+      tiny-invariant: 1.3.3
+      zod: 4.4.3
+    optionalDependencies:
+      '@anthropic-ai/sdk': 0.98.0(zod@4.4.3)
+      ai: 6.0.200(zod@4.4.3)
+      openai: 6.42.0(ws@8.21.0)(zod@4.4.3)
+    transitivePeerDependencies:
+      - '@opentelemetry/api'
+      - '@opentelemetry/semantic-conventions'
+      - supports-color
+
+  '@arizeai/phoenix-config@0.1.4': {}
 
   '@arizeai/phoenix-otel@1.0.2(@opentelemetry/semantic-conventions@1.41.1)':
     dependencies:
@@ -13201,6 +13254,10 @@ snapshots:
       ws: 8.21.0
       zod: 4.4.3
 
+  openapi-fetch@0.17.0:
+    dependencies:
+      openapi-typescript-helpers: 0.1.0
+
   openapi-fetch@0.8.2:
     dependencies:
       openapi-typescript-helpers: 0.0.5
@@ -13208,6 +13265,8 @@ snapshots:
 
   openapi-typescript-helpers@0.0.5:
     optional: true
+
+  openapi-typescript-helpers@0.1.0: {}
 
   opener@1.5.2: {}
 

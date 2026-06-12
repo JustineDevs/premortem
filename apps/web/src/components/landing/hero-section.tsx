@@ -77,10 +77,13 @@ export function HeroSection() {
         <GitLabLogo />
       </a>
 
-      <a
-        href={authProviderHref('github', 'signup')}
+      <button
+        type="button"
         className="framer-mlk6bw"
         data-border="true"
+        aria-label="GitHub sign-in coming soon"
+        aria-disabled="true"
+        disabled
         style={{
           ...buttonShell('rgb(82, 82, 82)'),
           borderRadius: 5
@@ -90,9 +93,7 @@ export function HeroSection() {
         <div className="framer-z60kjx" data-border="true" style={chromeStyle()} />
         <div className="framer-1dzkffg" data-border="true" style={chromeStyle()} />
         <div className="framer-1cz4zd2" data-border="true" style={chromeStyle()} />
-        <span className="framer-115vgtw landing-cta-label landing-cta-label-muted">
-          Connect to
-        </span>
+        <span className="framer-115vgtw landing-cta-label landing-cta-label-muted">Connect to</span>
         <img
           src={assets.githubIcon}
           alt=""
@@ -100,7 +101,8 @@ export function HeroSection() {
           height={19}
           className="framer-a3dd0r"
         />
-      </a>
+        <span className="landing-cta-soon">(Coming soon)</span>
+      </button>
 
       <h2 className="framer-jbx38w" style={sectionTitle}>
         Built with / Ecosystem

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://premortem.dev/schemas/issue-candidate.v1.json",
+  "$id": "https://premortem.jstn.site/schemas/issue-candidate.v1.json",
   "title": "Premortem Issue Candidate v1",
   "type": "object",
   "required": ["id", "run_id", "title", "body", "source_finding_ids", "review_state", "version", "publish_target"],

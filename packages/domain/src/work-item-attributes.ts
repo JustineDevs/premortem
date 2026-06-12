@@ -1,3 +1,5 @@
+import { renderPremortemPublishAttribution } from './branding';
+
 export interface WorkItemAttributeConfig {
   autoApply: boolean;
   labelPrefix: string;
@@ -6,7 +8,16 @@ export interface WorkItemAttributeConfig {
   includePriority: boolean;
   includeAuditRef: boolean;
   includeConfidenceBand: boolean;
-  gitlab: { ensureProjectLabels: boolean };
+  gitlab: {
+    ensureProjectLabels: boolean;
+    defaultMilestoneId?: number | null;
+    defaultMilestoneTitle?: string | null;
+    defaultAssigneeId?: number | null;
+    defaultAssigneeUsername?: string | null;
+    dueDateDaysBySeverity?: Partial<Record<string, number>>;
+    timeEstimateByPriority?: Partial<Record<string, string>>;
+    weightBySeverity?: Partial<Record<string, number>>;
+  };
   github: { ensureRepositoryLabels: boolean };
 }
 
@@ -20,6 +31,27 @@ export const DEFAULT_WORK_ITEM_ATTRIBUTE_CONFIG: WorkItemAttributeConfig = {
   includeConfidenceBand: true,
   gitlab: { ensureProjectLabels: true },
   github: { ensureRepositoryLabels: true }
+};
+
+const DEFAULT_DUE_DATE_DAYS: Record<string, number> = {
+  critical: 7,
+  high: 14,
+  medium: 30,
+  low: 45
+};
+
+const DEFAULT_TIME_ESTIMATE: Record<string, string> = {
+  p1: '8h',
+  p2: '4h',
+  p3: '2h',
+  p4: '1h'
+};
+
+const DEFAULT_WEIGHT_BY_SEVERITY: Record<string, number> = {
+  critical: 9,
+  high: 7,
+  medium: 5,
+  low: 3
 };
 
 export interface WorkItemAttributeInput {
@@ -48,6 +80,15 @@ export interface ResolvedWorkItemAttributes {
   labelDefinitions: ProviderLabelDefinition[];
   metadata: Record<string, string>;
   metadataFooter: string;
+  gitlabScheduling: {
+    assigneeIds: number[];
+    milestoneId?: number;
+    dueDate?: string;
+    timeEstimate?: string;
+    weight?: number;
+    assigneeUsername?: string;
+    milestoneTitle?: string;
+  };
 }
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -118,7 +159,27 @@ export function normalizeWorkItemAttributeConfig(
       ensureProjectLabels:
         typeof gitlab.ensureProjectLabels === 'boolean'
           ? gitlab.ensureProjectLabels
-          : DEFAULT_WORK_ITEM_ATTRIBUTE_CONFIG.gitlab.ensureProjectLabels
+          : DEFAULT_WORK_ITEM_ATTRIBUTE_CONFIG.gitlab.ensureProjectLabels,
+      defaultMilestoneId:
+        typeof gitlab.defaultMilestoneId === 'number' ? gitlab.defaultMilestoneId : null,
+      defaultMilestoneTitle:
+        typeof gitlab.defaultMilestoneTitle === 'string' ? gitlab.defaultMilestoneTitle : null,
+      defaultAssigneeId:
+        typeof gitlab.defaultAssigneeId === 'number' ? gitlab.defaultAssigneeId : null,
+      defaultAssigneeUsername:
+        typeof gitlab.defaultAssigneeUsername === 'string' ? gitlab.defaultAssigneeUsername : null,
+      dueDateDaysBySeverity:
+        gitlab.dueDateDaysBySeverity && typeof gitlab.dueDateDaysBySeverity === 'object'
+          ? (gitlab.dueDateDaysBySeverity as Partial<Record<string, number>>)
+          : DEFAULT_DUE_DATE_DAYS,
+      timeEstimateByPriority:
+        gitlab.timeEstimateByPriority && typeof gitlab.timeEstimateByPriority === 'object'
+          ? (gitlab.timeEstimateByPriority as Partial<Record<string, string>>)
+          : DEFAULT_TIME_ESTIMATE,
+      weightBySeverity:
+        gitlab.weightBySeverity && typeof gitlab.weightBySeverity === 'object'
+          ? (gitlab.weightBySeverity as Partial<Record<string, number>>)
+          : DEFAULT_WEIGHT_BY_SEVERITY
     },
     github: {
       ensureRepositoryLabels:
@@ -127,6 +188,12 @@ export function normalizeWorkItemAttributeConfig(
           : DEFAULT_WORK_ITEM_ATTRIBUTE_CONFIG.github.ensureRepositoryLabels
     }
   };
+}
+
+function formatDueDate(daysFromNow: number) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + daysFromNow);
+  return date.toISOString().slice(0, 10);
 }
 
 export function buildWorkItemAttributes(
@@ -192,22 +259,63 @@ export function buildWorkItemAttributes(
   if (input.branch) metadata['premortem.branch'] = input.branch;
   if (input.commitSha) metadata['premortem.commit_sha'] = input.commitSha;
 
-  const metadataFooter = [
-    '',
-    '---',
-    '### Premortem work item attributes',
-    '',
-    '| Attribute | Value |',
-    '| --- | --- |',
-    ...Object.entries(metadata).map(([key, value]) => `| \`${key}\` | ${value} |`),
-    '',
-    `_Automated by Premortem. Labels organize audit findings for triage, filtering, and reconciliation._`
-  ].join('\n');
+  const severityKey = slugify(input.severity);
+  const priorityKey = slugify(input.priority);
+  const dueDays =
+    config.gitlab.dueDateDaysBySeverity?.[severityKey] ??
+    DEFAULT_DUE_DATE_DAYS[severityKey] ??
+    30;
+  const dueDate = formatDueDate(dueDays);
+  const timeEstimate =
+    config.gitlab.timeEstimateByPriority?.[priorityKey] ??
+    DEFAULT_TIME_ESTIMATE[priorityKey] ??
+    '2h';
+  const weight =
+    config.gitlab.weightBySeverity?.[severityKey] ?? DEFAULT_WEIGHT_BY_SEVERITY[severityKey] ?? 5;
+
+  const gitlabScheduling = {
+    assigneeIds: config.gitlab.defaultAssigneeId ? [config.gitlab.defaultAssigneeId] : [],
+    ...(config.gitlab.defaultMilestoneId ? { milestoneId: config.gitlab.defaultMilestoneId } : {}),
+    dueDate,
+    timeEstimate,
+    weight,
+    ...(config.gitlab.defaultAssigneeUsername
+      ? { assigneeUsername: config.gitlab.defaultAssigneeUsername }
+      : {}),
+    ...(config.gitlab.defaultMilestoneTitle
+      ? { milestoneTitle: config.gitlab.defaultMilestoneTitle }
+      : {})
+  };
+
+  metadata['premortem.due_date'] = dueDate;
+  metadata['premortem.time_estimate'] = timeEstimate;
+  metadata['premortem.weight'] = String(weight);
+  if (config.gitlab.defaultAssigneeUsername) {
+    metadata['premortem.assignee'] = config.gitlab.defaultAssigneeUsername;
+  }
+  if (config.gitlab.defaultMilestoneTitle) {
+    metadata['premortem.milestone'] = config.gitlab.defaultMilestoneTitle;
+  }
+
+  const publishAttribution = renderPremortemPublishAttribution();
+
+  const attributeTable = config.includeAuditRef
+    ? [
+        '### Premortem work item attributes',
+        '',
+        '| Attribute | Value |',
+        '| --- | --- |',
+        ...Object.entries(metadata).map(([key, value]) => `| \`${key}\` | ${value} |`)
+      ]
+    : [];
+
+  const metadataFooter = ['', '---', ...attributeTable, '', publishAttribution].join('\n');
 
   return {
     labels: config.autoApply ? [...labels] : [prefix],
     labelDefinitions: [...labelDefinitions.values()],
     metadata,
-    metadataFooter: config.includeAuditRef ? metadataFooter : ''
+    metadataFooter,
+    gitlabScheduling
   };
 }

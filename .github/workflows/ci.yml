@@ -13,7 +13,7 @@ jobs:
       DIRECT_URL: postgresql://ci:ci@127.0.0.1:5432/ci
       NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key
-      NEXT_PUBLIC_APP_URL: https://premortem.dev
+      NEXT_PUBLIC_APP_URL: https://premortem.jstn.site
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

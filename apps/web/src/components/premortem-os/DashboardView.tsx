@@ -46,6 +46,8 @@ interface DashboardViewProps {
   showStopAll?: boolean;
   isStopAllPending?: boolean;
   isResumePending?: boolean;
+  gitLabConnected?: boolean;
+  discoveredRepoCount?: number;
 }
 
 function SeeMoreButton({
@@ -129,7 +131,9 @@ export function DashboardView({
   onResumeAudit,
   showStopAll = false,
   isStopAllPending = false,
-  isResumePending = false
+  isResumePending = false,
+  gitLabConnected = false,
+  discoveredRepoCount = 0
 }: DashboardViewProps) {
   const [clustersExpanded, setClustersExpanded] = useState(false);
   const [projectsExpanded, setProjectsExpanded] = useState(false);
@@ -157,11 +161,12 @@ export function DashboardView({
       void fetch(`/api/audits/${monitorAudit.id}`)
         .then((response) => response.json())
         .then((payload) => {
-          if (cancelled || !payload.snapshot) return;
+          const snapshot = payload.snapshot ?? payload.auditRun;
+          if (cancelled || !snapshot) return;
           setMonitorSnapshot({
-            agentRuns: payload.snapshot.agentRuns ?? [],
-            events: payload.snapshot.events ?? [],
-            summary: payload.snapshot.summary
+            agentRuns: snapshot.agentRuns ?? [],
+            events: snapshot.events ?? [],
+            summary: snapshot.summary
           });
         })
         .catch(() => {
@@ -198,19 +203,9 @@ export function DashboardView({
     low: audits.reduce((sum, item) => sum + (item.lowCount || 0), 0),
   };
 
-  const clustersToShow: RiskCluster[] =
-    riskClusters.length > 0
-      ? riskClusters
-      : [
-          {
-            id: 'runtime-empty',
-            name: 'No clustered risks yet',
-            description: 'Run an audit to populate deduplicated risk clusters from the orchestrator.',
-            severity: 'LOW',
-            findingsCount: totalFindingsCount,
-            projectIds: projects.map((project) => project.id)
-          }
-        ];
+  const clustersToShow: RiskCluster[] = riskClusters;
+  const hasRealClusters = clustersToShow.length > 0;
+  const workspaceEmpty = projects.length === 0 && audits.length === 0 && !isLoading;
 
   const visibleClusters = clustersExpanded
     ? clustersToShow
@@ -261,6 +256,41 @@ export function DashboardView({
           </div>
         </div>
       </div>
+
+      {workspaceEmpty ? (
+        <div className="rounded border border-amber-200 bg-amber-50/80 px-5 py-4 text-sm text-amber-950">
+          <p className="font-display font-semibold text-[#1E2522]">Your workspace has no audit history yet</p>
+          <p className="mt-1 text-xs text-[#5C6560] leading-relaxed">
+            {gitLabConnected
+              ? discoveredRepoCount > 0
+                ? `GitLab is connected (${discoveredRepoCount} repositories discovered). Register a project in Projects Inventory, then launch a security scan.`
+                : 'GitLab is connected. Open Projects Inventory to register a repository, then launch your first security scan.'
+              : 'Connect GitLab under Integrations and Scope, register a project, then launch your first security scan.'}
+          </p>
+          {onNavigateTab ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onNavigateTab(gitLabConnected ? 'projects' : 'settings')}
+                className="inline-flex items-center gap-1 rounded border border-amber-300 bg-white px-3 py-1.5 text-[11px] font-mono font-bold uppercase tracking-wider text-amber-900 hover:border-amber-400"
+              >
+                {gitLabConnected ? 'Open projects' : 'Connect GitLab'}
+                <ArrowUpRight size={12} />
+              </button>
+              {gitLabConnected && projects.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => onTriggerScan(projects[0].id)}
+                  className="inline-flex items-center gap-1 rounded border border-emerald-800 bg-emerald-950 px-3 py-1.5 text-[11px] font-mono font-bold uppercase tracking-wider text-[#72C8AF] hover:bg-emerald-900"
+                >
+                  Launch scan
+                  <ArrowUpRight size={12} />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="bg-[#FAF8F5] border border-[#EAE6DF] rounded p-6 flex flex-col justify-between relative overflow-hidden group hover:shadow-sm transition-all">
@@ -368,7 +398,17 @@ export function DashboardView({
             </div>
 
             <div className="space-y-4">
-              {visibleClusters.map((cluster) => (
+              {!hasRealClusters ? (
+                <div className="rounded border border-dashed border-[#EAE6DF] bg-[#FDFDFD] px-4 py-8 text-center">
+                  <p className="text-xs font-display font-semibold uppercase tracking-wide text-[#1E2522]">
+                    No clustered risks yet
+                  </p>
+                  <p className="mt-2 text-xs text-[#5C6560] leading-relaxed max-w-md mx-auto">
+                    Run an audit to populate deduplicated risk clusters from the orchestrator.
+                  </p>
+                </div>
+              ) : (
+                visibleClusters.map((cluster) => (
                 <div key={cluster.id} className="border border-[#EAE6DF] bg-[#FDFDFD] rounded p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-emerald-950/20 transition-all">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -395,7 +435,6 @@ export function DashboardView({
                       onClick={() => onOpenRiskCluster?.(cluster)}
                       disabled={
                         !onOpenRiskCluster ||
-                        cluster.id === 'runtime-empty' ||
                         !cluster.auditRunId ||
                         cluster.findingsCount === 0
                       }
@@ -407,9 +446,11 @@ export function DashboardView({
                     </button>
                   </div>
                 </div>
-              ))}
+              ))
+              )}
             </div>
 
+            {hasRealClusters ? (
             <SeeMoreButton
               expanded={clustersExpanded}
               hiddenCount={Math.max(0, clustersToShow.length - CLUSTER_PREVIEW_COUNT)}
@@ -417,6 +458,7 @@ export function DashboardView({
               onNavigate={onNavigateTab ? () => onNavigateTab('audits') : undefined}
               navigateLabel={onNavigateTab ? 'Open audits' : undefined}
             />
+            ) : null}
           </div>
 
           <div className="bg-[#FAF8F5] border border-[#EAE6DF] rounded p-6">
@@ -443,7 +485,14 @@ export function DashboardView({
                   </tr>
                 </thead>
                 <tbody className="text-xs divide-y divide-[#EAE6DF]/60">
-                  {visibleAudits.map((audit) => {
+                  {visibleAudits.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 px-3 text-center text-[#5C6560]">
+                        No audit runs yet. Register a project and launch a security scan to populate this table.
+                      </td>
+                    </tr>
+                  ) : (
+                  visibleAudits.map((audit) => {
                     const totalRisks = (audit.criticalCount || 0) + (audit.highCount || 0) + (audit.mediumCount || 0) + (audit.lowCount || 0);
                     return (
                       <tr key={audit.id} className="hover:bg-[#FCECF3]/10 transition-all">
@@ -484,7 +533,8 @@ export function DashboardView({
                         </td>
                       </tr>
                     );
-                  })}
+                  })
+                  )}
                 </tbody>
               </table>
               )}
@@ -511,7 +561,7 @@ export function DashboardView({
               </h3>
               
               <p className="text-xs text-[#B2C5BD] leading-relaxed">
-                Invoke Premortem&apos;s AI Engine to execute a telemetry deep-scan. Gemini will isolate credentials leak indicators, parse transit encryption pathways, and trace request chains.
+                Start a repository audit through the Premortem orchestrator. Results land in History and Issues once the run completes.
               </p>
 
               <div className="space-y-3 pt-2">
@@ -519,7 +569,17 @@ export function DashboardView({
                   Select Scope Repository:
                 </label>
                 <div className="space-y-2">
-                  {visibleProjects.map((proj) => (
+                  {visibleProjects.length === 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateTab?.('projects')}
+                      className="w-full text-left p-3 rounded bg-emerald-900/50 border border-dashed border-emerald-700/80 hover:border-[#72C8AF]/40 hover:bg-emerald-900 transition-all text-xs text-[#B2C5BD]"
+                    >
+                      <span className="block font-bold text-white font-display">No projects registered</span>
+                      <span className="text-[10px] font-mono mt-1 block">Open Projects Inventory to register a repository</span>
+                    </button>
+                  ) : (
+                  visibleProjects.map((proj) => (
                     <button
                       key={proj.id}
                       onClick={() => onTriggerScan(proj.id)}
@@ -536,7 +596,8 @@ export function DashboardView({
                         {proj.status === 'SCANNING' ? 'SCANNING...' : 'SCAN'}
                       </span>
                     </button>
-                  ))}
+                  ))
+                  )}
                 </div>
 
                 <SeeMoreButton

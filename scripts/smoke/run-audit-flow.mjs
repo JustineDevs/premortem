@@ -137,7 +137,7 @@ function createAppFetch(env) {
 }
 
 function buildRegistryWithRejectedArtifact() {
-  return buildWorkerRegisteredAgents().map((agent) => {
+  return buildWorkerRegisteredAgents(ROOT_DIR).map((agent) => {
     if (agent.name !== 'finding_synthesizer_agent' || agent.executor.kind !== 'synthesizer') {
       return agent;
     }

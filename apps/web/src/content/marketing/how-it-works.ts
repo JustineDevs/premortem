@@ -38,7 +38,14 @@ export const howItWorksPage = {
     href: marketingLinks.docsGettingStarted
   },
   screenshot: {
-    src: '/landing/workflow-preview.png',
-    alt: 'Premortem workflow panel preview'
+    src: '/landing/console-audits-preview.png',
+    alt: 'Premortem reviewer console: Audits and Tracing with structured issue review'
+  },
+  audioBrief: {
+    src: '/media/ai-swarms-predict-code-breaks-before-deployment.m4a',
+    title: 'AI swarms predict code breaks before deployment',
+    description:
+      'A short overview of how Premortem runs multi-lens agent swarms across your repository before merge, surfaces structured findings, and keeps review in your workflow.',
+    durationLabel: 'M4A · playable in browser'
   }
 } as const;

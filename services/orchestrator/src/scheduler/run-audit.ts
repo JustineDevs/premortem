@@ -7,11 +7,15 @@ import {
   findActiveAuditRun,
   prisma,
   recordAuditSubmitted,
+  resolveGitLabCredentialsForProject,
   resumeAuditRun
 } from '@premortem/db';
 import {
   validateFinding,
   validateIssueCandidate,
+  loadDedupePolicy,
+  loadSeverityPolicy,
+  downgradeSeverityForConfidence,
   type RegisteredAgent
 } from '@premortem/agent-kit';
 import type { CanonicalFinding, IssueCandidate } from '@premortem/agent-kit';
@@ -19,11 +23,16 @@ import type { GraphSnapshotPayload } from '@premortem/graph-model';
 import { buildAuditJob, type AuditJob } from '@premortem/workflow';
 import { uploadArtifact, downloadArtifact } from '@premortem/storage';
 import {
+  appendAuditMissionToPhoenixDataset,
   captureServerException,
   createLangfuseScore,
   evaluateAuditMissionQuality,
+  evaluateAuditMissionWithLlmJudge,
   isLangfuseConfigured,
+  isPhoenixDatasetSyncEnabled,
+  isPhoenixLlmEvalEnabled,
   trackServerEvent,
+  trace,
   tracePremortemAuditJob
 } from '@premortem/observability';
 import { isNeo4jGraphEnabled, writeGraphSnapshotToNeo4j } from '@premortem/integrations';
@@ -32,8 +41,8 @@ import { clusterFindings } from '../merge/cluster-findings';
 import {
   beginAudit,
   createQueuedAudit,
-  failAudit,
-  finishAudit,
+  failAuditWithNotifications,
+  finishAuditWithNotifications,
   getPersistedAuditRun,
   listAuditRuns,
   recordAuditEvent,
@@ -46,6 +55,7 @@ import {
 } from '../services/audit-persistence';
 import { buildGraphFromIngestion } from '../graph/build-graph-snapshot';
 import { resolveGraphSnapshotPayload } from '../graph/resolve-graph-payload';
+import { enrichEvidenceWithSourceSnippets } from '../evidence/resolve-evidence-snippets';
 import { prepareAuditExecution } from './prepare-audit-context';
 import {
   assertAuditContinuing,
@@ -56,6 +66,98 @@ import {
   shouldSkipPhase
 } from './audit-execution-control';
 
+const SEVERITY_RANK: Record<CanonicalFinding['severity'], number> = {
+  low: 0,
+  medium: 1,
+  high: 2,
+  critical: 3
+};
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.filter((value): value is string => typeof value === 'string' && value.length > 0))];
+}
+
+function uniqueEvidence(values: CanonicalFinding['evidence']) {
+  const merged: CanonicalFinding['evidence'] = [];
+  for (const item of values) {
+    const duplicate = merged.some(
+      (existing) => existing.kind === item.kind && existing.ref === item.ref && existing.reason === item.reason
+    );
+    if (!duplicate) merged.push(item);
+  }
+  return merged;
+}
+
+function mergeFindingRecords(existing: CanonicalFinding, incoming: CanonicalFinding): CanonicalFinding {
+  return {
+    ...existing,
+    severity:
+      SEVERITY_RANK[incoming.severity] > SEVERITY_RANK[existing.severity]
+        ? incoming.severity
+        : existing.severity,
+    confidence: Math.max(existing.confidence, incoming.confidence),
+    predicted_failure: {
+      summary:
+        incoming.predicted_failure.summary.length > existing.predicted_failure.summary.length
+          ? incoming.predicted_failure.summary
+          : existing.predicted_failure.summary,
+      failure_mode: existing.predicted_failure.failure_mode ?? incoming.predicted_failure.failure_mode,
+      trigger_conditions: uniqueStrings([
+        ...existing.predicted_failure.trigger_conditions,
+        ...incoming.predicted_failure.trigger_conditions
+      ]),
+      blast_radius: existing.predicted_failure.blast_radius ?? incoming.predicted_failure.blast_radius
+    },
+    why_it_matters: existing.why_it_matters ?? incoming.why_it_matters,
+    affected_assets: uniqueStrings([...existing.affected_assets, ...incoming.affected_assets]),
+    evidence: uniqueEvidence([...existing.evidence, ...incoming.evidence]),
+    recommended_controls: uniqueStrings([
+      ...existing.recommended_controls,
+      ...incoming.recommended_controls
+    ]),
+    dedupe_keys: uniqueStrings([...existing.dedupe_keys, ...incoming.dedupe_keys]),
+    tags: uniqueStrings([...existing.tags, ...incoming.tags])
+  };
+}
+
+function dedupeFindings(findings: CanonicalFinding[]) {
+  const unique = new Map<string, CanonicalFinding>();
+
+  for (const finding of findings) {
+    const existing = unique.get(finding.finding_id);
+    if (!existing) {
+      unique.set(finding.finding_id, finding);
+      continue;
+    }
+
+    unique.set(finding.finding_id, mergeFindingRecords(existing, finding));
+  }
+
+  return [...unique.values()];
+}
+
+export function filterAgentsForProjectSettings(
+  agents: RegisteredAgent[],
+  enabledAgents: string[]
+): RegisteredAgent[] {
+  if (enabledAgents.length === 0) {
+    return agents;
+  }
+
+  const allowlist = new Set(enabledAgents);
+  return agents.filter((agent) => {
+    if (agent.name === 'finding_synthesizer_agent' || agent.name === 'issue_validator_agent') {
+      return true;
+    }
+
+    if (agent.executor.kind !== 'specialist') {
+      return true;
+    }
+
+    return allowlist.has(agent.name);
+  });
+}
+
 export interface SubmitAuditInput {
   rootDir?: string;
   organizationId: string;
@@ -63,6 +165,7 @@ export interface SubmitAuditInput {
   branch: string;
   commitSha?: string;
   triggeredById?: string;
+  triggerSource?: 'manual' | 'webhook' | 'scheduled' | 'api';
 }
 
 export interface ExecuteAuditJobInput {
@@ -141,11 +244,18 @@ export interface AuditRunSnapshot {
   }>;
   findings: Array<{
     id: string;
+    findingKey: string;
     title: string;
     category: string;
     severity: string;
     predictedFailureSummary: string;
     agentRunId: string;
+    whyItMatters?: string | null;
+    failureMode?: string | null;
+    triggerConditions?: string[];
+    affectedAssets?: string[];
+    recommendedControls?: string[];
+    evidence?: Array<{ kind: string; ref: string; reason: string; codeSnippet?: string }>;
   }>;
   clusters: Array<{
     id: string;
@@ -153,15 +263,26 @@ export interface AuditRunSnapshot {
     titleHint?: string | null;
     severity: string;
     findingCount: number;
+    memberFindingIds?: string[];
   }>;
   issueCandidates: Array<{
     id: string;
     title: string;
+    category: string;
     validationStatus: string;
     reviewerStatus: string;
     versionCount: number;
     validationResultCount: number;
     publishedUrl?: string | null;
+    predictedFailureSummary?: string;
+    whyItMatters?: string;
+    recommendedActionSummary?: string;
+    implementationSteps?: string[];
+    doneCriteria?: string[];
+    affectedAssets?: string[];
+    clusterId?: string;
+    sourceFindings?: string[];
+    evidence?: Array<{ kind: string; ref: string; reason: string; codeSnippet?: string }>;
   }>;
   rejectedIssueCandidates: Array<{
     id: string;
@@ -312,7 +433,8 @@ export async function submitAudit(input: SubmitAuditInput): Promise<SubmittedAud
     projectId: input.projectId,
     branch: input.branch,
     commitSha: input.commitSha,
-    triggeredById: input.triggeredById
+    triggeredById: input.triggeredById,
+    triggerSource: input.triggerSource
   });
 
   const job = buildAuditJob({
@@ -349,10 +471,20 @@ export async function executeAuditJob(input: ExecuteAuditJobInput): Promise<Audi
   return runExecuteAuditJob(input);
 }
 
+function tagActiveSpanWithAuditRun(auditRunId: string) {
+  trace.getActiveSpan()?.setAttribute('premortem.audit_run_id', auditRunId);
+}
+
 async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditExecutionResult> {
+  tagActiveSpanWithAuditRun(input.job.id);
   const prepared = await prepareAuditExecution(input.job, { rootDir: input.rootDir });
   const { ingestion, rootDir } = prepared;
-  const agents = input.registryAgents ?? prepared.agents;
+  const dedupePolicy = loadDedupePolicy(rootDir);
+  const severityPolicy = loadSeverityPolicy(rootDir);
+  const agents = filterAgentsForProjectSettings(
+    input.registryAgents ?? prepared.agents,
+    prepared.projectSettings.enabledAgents
+  );
   const agentBuilderMission = await bootstrapPremortemAgentMission({
     auditRunId: input.job.id,
     projectId: input.job.projectId,
@@ -366,14 +498,19 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
 
   const specialists = agents.filter((agent) => agent.executor.kind === 'specialist');
   const synthesizer = agents.find((agent) => agent.name === 'finding_synthesizer_agent');
+  const validator = agents.find((agent) => agent.name === 'issue_validator_agent');
   if (!synthesizer || synthesizer.executor.kind !== 'synthesizer') {
     throw new Error('Missing finding_synthesizer_agent executor');
+  }
+  if (!validator) {
+    throw new Error('Missing issue_validator_agent executor');
   }
 
   const findings: CanonicalFinding[] = [];
   let findingIdMap = new Map<string, string>();
   let graphPayload: GraphSnapshotPayload = { auditRunId: input.job.id, projectId: input.job.projectId, nodes: [], edges: [] };
   let graphSnapshotId: string | null = null;
+  let clusterIdByFindingId = new Map<string, string>();
 
   try {
     const control = await assertAuditContinuing(input.job.id);
@@ -513,15 +650,22 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       repo_tree: ingestion.repo_tree,
       ci_config: ingestion.ci_config,
       has_ci: ingestion.has_ci,
+      source_files: ingestion.source_files,
+      ownership_hints: ingestion.ownership_hints,
       ci_history: ingestion.ci_history,
       existing_issues: ingestion.existing_issues,
       graph_nodes: graphPayload.nodes,
       graph_edges: graphPayload.edges,
       ingestion_metadata: ingestion.metadata,
-      ingestion_source: prepared.ingestionSource
+      ingestion_source: prepared.ingestionSource,
+      validation_policy: {
+        dedupe: dedupePolicy,
+        severity: severityPolicy
+      }
     };
 
     const completedSpecialists = new Set(checkpoint?.completedSpecialists ?? []);
+    const seenFindingIds = new Set<string>();
     const pendingSpecialists = shouldSkipPhase(checkpoint, AuditCheckpointPhase.CLUSTERING)
       ? []
       : specialists.filter((specialist) => !completedSpecialists.has(specialist.name));
@@ -568,19 +712,27 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
         });
 
         const validFindings = result.filter((finding) => validateFinding(finding).length === 0);
-        if (validFindings.length > 0) {
+        const uniqueFindings = dedupeFindings(validFindings).filter((finding) => {
+          if (seenFindingIds.has(finding.finding_id)) {
+            return false;
+          }
+          seenFindingIds.add(finding.finding_id);
+          return true;
+        });
+
+        if (uniqueFindings.length > 0) {
           const persisted = await saveFindings({
             organizationId: input.job.organizationId,
             projectId: input.job.projectId,
             auditRunId: input.job.id,
             agentRunId: agentRun.id,
-            findings: validFindings
+            findings: uniqueFindings
           });
 
-          validFindings.forEach((finding, index) => {
+          uniqueFindings.forEach((finding, index) => {
             mapEntries.push([finding.finding_id, persisted[index]!.id]);
           });
-          laneFindings.push(...validFindings);
+          laneFindings.push(...uniqueFindings);
         }
 
         completedSpecialists.add(specialist.name);
@@ -608,6 +760,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       }
     }
 
+    findings.splice(0, findings.length, ...dedupeFindings(findings));
     findingIdMap = await loadPersistedFindingIdMap(input.job.id);
     const findingsForClustering =
       findings.length > 0 ? findings : await loadFindingsForClustering(input.job.id);
@@ -625,10 +778,15 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       clusterIdByCategory = new Map(
         persistedClusters.map((cluster) => [cluster.categoryOwner, cluster.id])
       );
+      clusterIdByFindingId = new Map(
+        auditRun?.dedupeClusters.flatMap((cluster) =>
+          cluster.members.map((member) => [member.findingId, cluster.id] as const)
+        ) ?? []
+      );
     } else {
       await assertAuditContinuing(input.job.id);
 
-      const runtimeClusters = clusterFindings(findingsForClustering);
+      const runtimeClusters = clusterFindings(findingsForClustering, dedupePolicy);
       persistedClusters = await saveClusters({
         organizationId: input.job.organizationId,
         projectId: input.job.projectId,
@@ -638,6 +796,11 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       });
       clusterIdByCategory = new Map(
         persistedClusters.map((cluster) => [cluster.categoryOwner, cluster.id])
+      );
+      clusterIdByFindingId = new Map(
+        runtimeClusters.flatMap((cluster, index) =>
+          cluster.sourceFindingIds.map((findingId) => [findingId, persistedClusters[index]!.id] as const)
+        )
       );
 
       await persistPhaseCheckpoint(input.job.id, AuditCheckpointPhase.CLUSTERING, {
@@ -703,25 +866,58 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
     } else {
       await assertAuditContinuing(input.job.id);
 
-      const { result: validationDecisions } = await runAgentWithPersistence({
+      const { result: validatedIssues } = await runAgentWithPersistence({
         auditRunId: input.job.id,
         agentName: 'issue_validator_agent',
         runMode: 'always',
-        execute: async () =>
-          rawIssues.map((issue) => ({
-            issue,
-            errors: validateIssueCandidate(issue),
-            warnings: [] as string[],
-            validatorName: 'issue_validator_agent'
-          })),
+        execute: async () => {
+          if (!validator || validator.executor.kind !== 'synthesizer') {
+            return rawIssues;
+          }
+
+          try {
+            return await validator.executor.run(
+              {
+                rootDir,
+                projectId: input.job.projectId,
+                auditRunId: input.job.id,
+                payload: sharedPayload
+              },
+              rawIssues as unknown as CanonicalFinding[]
+            );
+          } catch (error) {
+            captureServerException(error, {
+              auditRunId: input.job.id,
+              phase: 'issue_validation_fallback'
+            });
+            return rawIssues;
+          }
+        },
         serialize: (value) => ({
-          passedCount: value.filter((decision) => decision.errors.length === 0).length,
-          failedCount: value.filter((decision) => decision.errors.length > 0).length
+          inputCount: rawIssues.length,
+          outputCount: value.length
         })
       });
 
-      reviewableIssues = validationDecisions.filter((decision) => decision.errors.length === 0);
-      rejectedIssues = validationDecisions.filter((decision) => decision.errors.length > 0);
+      const validationDecisions = validatedIssues.map((issue) => ({
+        issue,
+        errors: validateIssueCandidate(issue),
+        warnings: [] as string[],
+        validatorName: 'issue_validator_agent'
+      }));
+
+      reviewableIssues = validationDecisions
+        .filter((decision) => decision.errors.length === 0)
+        .map((decision) => ({
+          ...decision,
+          issue: downgradeSeverityForConfidence(decision.issue, severityPolicy)
+        }));
+      rejectedIssues = validationDecisions
+        .filter((decision) => decision.errors.length > 0)
+        .map((decision) => ({
+          ...decision,
+          issue: downgradeSeverityForConfidence(decision.issue, severityPolicy)
+        }));
 
       if (rejectedIssues.length > 0) {
         await saveRejectedIssueArtifacts({
@@ -729,6 +925,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
           projectId: input.job.projectId,
           auditRunId: input.job.id,
           clusterIdByCategory,
+          clusterIdByFindingId,
           issues: rejectedIssues.map((decision) => ({
             issue: decision.issue,
             validationErrors: decision.errors,
@@ -749,6 +946,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
           projectId: input.job.projectId,
           auditRunId: input.job.id,
           clusterIdByCategory,
+          clusterIdByFindingId,
           issues: reviewableIssues.map((decision) => ({
             issue: decision.issue,
             validationErrors: decision.errors,
@@ -771,7 +969,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
     const rejectedIssueCount =
       finalRun?.rejectedIssueCandidateArtifacts.length ?? rejectedIssues.length;
 
-    await finishAudit(input.job.id, {
+    const auditSummary = {
       findingCount: findingIdMap.size,
       clusterCount: persistedClusters.length,
       issueCandidateCount,
@@ -788,6 +986,13 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
         graphSnapshotId,
         savedAt: new Date().toISOString()
       }
+    };
+    await finishAuditWithNotifications({
+      auditRunId: input.job.id,
+      organizationId: input.job.organizationId,
+      projectId: input.job.projectId,
+      branch: input.job.branch,
+      summary: auditSummary
     });
 
     const phoenixEval = evaluateAuditMissionQuality({
@@ -797,10 +1002,32 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       hasHumanReviewGate: true
     });
 
+    let phoenixLlmEval: Awaited<ReturnType<typeof evaluateAuditMissionWithLlmJudge>> | null =
+      null;
+    const geminiApiKey =
+      process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim() || '';
+    if (isPhoenixLlmEvalEnabled() && geminiApiKey) {
+      try {
+        phoenixLlmEval = await evaluateAuditMissionWithLlmJudge({
+          auditRunId: input.job.id,
+          findingCount: findingIdMap.size,
+          issueCandidateCount,
+          sampleFindingTitles: reviewableIssues
+            .slice(0, 8)
+            .map((decision) => decision.issue.title),
+          apiKey: geminiApiKey,
+          model: process.env.LLM_MODEL?.trim() || DEFAULT_GEMINI_MODEL
+        });
+      } catch (error) {
+        captureServerException(error, { auditRunId: input.job.id, phase: 'phoenix_llm_eval' });
+      }
+    }
+
     trackServerEvent(input.job.organizationId, 'audit_completed', {
       auditRunId: input.job.id,
       findingsCount: findingIdMap.size,
-      phoenixEval
+      phoenixEval,
+      phoenixLlmEval
     });
 
     if (isLangfuseConfigured()) {
@@ -810,6 +1037,34 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
         value: phoenixEval.score,
         comment: phoenixEval.passed ? 'passed' : 'needs_review'
       }).catch(() => undefined);
+    }
+
+    if (isPhoenixDatasetSyncEnabled()) {
+      void appendAuditMissionToPhoenixDataset({
+        input: {
+          auditRunId: input.job.id,
+          organizationId: input.job.organizationId,
+          projectId: input.job.projectId,
+          repositoryId: null
+        },
+        output: {
+          findingCount: findingIdMap.size,
+          issueCandidateCount,
+          rejectedIssueCount,
+          hasHumanReviewGate: true,
+          passed: phoenixEval.passed,
+          score: phoenixEval.score
+        },
+        metadata: {
+          evaluator: phoenixEval.evaluator,
+          label: phoenixEval.label
+        }
+      }).catch((error) => {
+        captureServerException(error, {
+          auditRunId: input.job.id,
+          phase: 'phoenix_dataset_sync'
+        });
+      });
     }
 
     return {
@@ -845,7 +1100,13 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
 
     const message = error instanceof Error ? error.message : 'Unknown audit execution error';
     captureServerException(error, { auditRunId: input.job.id, stage: 'executeAuditJob' });
-    await failAudit(input.job.id, message);
+    await failAuditWithNotifications({
+      auditRunId: input.job.id,
+      organizationId: input.job.organizationId,
+      projectId: input.job.projectId,
+      branch: input.job.branch,
+      errorMessage: message
+    });
     return {
       auditRunId: input.job.id,
       runStatus: 'failed',
@@ -874,6 +1135,106 @@ export async function getAuditRunSnapshot(auditRunId: string): Promise<AuditRunS
       download: downloadArtifact
     });
   }
+
+  const project = await prisma.project.findUnique({
+    where: { id: auditRun.projectId },
+    select: { provider: true, externalProjectId: true }
+  });
+  const gitlabCredentials = project
+    ? await resolveGitLabCredentialsForProject(auditRun.projectId)
+    : null;
+  const canResolveSource =
+    project?.provider === 'gitlab' &&
+    Boolean(project.externalProjectId) &&
+    Boolean(gitlabCredentials?.token);
+
+  const sourceContext = canResolveSource
+    ? {
+        baseUrl: gitlabCredentials!.baseUrl,
+        token: gitlabCredentials!.token,
+        externalProjectId: project!.externalProjectId!,
+        branch: auditRun.branch
+      }
+    : null;
+
+  const findings = await Promise.all(
+    auditRun.findings.map(async (finding) => {
+      const triggerConditions = Array.isArray(finding.triggerConditions)
+        ? finding.triggerConditions.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+      const affectedAssets = Array.isArray(finding.affectedAssets)
+        ? finding.affectedAssets.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+      const recommendedControls = Array.isArray(finding.recommendedControls)
+        ? finding.recommendedControls.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+      const evidence = sourceContext
+        ? await enrichEvidenceWithSourceSnippets({
+            evidence: finding.evidence,
+            ...sourceContext
+          })
+        : undefined;
+
+      return {
+        id: finding.id,
+        findingKey: finding.findingKey,
+        title: finding.predictedFailureSummary.slice(0, 120),
+        category: finding.category,
+        severity: finding.severity,
+        predictedFailureSummary: finding.predictedFailureSummary,
+        agentRunId: finding.agentRunId,
+        whyItMatters: finding.whyItMatters,
+        failureMode: finding.failureMode,
+        triggerConditions,
+        affectedAssets,
+        recommendedControls,
+        evidence
+      };
+    })
+  );
+
+  const issueCandidates = await Promise.all(
+    auditRun.issueCandidates.map(async (issue) => {
+      const implementationSteps = Array.isArray(issue.implementationSteps)
+        ? issue.implementationSteps.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+      const doneCriteria = Array.isArray(issue.doneCriteria)
+        ? issue.doneCriteria.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+      const affectedAssets = Array.isArray(issue.affectedAssets)
+        ? issue.affectedAssets.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+      const sourceFindings = Array.isArray(issue.sourceFindings)
+        ? issue.sourceFindings.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+      const evidence = sourceContext
+        ? await enrichEvidenceWithSourceSnippets({
+            evidence: issue.evidence,
+            ...sourceContext
+          })
+        : undefined;
+
+      return {
+        id: issue.id,
+        title: issue.title,
+        category: issue.category,
+        validationStatus: issue.validationStatus,
+        reviewerStatus: issue.reviewerStatus,
+        versionCount: issue.versions.length,
+        validationResultCount: issue.validationResults.length,
+        publishedUrl: issue.publishedIssue?.url ?? null,
+        predictedFailureSummary: issue.predictedFailureSummary,
+        whyItMatters: issue.whyItMatters,
+        recommendedActionSummary: issue.recommendedActionSummary,
+        implementationSteps,
+        doneCriteria,
+        affectedAssets,
+        sourceFindings,
+        clusterId: issue.clusterId,
+        evidence
+      };
+    })
+  );
 
   return {
     auditRunId: auditRun.id,
@@ -916,30 +1277,16 @@ export async function getAuditRunSnapshot(auditRunId: string): Promise<AuditRunS
       startedAt: run.startedAt?.toISOString() ?? null,
       completedAt: run.completedAt?.toISOString() ?? null
     })),
-    findings: auditRun.findings.map((finding) => ({
-      id: finding.id,
-      title: finding.predictedFailureSummary.slice(0, 120),
-      category: finding.category,
-      severity: finding.severity,
-      predictedFailureSummary: finding.predictedFailureSummary,
-      agentRunId: finding.agentRunId
-    })),
+    findings,
     clusters: auditRun.dedupeClusters.map((cluster) => ({
       id: cluster.id,
       categoryOwner: cluster.categoryOwner,
       titleHint: cluster.titleHint,
       severity: cluster.severity,
-      findingCount: cluster.members.length
+      findingCount: cluster.members.length,
+      memberFindingIds: cluster.members.map((member) => member.findingId)
     })),
-    issueCandidates: auditRun.issueCandidates.map((issue) => ({
-      id: issue.id,
-      title: issue.title,
-      validationStatus: issue.validationStatus,
-      reviewerStatus: issue.reviewerStatus,
-      versionCount: issue.versions.length,
-      validationResultCount: issue.validationResults.length,
-      publishedUrl: issue.publishedIssue?.url ?? null
-    })),
+    issueCandidates,
     rejectedIssueCandidates: auditRun.rejectedIssueCandidateArtifacts.map((issue) => ({
       id: issue.id,
       title: issue.title,
@@ -976,8 +1323,11 @@ export async function getAuditRunSnapshot(auditRunId: string): Promise<AuditRunS
   };
 }
 
-export async function getRecentAuditRuns(limit = 12): Promise<AuditRunListItem[]> {
-  const auditRuns = await listAuditRuns(limit);
+export async function getRecentAuditRuns(
+  organizationId: string,
+  limit = 12
+): Promise<AuditRunListItem[]> {
+  const auditRuns = await listAuditRuns(organizationId, limit);
   return auditRuns.map((auditRun) => ({
     auditRunId: auditRun.id,
     projectId: auditRun.projectId,

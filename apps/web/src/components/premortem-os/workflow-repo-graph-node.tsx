@@ -7,7 +7,7 @@ export type RepoGraphNodeData = {
   label: string;
   type: string;
   color: string;
-  lane?: 'structure' | 'runtime' | 'pipeline';
+  lane?: 'structure' | 'runtime' | 'pipeline' | 'semantic';
 };
 
 export type RepoGraphFlowNode = Node<RepoGraphNodeData, 'repoGraph'>;
@@ -50,5 +50,5 @@ export const repoGraphNodeTypes = {
   repoGraph: RepoGraphNode
 };
 
-export const REPO_GRAPH_NODE_WIDTH = 96;
-export const REPO_GRAPH_NODE_HEIGHT = 64;
+export const REPO_GRAPH_NODE_WIDTH = 112;
+export const REPO_GRAPH_NODE_HEIGHT = 72;

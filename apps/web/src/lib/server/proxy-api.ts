@@ -5,6 +5,7 @@ import { trackServerEvent } from '@premortem/observability';
 
 import { getApiBaseUrl } from '@/lib/runtime-config';
 import { bffRateLimitKey, bffRateLimitResponse, checkBffRateLimit } from '@/lib/server/bff-rate-limit';
+import { bffErrorResponse, readUpstreamJson } from '@/lib/server/bff-errors';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
 
 export async function proxyPremortemApi(path: string, init?: RequestInit, request?: Request) {
@@ -26,7 +27,7 @@ export async function proxyPremortemApi(path: string, init?: RequestInit, reques
       cache: 'no-store'
     });
 
-    const payload = await response.json().catch(() => ({}));
+    const payload = await readUpstreamJson(response);
 
     if (!response.ok) {
       trackServerEvent(context.profileId, 'bff_proxy_error', {
@@ -47,21 +48,15 @@ export async function proxyPremortemApi(path: string, init?: RequestInit, reques
       path,
       duration_ms: Date.now() - startedAt
     });
-    throw error;
+    return bffErrorResponse(error, 'Upstream API request failed');
   }
 }
 
+/** @deprecated Prefer proxyPremortemApi; kept for route compatibility. */
 export async function proxyPremortemApiOrUnauthorized(
   path: string,
   init?: RequestInit,
   request?: Request
 ) {
-  try {
-    return await proxyPremortemApi(path, init, request);
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unauthorized' },
-      { status: 401 }
-    );
-  }
+  return proxyPremortemApi(path, init, request);
 }

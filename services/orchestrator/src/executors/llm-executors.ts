@@ -1,6 +1,7 @@
 import type { AgentExecutor } from '@premortem/agent-kit';
 import { DEFAULT_GEMINI_MODEL } from '@premortem/domain';
 import { parseFindingEnvelope, parseIssueEnvelope, synthesizeMockIssues } from '@premortem/agent-kit';
+import { recordUsageEvent } from '@premortem/db';
 import { createLlmAdapter } from '@premortem/llm';
 
 export interface LlmExecutorConfig {
@@ -8,6 +9,82 @@ export interface LlmExecutorConfig {
   temperature?: number;
   maxTokens?: number;
 }
+
+function readTokenUsage(raw: unknown): { inputTokens: number; outputTokens: number } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+
+  const geminiUsage = value.usageMetadata as Record<string, unknown> | undefined;
+  if (geminiUsage) {
+    const inputTokens = Number(geminiUsage.promptTokenCount ?? 0);
+    const outputTokens = Number(geminiUsage.candidatesTokenCount ?? 0);
+    if (inputTokens > 0 || outputTokens > 0) {
+      return { inputTokens, outputTokens };
+    }
+  }
+
+  const azureUsage = value.usage as Record<string, unknown> | undefined;
+  if (azureUsage) {
+    const inputTokens = Number(azureUsage.prompt_tokens ?? 0);
+    const outputTokens = Number(azureUsage.completion_tokens ?? 0);
+    if (inputTokens > 0 || outputTokens > 0) {
+      return { inputTokens, outputTokens };
+    }
+  }
+
+  return null;
+}
+
+async function persistUsage(context: { payload: Record<string, unknown> }, raw: unknown) {
+  const usage = readTokenUsage(raw);
+  if (!usage) return;
+
+  const organizationId = typeof context.payload.organizationId === 'string' ? context.payload.organizationId : null;
+  if (!organizationId) return;
+
+  const projectId = typeof context.payload.projectId === 'string' ? context.payload.projectId : undefined;
+  const auditRunId = typeof context.payload.auditRunId === 'string' ? context.payload.auditRunId : undefined;
+
+  await Promise.all([
+    usage.inputTokens > 0
+        ? recordUsageEvent({
+          organizationId,
+          projectId,
+          auditRunId,
+          eventType: 'tokens_in',
+          quantity: usage.inputTokens,
+          unit: 'token',
+          metadata: { source: 'llm', direction: 'input' }
+        })
+      : Promise.resolve(),
+    usage.outputTokens > 0
+        ? recordUsageEvent({
+          organizationId,
+          projectId,
+          auditRunId,
+          eventType: 'tokens_out',
+          quantity: usage.outputTokens,
+          unit: 'token',
+          metadata: { source: 'llm', direction: 'output' }
+        })
+      : Promise.resolve()
+  ]);
+}
+
+const FINDING_JSON_CONTRACT = [
+  'Return JSON only with shape {"findings":[...]}.',
+  'Each finding must cite concrete repository file paths from payload.repo_tree in evidence.ref.',
+  'Never use synthetic repo:// placeholder refs or UUID-only paths.',
+  'Use canonical Premortem fields: agent, finding_id, category, finding_type, severity, confidence, predicted_failure, evidence, affected_assets, recommended_controls, dedupe_keys, tags.'
+].join('\n');
+
+const ISSUE_JSON_CONTRACT = [
+  'Return JSON only with shape {"issues":[...]}.',
+  'Each issue must name exact file paths from the input findings in evidence, affected_assets, and predicted_failure_summary.',
+  'Titles must describe a concrete future failure surface, not generic cleanup wording.',
+  'Never use synthetic repo:// placeholder refs.',
+  'Include source_agents and source_findings for full audit lineage.'
+].join('\n');
 
 export function createLlmExecutors(
   promptByAgent: Record<string, string>,
@@ -24,9 +101,15 @@ export function createLlmExecutors(
         model,
         temperature,
         messages: [
-          { role: 'system', content: promptByAgent[agentName] ?? '' },
+          { role: 'system', content: `${promptByAgent[agentName] ?? ''}\n\n${FINDING_JSON_CONTRACT}` },
           { role: 'user', content: JSON.stringify(context.payload) }
         ]
+      });
+      void persistUsage(context, result.raw).catch((error) => {
+        console.warn(
+          `[${agentName}] usage persistence failed:`,
+          error instanceof Error ? error.message : error
+        );
       });
       try {
         return parseFindingEnvelope(result.text);
@@ -47,14 +130,23 @@ export function createLlmExecutors(
         model,
         temperature,
         messages: [
-          { role: 'system', content: promptByAgent[agentName] ?? '' },
+          {
+            role: 'system',
+            content: `${promptByAgent[agentName] ?? ''}\n\n${ISSUE_JSON_CONTRACT}`
+          },
           { role: 'user', content: JSON.stringify({ payload: context.payload, findings }) }
         ]
+      });
+      void persistUsage(context, result.raw).catch((error) => {
+        console.warn(
+          `[${agentName}] usage persistence failed:`,
+          error instanceof Error ? error.message : error
+        );
       });
       try {
         return parseIssueEnvelope(result.text);
       } catch (error) {
-        if (agentName === 'finding_synthesizer_agent' && findings.length > 0) {
+        if (agentName === 'finding_synthesizer_agent') {
           console.warn(
             `[${agentName}] issue parse failed; falling back to deterministic synthesis:`,
             error instanceof Error ? error.message : error

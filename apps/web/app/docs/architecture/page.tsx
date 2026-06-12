@@ -1,5 +1,6 @@
 import {
   MarketingDocArticle,
+  MarketingDocGithubSource,
   MarketingDocLayout,
   MarketingDocSection
 } from '@/components/landing/blocks';
@@ -30,6 +31,14 @@ export default function ArchitectureDocPage() {
         <MarketingDocSection id="supporting" title="Supporting services (next)">
           <MarketingBulletList items={architectureDoc.supportingNext} />
         </MarketingDocSection>
+        {architectureDoc.sections?.map((section) => (
+          <MarketingDocSection key={section.id} id={section.id} title={section.heading}>
+            {section.bullets ? <MarketingBulletList items={section.bullets} /> : null}
+          </MarketingDocSection>
+        ))}
+        {architectureDoc.githubSource ? (
+          <MarketingDocGithubSource href={architectureDoc.githubSource} />
+        ) : null}
       </MarketingDocArticle>
     </MarketingDocLayout>
   );

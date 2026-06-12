@@ -2,6 +2,7 @@ import {
   disableOrganizationProject,
   enableDiscoveredRepositories,
   EntitlementError,
+  GitLabTokenError,
   listDiscoveredRepositories
 } from '@premortem/db';
 
@@ -20,6 +21,9 @@ export async function handleIntegrationRepositoriesList(
     });
     return Response.json(payload);
   } catch (error) {
+    if (error instanceof GitLabTokenError) {
+      return Response.json({ error: error.message, code: error.code }, { status: 401 });
+    }
     return Response.json(
       { error: error instanceof Error ? error.message : 'Failed to list repositories.' },
       { status: error instanceof Error && error.message.includes('not found') ? 404 : 502 }
@@ -48,11 +52,25 @@ export async function handleIntegrationRepositoriesEnable(
       createdById: actor.profileId
     });
 
-    const status = result.enabled.length > 0 ? 200 : 422;
-    return Response.json(result, { status });
+    const status =
+      result.enabled.length > 0
+        ? 200
+        : result.errors.some(
+              (entry) => entry.code === 'repo_limit' || entry.code === 'feature_locked'
+            )
+          ? 403
+          : 422;
+    const error =
+      result.enabled.length > 0
+        ? undefined
+        : result.errors[0]?.error ?? 'No repositories could be enabled.';
+    return Response.json(error ? { ...result, error } : result, { status });
   } catch (error) {
     if (error instanceof EntitlementError) {
       return Response.json({ error: error.message, code: error.code }, { status: error.status });
+    }
+    if (error instanceof GitLabTokenError) {
+      return Response.json({ error: error.message, code: error.code }, { status: 401 });
     }
     return Response.json(
       { error: error instanceof Error ? error.message : 'Failed to enable repositories.' },

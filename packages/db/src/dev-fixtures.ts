@@ -3,6 +3,7 @@ export { LOCAL_DEV_FIXTURE } from '@premortem/domain';
 import { LOCAL_DEV_FIXTURE, shouldSeedLocalDevFixture } from '@premortem/domain';
 import { prisma } from './client';
 import { auditQuotaForPlan } from './entitlements';
+import { encodeStoredToken } from './provider-tokens';
 
 import { resolveGitLabApiBaseUrl, resolveGitLabExternalProjectIdFromEnv } from './gitlab-url';
 
@@ -127,9 +128,7 @@ export async function ensureLocalDevelopmentFixture() {
       status: 'active',
       lastSyncedAt: new Date(),
       accessScope: { summary: 'read_user, api, read_repository, write_repository' },
-      ...(process.env.GITLAB_TOKEN
-        ? { encryptedAccessToken: `plain:${process.env.GITLAB_TOKEN}` }
-        : {})
+      ...(process.env.GITLAB_TOKEN ? { encryptedAccessToken: encodeStoredToken(process.env.GITLAB_TOKEN) } : {})
     },
     create: {
       organizationId: LOCAL_DEV_FIXTURE.organizationId,
@@ -140,9 +139,7 @@ export async function ensureLocalDevelopmentFixture() {
       createdById: LOCAL_DEV_FIXTURE.profileId,
       lastSyncedAt: new Date(),
       accessScope: { summary: 'read_user, api, read_repository, write_repository' },
-      ...(process.env.GITLAB_TOKEN
-        ? { encryptedAccessToken: `plain:${process.env.GITLAB_TOKEN}` }
-        : {})
+      ...(process.env.GITLAB_TOKEN ? { encryptedAccessToken: encodeStoredToken(process.env.GITLAB_TOKEN) } : {})
     }
   });
 
@@ -164,15 +161,15 @@ export async function ensureLocalDevelopmentFixture() {
   await prisma.organizationBillingAccount.upsert({
     where: { organizationId: LOCAL_DEV_FIXTURE.organizationId },
     update: {
-      plan: 'free',
-      auditQuotaMonthly: auditQuotaForPlan('free'),
+      plan: 'pro',
+      auditQuotaMonthly: auditQuotaForPlan('pro'),
       auditsUsedMonth: 0,
       billingStatus: 'active'
     },
     create: {
       organizationId: LOCAL_DEV_FIXTURE.organizationId,
-      plan: 'free',
-      auditQuotaMonthly: auditQuotaForPlan('free'),
+      plan: 'pro',
+      auditQuotaMonthly: auditQuotaForPlan('pro'),
       auditsUsedMonth: 0,
       billingStatus: 'active'
     }

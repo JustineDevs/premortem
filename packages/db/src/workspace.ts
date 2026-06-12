@@ -3,6 +3,8 @@ import { DEFAULT_GEMINI_MODEL, normalizeWorkItemAttributeConfig } from '@premort
 
 import { auditQuotaForPlan, PLAN_LIMITS } from './entitlements';
 import { prisma } from './client';
+import { encodeStoredToken, ensureGitLabAccessTokenForConnection } from './provider-tokens';
+import { getUsageEventTotalsForOrganization } from './usage-metering';
 import { isStripeBillingConfigured, isStripeTestMode, shouldUseStripeCheckout } from './stripe-env';
 
 export const DEFAULT_WORKSPACE_POLICIES = [
@@ -367,8 +369,10 @@ export async function getWorkspaceBundle(input: {
     connections,
     projects,
     billing,
+    apiKeys,
     auditsThisMonth,
     publishedIssues,
+    usageTotals,
     activityEvents,
     runningAudits
   ] = await Promise.all([
@@ -398,6 +402,10 @@ export async function getWorkspaceBundle(input: {
     prisma.organizationBillingAccount.findUnique({
       where: { organizationId: input.organizationId }
     }),
+    prisma.organizationApiKey.findMany({
+      where: { organizationId: input.organizationId },
+      orderBy: { createdAt: 'desc' }
+    }),
     prisma.auditRun.count({
       where: {
         organizationId: input.organizationId,
@@ -407,6 +415,7 @@ export async function getWorkspaceBundle(input: {
     prisma.publishedIssue.count({
       where: { organizationId: input.organizationId }
     }),
+    getUsageEventTotalsForOrganization(input.organizationId, monthStart),
     prisma.activityEvent.findMany({
       where: { organizationId: input.organizationId },
       orderBy: { createdAt: 'desc' },
@@ -490,10 +499,18 @@ export async function getWorkspaceBundle(input: {
       maxRepos: PLAN_LIMITS[billing?.plan ?? organization.plan].maxRepos,
       invoices: []
     },
+    apiKeys: apiKeys.map((key) => ({
+      id: key.id,
+      label: key.label,
+      keyPrefix: key.keyPrefix,
+      lastUsedAt: key.lastUsedAt ? key.lastUsedAt.toISOString() : null,
+      revokedAt: key.revokedAt ? key.revokedAt.toISOString() : null,
+      createdAt: key.createdAt.toISOString()
+    })),
     usage: {
       scans: { used: auditsThisMonth, limit: auditQuota },
       repos: { used: projects.length, limit: PLAN_LIMITS[billing?.plan ?? organization.plan].maxRepos },
-      tokens: { used: 0, limit: 50 },
+      tokens: { used: usageTotals.tokensUsed, limit: 50 },
       patches: { used: publishedIssues, limit: Math.max(publishedIssues, 50) }
     },
     activity: activityEvents.map((event) => ({
@@ -715,7 +732,7 @@ export async function createProviderConnection(input: {
       accessScope: (input.accessScope ?? { summary: 'read_user' }) as Prisma.JsonObject,
       status: input.accessToken ? 'active' : 'pending',
       createdById: input.createdById,
-      encryptedAccessToken: input.accessToken ? `plain:${input.accessToken}` : undefined,
+      encryptedAccessToken: input.accessToken ? encodeStoredToken(input.accessToken) : undefined,
       lastSyncedAt: input.accessToken ? new Date() : undefined
     }
   });
@@ -731,7 +748,13 @@ export async function upsertProviderConnectionFromOAuth(input: {
   accessToken: string;
   refreshToken?: string;
   accessScope?: Record<string, unknown>;
+  expiresInSeconds?: number;
 }) {
+  const tokenExpiresAt =
+    typeof input.expiresInSeconds === 'number' && input.expiresInSeconds > 0
+      ? new Date(Date.now() + input.expiresInSeconds * 1000)
+      : undefined;
+
   return prisma.providerConnection.upsert({
     where: {
       organizationId_provider_externalAccountId: {
@@ -742,34 +765,27 @@ export async function upsertProviderConnectionFromOAuth(input: {
     },
     update: {
       externalAccountName: input.externalAccountName,
-      encryptedAccessToken: `plain:${input.accessToken}`,
-      encryptedRefreshToken: input.refreshToken ? `plain:${input.refreshToken}` : undefined,
+      encryptedAccessToken: encodeStoredToken(input.accessToken),
+      encryptedRefreshToken: input.refreshToken ? encodeStoredToken(input.refreshToken) : undefined,
       accessScope: (input.accessScope ?? { summary: 'read_user, api, read_repository' }) as Prisma.JsonObject,
       status: 'active',
-      lastSyncedAt: new Date()
+      lastSyncedAt: new Date(),
+      tokenExpiresAt
     },
     create: {
       organizationId: input.organizationId,
       provider: input.provider,
       externalAccountId: input.externalAccountId,
       externalAccountName: input.externalAccountName,
-      encryptedAccessToken: `plain:${input.accessToken}`,
-      encryptedRefreshToken: input.refreshToken ? `plain:${input.refreshToken}` : undefined,
+      encryptedAccessToken: encodeStoredToken(input.accessToken),
+      encryptedRefreshToken: input.refreshToken ? encodeStoredToken(input.refreshToken) : undefined,
       accessScope: (input.accessScope ?? { summary: 'read_user, api, read_repository' }) as Prisma.JsonObject,
       status: 'active',
       createdById: input.createdById,
-      lastSyncedAt: new Date()
+      lastSyncedAt: new Date(),
+      tokenExpiresAt
     }
   });
-}
-
-async function verifyGitLabAccessToken(baseUrl: string, token: string) {
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/v4/user`, {
-    headers: { 'PRIVATE-TOKEN': token }
-  });
-  if (!response.ok) {
-    throw new Error(`GitLab token validation failed: ${response.status}`);
-  }
 }
 
 export async function syncProviderConnection(connectionId: string) {
@@ -778,13 +794,8 @@ export async function syncProviderConnection(connectionId: string) {
   });
 
   if (connection.provider === 'gitlab' && connection.encryptedAccessToken) {
-    const token = connection.encryptedAccessToken.startsWith('plain:')
-      ? connection.encryptedAccessToken.slice('plain:'.length)
-      : connection.encryptedAccessToken;
-    const baseUrl = process.env.GITLAB_BASE_URL ?? 'https://gitlab.com';
-
     try {
-      await verifyGitLabAccessToken(baseUrl, token);
+      await ensureGitLabAccessTokenForConnection(connection.id);
     } catch {
       return prisma.providerConnection.update({
         where: { id: connectionId },
@@ -854,4 +865,28 @@ export async function recordActivityEvent(input: {
       objectId: input.objectId
     }
   });
+}
+
+export async function getOrganizationActivityEvents(organizationId: string, limit = 250) {
+  const events = await prisma.activityEvent.findMany({
+    where: { organizationId },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    include: { actor: true }
+  });
+
+  return events.map((event) => ({
+    id: event.id,
+    organizationId: event.organizationId,
+    projectId: event.projectId,
+    actorId: event.actorId,
+    actorEmail: event.actor?.email ?? null,
+    actorName: event.actor?.fullName ?? event.actor?.username ?? null,
+    eventType: event.eventType,
+    objectType: event.objectType,
+    objectId: event.objectId,
+    summary: event.summary,
+    metadata: event.metadata,
+    createdAt: event.createdAt.toISOString()
+  }));
 }

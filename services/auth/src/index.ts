@@ -1,3 +1,9 @@
+/**
+ * Compatibility shim for the historical auth namespace.
+ * Supabase and GitLab are wired. GitHub and Entra remain roadmap items.
+ */
 export const authService = {
-  providers: ['supabase', 'gitlab', 'github', 'microsoft-entra-id']
+  kind: 'compatibility-shim' as const,
+  providers: ['supabase', 'gitlab'],
+  comingSoonProviders: ['github', 'microsoft-entra-id']
 };

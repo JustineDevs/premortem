@@ -7,6 +7,10 @@ export interface GitLabIssuePayload {
   title: string;
   description: string;
   labels?: string[];
+  assigneeIds?: number[];
+  milestoneId?: number;
+  dueDate?: string;
+  weight?: number;
 }
 
 export interface GitLabLabelDefinition {
@@ -72,10 +76,37 @@ export async function createGitLabIssue(baseUrl: string, token: string, payload:
     body: JSON.stringify({
       title: payload.title,
       description: payload.description,
-      labels: payload.labels?.join(',')
+      labels: payload.labels?.join(','),
+      assignee_ids: payload.assigneeIds?.length ? payload.assigneeIds : undefined,
+      milestone_id: payload.milestoneId,
+      due_date: payload.dueDate,
+      weight: payload.weight
     })
   });
 
   if (!response.ok) throw new Error(`GitLab issue create failed: ${response.status} ${await response.text()}`);
+  return response.json();
+}
+
+export async function updateGitLabIssueTimeEstimate(
+  baseUrl: string,
+  token: string,
+  projectId: string,
+  issueIid: string | number,
+  timeEstimate: string
+) {
+  const response = await fetch(
+    `${baseUrl}/api/v4/projects/${encodeURIComponent(projectId)}/issues/${issueIid}`,
+    {
+      method: 'PUT',
+      headers: gitLabJsonHeaders(token),
+      body: JSON.stringify({ time_estimate: timeEstimate })
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`GitLab issue time estimate update failed: ${response.status} ${await response.text()}`);
+  }
+
   return response.json();
 }

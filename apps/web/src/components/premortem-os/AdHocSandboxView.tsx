@@ -152,18 +152,18 @@ export function initializeS3() {
       {/* Title Header */}
       <div className="border-b border-[#EAE6DF] pb-6">
         <span className="text-[10px] uppercase tracking-widest font-mono text-[#8A958F] block">
-          AI-Powered Inspection Lab
+          Demo Inspection Lab
         </span>
         <h2 className="text-2xl font-semibold tracking-tight text-[#1E2522] font-display mt-1">
-          Premium AI Code Sandbox
+          Static Demo Scanner
         </h2>
         <p className="text-xs text-[#5C6560] mt-1 mb-3">
-          Paste any custom server-side TypeScript/JSON scripts to evaluate live vulnerability traces using **Gemini-3.5-flash**.
+          Paste server-side TypeScript or JSON snippets to run the local static demo scanner. Full orchestrator audits run from Projects or Audits.
         </p>
 
         {/* Explain the API config key environment */}
         <div className="p-3 bg-emerald-50 border border-emerald-200/60 rounded text-[11px] text-emerald-900 leading-relaxed max-w-2xl">
-          <span className="font-bold">Static pattern scanner:</span> This playground runs the Premortem static security analyzer against pasted code. Full orchestrator audits run from Projects or Audits tabs.
+          <span className="font-bold">Static demo scanner:</span> This playground runs the Premortem static demo analyzer against pasted code. It is not repository-aware. Full orchestrator audits run from Projects or Audits tabs.
         </div>
         <div className="mt-4">
           <OsStepper steps={scanSteps} />
@@ -225,30 +225,30 @@ export function initializeS3() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                <span>Analyzing Trace via Gemini AI Engine...</span>
+                <span>Running static pattern scan…</span>
               </>
             ) : (
               <>
                 <Play size={13} className="fill-current" />
-                <span>Execute AI Security Analysis Scan</span>
+                <span>Run static pattern scan</span>
               </>
             )}
           </button>
         </div>
 
-        {/* Right Side: Gemini Evaluation Results */}
+        {/* Right Side: static scan results */}
         <div className="space-y-4">
           <label className="block font-mono font-bold uppercase tracking-wider text-[#717A75] text-xs">
-            Live Compliances Evaluation Results
+            Static scan results (playground only)
           </label>
 
           {isLoading ? (
             <div className="border border-[#EAE6DF] rounded bg-[#FAF8F5] p-12 text-center flex flex-col items-center justify-center h-[420px] gap-3">
               <Sparkles size={24} className="text-emerald-800 animate-pulse" />
               <div className="space-y-1">
-                <p className="text-xs font-bold text-zinc-800">Reviewing code structure for security breaches...</p>
+                <p className="text-xs font-bold text-zinc-800">Applying static security rules…</p>
                 <p className="text-[10px] text-[#5C6560] max-w-xs">
-                  Gemini is mapping function calls, tracing variable flows, and composing the recommended patches.
+                  This playground does not call the orchestrator. Register a project for full AI audit findings.
                 </p>
               </div>
             </div>
@@ -256,13 +256,10 @@ export function initializeS3() {
             <div className="border border-red-200 bg-red-50 p-6 rounded text-xs text-red-800 space-y-2 font-sans h-[420px] overflow-y-auto">
               <span className="font-bold flex items-center gap-1.5 uppercase text-[10px]">
                 <Radio className="text-red-600 animate-pulse" size={12} />
-                AIS-SecOps Pipeline Error
+                Static scan failed
               </span>
               <p className="leading-relaxed">
                 {errorWord}
-              </p>
-              <p className="font-mono text-[10px] text-red-600 pt-4">
-                Verify if your API endpoint processes compile scripts or examine if network throttling occurred.
               </p>
             </div>
           ) : scanResult ? (

@@ -1193,7 +1193,7 @@ var Component = /* @__PURE__ */ React.forwardRef(function (props, ref) {
 													"--framer-text-decoration": "underline",
 												}}
 											>
-												{"GitHub (soon)"}
+												{"GitHub"}
 											</motion.p>
 										</React.Fragment>
 									</RichText>

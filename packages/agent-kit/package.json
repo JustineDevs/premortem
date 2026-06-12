@@ -12,8 +12,6 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "lint": "echo lint agent-kit",
-    "test": "echo test agent-kit",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

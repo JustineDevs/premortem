@@ -34,7 +34,7 @@ const submitted = await submitAudit({
 await executeAuditJob({
   job: submitted.job,
   rootDir: ROOT_DIR,
-  registryAgents: buildWorkerRegisteredAgents()
+  registryAgents: buildWorkerRegisteredAgents(ROOT_DIR)
 });
 
 const snapshot = await getAuditRunSnapshot(submitted.auditRunId);

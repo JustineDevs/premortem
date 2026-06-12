@@ -393,7 +393,7 @@ async function main() {
   console.log(`Config: ${CONFIG_PATH}`);
   console.log(`Servers: ${Object.keys(servers).length}`);
   console.log(
-    `Env: GITLAB_TOKEN=${process.env.GITLAB_TOKEN ? "set" : "missing"}, CLOUDFLARE_API_TOKEN=${process.env.CLOUDFLARE_API_TOKEN ? "set" : "missing"}, DATABASE_URL=${process.env.DATABASE_URL ? "set" : "missing"}\n`
+    `Env: GITLAB_TOKEN=${process.env.GITLAB_TOKEN ? "set" : "missing"}, CLOUDFLARE_API_TOKEN=${process.env.CLOUDFLARE_API_TOKEN ? "set" : "missing"}, DATABASE_URL=${process.env.DATABASE_URL ? "set" : "missing"}, PHOENIX_API_KEY=${process.env.PHOENIX_API_KEY ? "set" : "missing"}\n`
   );
 
   const results = [];
@@ -401,7 +401,9 @@ async function main() {
   for (const [name, serverConfig] of Object.entries(servers)) {
     process.stdout.write(`Checking ${name}... `);
     let result;
-    if (serverConfig.url) {
+    if (name === "Phoenix" && !process.env.PHOENIX_API_KEY?.trim()) {
+      result = { status: "CONFIG_MISSING", error: "PHOENIX_API_KEY missing" };
+    } else if (serverConfig.url) {
       result = await verifyHttp(name, serverConfig);
     } else if (serverConfig.command) {
       result = await verifyStdio(name, serverConfig);

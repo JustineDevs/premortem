@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 
+import { getApiBaseUrl } from '@/lib/runtime-config';
+
 export async function GET() {
   try {
-    const apiBase = process.env.PREMORTEM_API_BASE_URL ?? 'http://127.0.0.1:18787';
+    const apiBase = getApiBaseUrl();
     const response = await fetch(`${apiBase}/health`, { cache: 'no-store' });
     return NextResponse.json({
       ok: response.ok,

@@ -17,6 +17,7 @@ import {
   createSupabaseSmokeSession,
   deleteSupabaseSmokeUser
 } from './smoke-supabase-session.mjs';
+import { smokeReviewEditPayload } from './smoke-review-edit.mjs';
 
 const { rootDir: ROOT_DIR, productionMode, fixtureMode } = loadSmokeEnv();
 
@@ -229,7 +230,7 @@ for (let attempt = 1; attempt <= 3; attempt += 1) {
   execution = await executeAuditJob({
     job: submitted.job,
     rootDir: ROOT_DIR,
-    registryAgents: buildWorkerRegisteredAgents()
+    registryAgents: buildWorkerRegisteredAgents(ROOT_DIR)
   });
 
   if (execution.runStatus === 'completed' && execution.issueCandidateCount > 0) {
@@ -271,6 +272,7 @@ if (productionMode) {
 }
 
 const issueId = snapshot?.issueCandidates?.[0]?.id;
+const issueCandidate = snapshot?.issueCandidates?.[0];
 assert.ok(issueId, 'issue candidate exists');
 
 const publishBeforeApprove = await fetch(`${WEB_BASE}/api/issues/${issueId}/publish`, {
@@ -297,7 +299,7 @@ const editRes = await fetch(`${WEB_BASE}/api/audits/${submitted.auditRunId}/issu
     'content-type': 'application/json',
     ...(bffInit?.headers ?? {})
   },
-  body: JSON.stringify({ title: 'Production readiness edited title' })
+  body: JSON.stringify(smokeReviewEditPayload(issueCandidate))
 });
 assert.equal(editRes.status, 200);
 pass('review_workflow', 'Edit action with versioning');

@@ -16,6 +16,7 @@
     "@premortem/db": "workspace:*",
     "@premortem/gitlab-sync": "workspace:*",
     "@premortem/orchestrator": "workspace:*",
+    "@premortem/storage": "workspace:*",
     "@premortem/workflow": "workspace:*",
     "@premortem/observability": "workspace:*"
   },

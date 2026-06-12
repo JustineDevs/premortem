@@ -25,7 +25,7 @@ type MarketingScreenshotProps = {
   src: string;
   alt: string;
   caption?: string;
-  crop?: 'preview';
+  crop?: 'preview' | 'console';
   showCaption?: boolean;
 };
 
@@ -39,7 +39,9 @@ export function MarketingScreenshot({
   const imgClass =
     crop === 'preview'
       ? 'landing-block-screenshot__img landing-block-screenshot__img--preview'
-      : 'landing-block-screenshot__img';
+      : crop === 'console'
+        ? 'landing-block-screenshot__img landing-block-screenshot__img--console'
+        : 'landing-block-screenshot__img';
 
   return (
     <figure className="landing-block-screenshot">

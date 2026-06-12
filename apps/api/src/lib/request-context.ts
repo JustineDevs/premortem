@@ -1,5 +1,11 @@
 import { isLocalAuthBypassEnabled } from '@premortem/domain';
-import { resolveActorOrganization, extractBearerToken, verifySupabaseAccessToken } from '@premortem/db';
+import {
+  resolveActorOrganization,
+  extractApiKeyToken,
+  extractBearerToken,
+  verifyOrganizationApiKey,
+  verifySupabaseAccessToken
+} from '@premortem/db';
 
 export interface ApiActorContext {
   profileId: string;
@@ -35,6 +41,18 @@ async function resolveFromHeaders(request: Request): Promise<ApiActorContext> {
 export async function resolveApiActorContext(request: Request): Promise<ApiActorContext> {
   if (isLocalAuthBypassEnabled()) {
     return resolveFromHeaders(request);
+  }
+
+  const apiKeyToken = extractApiKeyToken(request);
+  if (apiKeyToken) {
+    const resolved = await verifyOrganizationApiKey(apiKeyToken);
+    if (resolved) {
+      return {
+        profileId: resolved.profileId,
+        organizationId: resolved.organizationId,
+        email: null
+      };
+    }
   }
 
   const token = extractBearerToken(request);

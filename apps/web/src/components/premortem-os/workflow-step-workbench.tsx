@@ -5,6 +5,7 @@ import { ChevronRight, Info, Workflow, X } from 'lucide-react';
 
 import type { Finding } from '@/lib/premortem-os/types';
 import type { CanvasEdge, CanvasNode } from './workflow-canvas.types';
+import { FindingSourceEvidence } from './finding-source-evidence';
 import { WorkflowDualLanePanel } from './workflow-dual-lane-panel';
 import type { WorkflowAuditSnapshot } from './workflow-canvas.types';
 import { WorkflowStepBreadcrumb } from './workflow-step-breadcrumb';
@@ -214,7 +215,7 @@ export function WorkflowStepWorkbench({
                         {isDetailActive && (
                           <div className="animate-fadeIn mt-0.5 space-y-2 rounded border border-emerald-200 bg-[#FAF8F5] p-3 font-sans text-[10px] leading-relaxed text-neutral-800 shadow-sm">
                             <div className="flex items-center justify-between border-b pb-1 font-mono text-[8.5px]">
-                              <span className="font-bold uppercase text-emerald-800">Trace evidence</span>
+                              <span className="font-bold uppercase text-emerald-800">Finding detail</span>
                               <span className="text-zinc-500">
                                 File: {finding.filepath}:{finding.line}
                               </span>
@@ -225,6 +226,7 @@ export function WorkflowStepWorkbench({
                             <p className="text-[10px] leading-relaxed text-neutral-600">
                               {finding.description}
                             </p>
+                            <FindingSourceEvidence finding={finding} compact title="Source code evidence" />
                             {finding.recommendation && (
                               <div className="rounded border bg-white p-2 font-mono text-[9.5px] text-emerald-950">
                                 <span className="mb-0.5 block text-[8.5px] font-bold uppercase text-emerald-800">

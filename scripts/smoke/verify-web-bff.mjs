@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { ConsoleReviewAction, LOCAL_DEV_FIXTURE } from '@premortem/domain';
 import { loadSmokeEnv } from './load-smoke-env.mjs';
 import { createSupabaseSmokeSession } from './smoke-supabase-session.mjs';
+import { smokeReviewEditPayload } from './smoke-review-edit.mjs';
 import { randomBytes } from 'node:crypto';
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -98,7 +99,7 @@ const submitted = await submitAudit({
 await executeAuditJob({
   job: submitted.job,
   rootDir: ROOT_DIR,
-  registryAgents: buildWorkerRegisteredAgents()
+  registryAgents: buildWorkerRegisteredAgents(ROOT_DIR)
 });
 
 const snapshotRes = await bffFetch(`/api/audits/${submitted.auditRunId}`);
@@ -234,6 +235,7 @@ assert.equal(
 );
 
 const issueId = snapshotPayload.snapshot.issueCandidates?.[0]?.id;
+const issueCandidate = snapshotPayload.snapshot.issueCandidates?.[0];
 if (issueId) {
   const approveRes = await bffFetch(
     `/api/audits/${submitted.auditRunId}/issues/${issueId}/action`,
@@ -250,10 +252,7 @@ if (issueId) {
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        title: 'Smoke edited title',
-        whyItMatters: 'Verified edit route'
-      })
+      body: JSON.stringify(smokeReviewEditPayload(issueCandidate))
     }
   );
   assert.equal(editRes.status, 200, 'POST edit issue');

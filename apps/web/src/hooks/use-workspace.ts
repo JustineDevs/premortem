@@ -21,6 +21,8 @@ export function useWorkspace() {
     patchProfile: mutations.patchProfile,
     patchOrganization: mutations.patchOrganization,
     patchBillingPlan: mutations.patchBillingPlan,
+    createApiKey: mutations.createApiKey,
+    revokeApiKey: mutations.revokeApiKey,
     registerIntegration: mutations.registerIntegration,
     syncIntegration: mutations.syncIntegration,
     startCheckout: mutations.startCheckout,

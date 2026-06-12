@@ -1,4 +1,4 @@
-name = "premortem-api"
+name = "premortem"
 main = "src/index.ts"
 compatibility_date = "2026-06-08"
 workers_dev = true
@@ -6,6 +6,13 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 APP_ENV = "development"
+
+[triggers]
+crons = ["*/1 * * * *"]
+
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
 
 [[queues.producers]]
 binding = "AUDIT_QUEUE"
@@ -19,15 +26,19 @@ max_retries = 3
 dead_letter_queue = "premortem-audit-jobs-dlq-dev"
 
 [[routes]]
-pattern = "api.premortem.dev/*"
-zone_name = "premortem.dev"
+pattern = "api.premortem.jstn.site/*"
+zone_name = "jstn.site"
 
 [env.production]
-name = "premortem-api"
+name = "premortem"
 workers_dev = false
 
 [env.production.vars]
 APP_ENV = "production"
+
+[[env.production.durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
 
 [[env.production.queues.producers]]
 binding = "AUDIT_QUEUE"
@@ -41,5 +52,9 @@ max_retries = 3
 dead_letter_queue = "premortem-audit-jobs-dlq"
 
 [[env.production.routes]]
-pattern = "api.premortem.dev/*"
-zone_name = "premortem.dev"
+pattern = "api.premortem.jstn.site/*"
+zone_name = "jstn.site"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiter"]

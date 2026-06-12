@@ -51,14 +51,11 @@ export function normalizeTransactionPoolerUrl(raw, env = process.env) {
 
   url.searchParams.set('pgbouncer', 'true');
   url.searchParams.set('sslmode', 'require');
-  const isServerless =
-    env?.VERCEL === '1' ||
-    env?.AWS_LAMBDA_FUNCTION_NAME ||
-    env?.PREMORTEM_SERVERLESS === '1';
-  if (!url.searchParams.has('connection_limit')) {
-    url.searchParams.set('connection_limit', isServerless ? '1' : '5');
-  } else if (!isServerless && url.searchParams.get('connection_limit') === '1') {
-    url.searchParams.set('connection_limit', '5');
+  const configuredLimit = env?.PREMORTEM_DB_CONNECTION_LIMIT?.trim();
+  if (configuredLimit) {
+    url.searchParams.set('connection_limit', configuredLimit);
+  } else if (!url.searchParams.has('connection_limit')) {
+    url.searchParams.set('connection_limit', isPoolerHost(url.hostname) ? '1' : '5');
   }
 
   return fromUrl(url);

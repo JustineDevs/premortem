@@ -4,7 +4,7 @@ import { getApiBaseUrl } from '@/lib/runtime-config';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
 
 async function proxyPatch(path: string, request: Request) {
-  const context = await resolveRequestActorContext();
+  const context = await resolveRequestActorContext(request);
   const body = await request.json();
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
     method: 'PATCH',
@@ -21,7 +21,7 @@ async function proxyPatch(path: string, request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    return proxyPatch('/api/workspace/policies', request);
+    return await proxyPatch('/api/workspace/policies', request);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed' }, { status: 502 });
   }

@@ -1,6 +1,13 @@
+import {
+  DEFAULT_PREMORTEM_SITE_URL,
+  PREMORTEM_PRODUCT_NAME,
+  PREMORTEM_SITE_HOST
+} from '@premortem/domain';
+
 export const premortemBrand = {
-  productName: 'Premortem',
-  domain: 'premortem.dev',
+  productName: PREMORTEM_PRODUCT_NAME,
+  domain: PREMORTEM_SITE_HOST,
+  siteUrl: DEFAULT_PREMORTEM_SITE_URL,
   contactEmail: 'justinedevs@jstn.site',
   supportEmail: 'justinedevs@jstn.site',
   workspaceName: 'Premortem Workspace',

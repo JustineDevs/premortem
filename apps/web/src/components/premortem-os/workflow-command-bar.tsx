@@ -19,6 +19,7 @@ interface WorkflowCommandBarProps {
   selectedProjectId: string;
   onProjectChange: (projectId: string) => void;
   selectedProject: Project;
+  hasProjects?: boolean;
   onExecuteStream: () => void;
 }
 
@@ -33,6 +34,7 @@ export function WorkflowCommandBar({
   selectedProjectId,
   onProjectChange,
   selectedProject,
+  hasProjects = true,
   onExecuteStream
 }: WorkflowCommandBarProps) {
   return (
@@ -51,7 +53,7 @@ export function WorkflowCommandBar({
         <WorkflowViewModeToggle mode={viewMode} onChange={(mode) => onViewModeChange(mode)} />
 
         <div className="flex items-center gap-1.5 rounded border border-[#EAE6DF] bg-[#FAF8F5] p-1 px-2.5 shadow-xs">
-          <span className="mr-1 font-mono text-[9px] font-bold uppercase text-[#8A958F]">Trace Player:</span>
+          <span className="mr-1 font-mono text-[9px] font-bold uppercase text-[#8A958F]">Step replay:</span>
           <button
             type="button"
             onClick={onToggleSimulation}
@@ -64,7 +66,7 @@ export function WorkflowCommandBar({
             <span
               className={`h-1.5 w-1.5 rounded-full ${isSimulating ? 'bg-amber-300 motion-safe:animate-ping' : 'bg-emerald-300'}`}
             />
-            <span>{isSimulating ? 'Stop Trace' : 'Simulate Trace'}</span>
+            <span>{isSimulating ? 'Stop replay' : 'Replay steps'}</span>
           </button>
         </div>
 
@@ -86,11 +88,17 @@ export function WorkflowCommandBar({
         <button
           type="button"
           onClick={onExecuteStream}
-          disabled={selectedProject.status === 'SCANNING'}
+          disabled={!hasProjects || selectedProject.status === 'SCANNING'}
           className="flex cursor-pointer items-center gap-1.5 rounded bg-emerald-950 py-1 px-3 font-mono text-xs font-bold uppercase tracking-wider text-[#FAF8F5] transition-all hover:bg-emerald-900 disabled:opacity-55"
         >
           <Play size={11} strokeWidth={2.5} aria-hidden />
-          <span>{selectedProject.status === 'SCANNING' ? 'Running...' : 'Execute Stream'}</span>
+          <span>
+            {!hasProjects
+              ? 'Add project'
+              : selectedProject.status === 'SCANNING'
+                ? 'Running...'
+                : 'Execute Stream'}
+          </span>
         </button>
       </div>
     </div>

@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { ConsoleReviewAction, LOCAL_DEV_FIXTURE } from '@premortem/domain';
 
 import { loadSmokeEnv } from './load-smoke-env.mjs';
+import { smokeReviewEditPayload } from './smoke-review-edit.mjs';
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 loadSmokeEnv();
@@ -93,7 +94,7 @@ const parallelAudits = await Promise.all(
     await executeAuditJob({
       job: submitted.job,
       rootDir: ROOT_DIR,
-      registryAgents: buildWorkerRegisteredAgents()
+      registryAgents: buildWorkerRegisteredAgents(ROOT_DIR)
     });
 
     return submitted.auditRunId;
@@ -132,6 +133,7 @@ assert.ok(lastAuditId, 'last audit id');
 const snapshotRes = await fetch(`${WEB_BASE}/api/audits/${lastAuditId}`);
 const snapshotPayload = await snapshotRes.json();
 const issueId = snapshotPayload.snapshot?.issueCandidates?.[0]?.id;
+const issueCandidate = snapshotPayload.snapshot?.issueCandidates?.[0];
 
 if (issueId) {
   const approveRes = await fetch(
@@ -147,7 +149,7 @@ if (issueId) {
   const editRes = await fetch(`${WEB_BASE}/api/audits/${lastAuditId}/issues/${issueId}/edit`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ title: 'E2E stress edited title' })
+    body: JSON.stringify(smokeReviewEditPayload(issueCandidate))
   });
   assert.equal(editRes.status, 200, 'edit issue');
 

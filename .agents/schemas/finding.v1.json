@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://premortem.dev/schemas/finding.v1.json",
+  "$id": "https://premortem.jstn.site/schemas/finding.v1.json",
   "title": "Premortem Finding v1",
   "type": "object",
   "required": ["id", "run_id", "specialist", "title", "summary", "severity", "confidence", "scope", "evidence", "status"],

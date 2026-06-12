@@ -1,5 +1,20 @@
 import { marketingLinks } from '@/lib/marketing-links';
 
+export type { StructuredDoc } from './docs-types';
+export {
+  deployProductionGuideDoc,
+  workflowCanvasGuideDoc,
+  auditHistoryGuideDoc,
+  aiPlaygroundGuideDoc,
+  workspaceSettingsGuideDoc,
+  authSessionsGuideDoc,
+  billingPlansReferenceDoc,
+  neo4jGraphReferenceDoc,
+  observabilityReferenceDoc,
+  securityConceptDoc,
+  publishGitlabTutorialDoc
+} from './docs-additional-content';
+
 export type DocNavItem = {
   href: string;
   label: string;
@@ -30,6 +45,11 @@ export const docsNavSections: readonly DocSection[] = [
         href: marketingLinks.docsTutorialFirstAudit,
         label: 'Tutorial: first audit',
         description: 'Learning-oriented path from connect to review-ready issues.'
+      },
+      {
+        href: marketingLinks.docsTutorialPublishGitlab,
+        label: 'Tutorial: publish to GitLab',
+        description: 'Approve one candidate and verify reconciliation.'
       }
     ]
   },
@@ -52,6 +72,36 @@ export const docsNavSections: readonly DocSection[] = [
         description: 'Approve issue candidates and sync to GitLab.'
       },
       {
+        href: marketingLinks.docsGuidesWorkflowCanvas,
+        label: 'Workflow Canvas',
+        description: 'Pipeline graph, workbench, and dual-lane swarm view.'
+      },
+      {
+        href: marketingLinks.docsGuidesAuditHistory,
+        label: 'Audit history',
+        description: 'Compliance timeline, milestone compare, CSV export.'
+      },
+      {
+        href: marketingLinks.docsGuidesAiPlayground,
+        label: 'AI Code Playground',
+        description: 'Ad-hoc Gemini snippet analysis outside full audits.'
+      },
+      {
+        href: marketingLinks.docsGuidesWorkspaceSettings,
+        label: 'Workspace settings',
+        description: 'Profile, LLM, billing, notifications, work item attributes.'
+      },
+      {
+        href: marketingLinks.docsGuidesAuthSessions,
+        label: 'Auth & sessions',
+        description: 'Supabase login, local dev auth, GitLab OAuth redirects.'
+      },
+      {
+        href: marketingLinks.docsGuidesDeployProduction,
+        label: 'Deploy to production',
+        description: 'Cloudflare Pages/Worker, Supabase, Neo4j, Stripe.'
+      },
+      {
         href: marketingLinks.docsIntegrationsGitlab,
         label: 'GitLab integration',
         description: 'MCP context, publish APIs, and reconciliation.'
@@ -69,7 +119,22 @@ export const docsNavSections: readonly DocSection[] = [
       {
         href: marketingLinks.docsReferenceEnvironment,
         label: 'Environment variables',
-        description: 'DATABASE_URL, provider keys, Stripe, and runtime flags.'
+        description: 'Full .env.example parity for local and production.'
+      },
+      {
+        href: marketingLinks.docsReferenceBilling,
+        label: 'Billing & plan limits',
+        description: 'PLAN_LIMITS tiers, Stripe, and quota enforcement.'
+      },
+      {
+        href: marketingLinks.docsReferenceNeo4j,
+        label: 'Neo4j & graph store',
+        description: 'Local docker, Aura, graph API, NEO4J_DISABLED.'
+      },
+      {
+        href: marketingLinks.docsReferenceObservability,
+        label: 'Observability',
+        description: 'Sentry, PostHog, Langfuse, Phoenix tracing.'
       },
       {
         href: marketingLinks.docsArchitecture,
@@ -92,6 +157,11 @@ export const docsNavSections: readonly DocSection[] = [
         description: 'Ingestion → graph → swarm → review → publish traceability.'
       },
       {
+        href: marketingLinks.docsConceptsSecurity,
+        label: 'Security & trust',
+        description: 'Publish gates, tokens, multi-tenant boundaries.'
+      },
+      {
         href: marketingLinks.docsProductFlows,
         label: 'Product flows',
         description: 'Onboarding, org switching, and lifecycle states.'
@@ -105,6 +175,11 @@ export const docsNavSections: readonly DocSection[] = [
         href: marketingLinks.docsTroubleshooting,
         label: 'Common issues',
         description: 'Auth, webhooks, failed audits, and publish drift.'
+      },
+      {
+        href: marketingLinks.docsFaq,
+        label: 'FAQ',
+        description: 'Short answers for launch, auth, and support questions.'
       }
     ]
   },
@@ -180,33 +255,39 @@ export const docsHubCards = [
     tag: 'Getting started'
   },
   {
+    href: marketingLinks.docsGuidesDeployProduction,
+    title: 'Deploy to production',
+    description: 'Cloudflare Pages, Worker, Supabase, Neo4j, Stripe webhooks.',
+    tag: 'Guide'
+  },
+  {
     href: marketingLinks.docsTutorialFirstAudit,
     title: 'First audit tutorial',
     description: 'Connect a repo, run the specialist swarm, and reach review-ready issues.',
     tag: 'Tutorial'
   },
   {
-    href: marketingLinks.docsGuidesRunAudit,
-    title: 'Run an audit',
-    description: 'Manual scans, continuous audit lock, runtime console, stop/resume.',
+    href: marketingLinks.docsGuidesWorkflowCanvas,
+    title: 'Workflow Canvas',
+    description: 'Pipeline graph, dual-lane workbench, and step telemetry.',
     tag: 'Guide'
   },
   {
-    href: marketingLinks.docsGuidesReviewPublish,
-    title: 'Review & publish',
-    description: 'Human approval gates before GitLab sync and reconciliation.',
-    tag: 'Guide'
+    href: marketingLinks.docsReferenceEnvironment,
+    title: 'Environment variables',
+    description: 'Full .env.example reference for local and production.',
+    tag: 'Reference'
   },
   {
-    href: marketingLinks.docsReferenceApi,
-    title: 'API reference',
-    description: 'Audits, workspace, issues, reconciliation: copy-ready routes.',
+    href: marketingLinks.docsReferenceBilling,
+    title: 'Billing & limits',
+    description: 'Plan tiers, quotas, and Stripe integration.',
     tag: 'Reference'
   },
   {
     href: marketingLinks.docsTroubleshooting,
     title: 'Troubleshooting',
-    description: 'Failed onboarding, auth, webhooks, and publish drift fixes.',
+    description: 'Auth loops, empty dashboard, OAuth host, publish drift.',
     tag: 'Support'
   }
 ] as const;
@@ -269,6 +350,11 @@ export const firstAuditTutorialDoc = {
     'A GitLab project you can authorize, or PREMORTEM_INGEST_LOCAL=1 for mock ingest.'
   ],
   expectedResult: 'An audit run with agent telemetry, deduplicated clusters, and issue candidates awaiting reviewer approval.',
+  screenshot: {
+    src: '/landing/demo/2.png',
+    alt: 'Register repository in Projects Inventory',
+    caption: 'Step 1: connect GitLab and register the target repository.'
+  },
   toc: [
     { id: 'connect', label: 'Connect GitLab' },
     { id: 'trigger', label: 'Trigger the audit' },
@@ -475,20 +561,46 @@ export const apiReferenceDoc = {
   lead: 'HTTP endpoints exposed by the Premortem API worker: use the same routes from /app BFF proxies locally.',
   audience: 'Developers integrating audits, workspace settings, or issue actions.',
   expectedResult: 'You can trigger audits and read snapshots without opening the UI.',
+  githubSource: 'https://github.com/JustineDevs/premortem/blob/main/docs/architecture/adr-0001-canonical-product-and-system-design.md',
   toc: [
+    { id: 'auth', label: 'Authentication' },
     { id: 'audits', label: 'Audits' },
     { id: 'workspace', label: 'Workspace' },
-    { id: 'issues', label: 'Issues' }
+    { id: 'issues', label: 'Issues' },
+    { id: 'errors', label: 'Error codes' }
   ],
   sections: [
+    {
+      id: 'auth',
+      heading: 'Authentication',
+      bullets: [
+        'Browser: Supabase session cookie on BFF routes (/api/* on web).',
+        'Direct API worker: Bearer token or internal service auth in production.',
+        'Local smoke: PREMORTEM_AUTH_DISABLED=1 with fixture org/project IDs.'
+      ],
+      codeBlocks: [
+        {
+          title: 'Submit audit (BFF)',
+          language: 'bash',
+          code: 'curl -sS -X POST http://127.0.0.1:13000/api/audits \\\n  -H "Content-Type: application/json" \\\n  -d \'{"projectId":"<uuid>","branch":"main"}\''
+        }
+      ]
+    },
     {
       id: 'audits',
       heading: 'Audits',
       bullets: [
         'POST /api/audits · submit audit (202 queued). Body: projectId, branch, commitSha?.',
         'GET /api/audits/:id · snapshot with runStatus, agentRuns, findings, graph, events.',
+        'GET /api/audits/:id/graph · graph snapshot for Workflow Canvas.',
         'POST /api/audits/:id/pause · POST /api/audits/:id/resume · POST /api/audits/:id/cancel.',
         'GET /api/audits?limit=12 · recent runs with reviewable/rejected counts.'
+      ],
+      codeBlocks: [
+        {
+          title: 'Poll audit snapshot',
+          code: 'curl -sS http://127.0.0.1:13000/api/audits/<auditId> | jq .runStatus,.findings'
+        }
       ]
     },
     {
@@ -506,58 +618,154 @@ export const apiReferenceDoc = {
       id: 'issues',
       heading: 'Issues',
       bullets: [
-        'POST /api/issues/:id/approve · /reject · /edit · /publish.',
+        'POST /api/audits/:id/issues/:issueId/action · confirm, dismiss, or stage.',
+        'POST /api/audits/:id/issues/:issueId/edit · persist synthesis edits.',
+        'POST /api/issues/:issueId/publish · create GitLab issue after approval.',
         'POST /api/issues/reconcile · org-wide reconciliation sweep.',
         'GET /api/reconciliation · recent drift/match events.'
+      ]
+    },
+    {
+      id: 'errors',
+      heading: 'Error codes',
+      bullets: [
+        '402 quota_exceeded: monthly audit limit reached for plan.',
+        '403 feature_locked: GitLab publish on Free tier.',
+        '403 repo_limit: max connected repositories for plan.',
+        '502 upstream: API worker unreachable from BFF or provider timeout.'
       ]
     }
   ],
   relatedLinks: [
     { href: marketingLinks.docsReferenceEnvironment, label: 'Environment variables' },
+    { href: marketingLinks.docsReferenceBilling, label: 'Billing & plan limits' },
     { href: marketingLinks.documentationReadme, label: 'Repository README' }
   ]
 } as const;
 
 export const environmentReferenceDoc = {
   title: 'Environment variables',
-  lead: 'Required and optional configuration for local dev, smoke tests, and provider integrations.',
+  lead: 'Required and optional configuration for local dev, smoke tests, and production deployments.',
   audience: 'Developers deploying or debugging the stack.',
+  githubSource: 'https://github.com/JustineDevs/premortem/blob/main/.env.example',
   toc: [
-    { id: 'core', label: 'Core' },
-    { id: 'providers', label: 'Providers' },
+    { id: 'app', label: 'App URLs' },
+    { id: 'database', label: 'Database' },
+    { id: 'supabase', label: 'Supabase' },
+    { id: 'llm', label: 'LLM providers' },
+    { id: 'gitlab', label: 'GitLab' },
+    { id: 'neo4j', label: 'Neo4j' },
+    { id: 'observability', label: 'Observability' },
+    { id: 'billing', label: 'Stripe billing' },
+    { id: 'cloudflare', label: 'Cloudflare' },
     { id: 'runtime-flags', label: 'Runtime flags' }
   ],
   sections: [
     {
-      id: 'core',
-      heading: 'Core',
+      id: 'app',
+      heading: 'App URLs',
       bullets: [
-        'DATABASE_URL · DIRECT_URL: Postgres (Supabase pooler + direct).',
-        'PREMORTEM_API_PORT (default 18787) · PREMORTEM_WEB_PORT (default 13000).',
-        'PREMORTEM_AUTH_DISABLED=1: bypass auth for local smoke and BFF tests.'
+        'NEXT_PUBLIC_APP_URL: canonical origin (use http://127.0.0.1:13000 locally for OAuth).',
+        'PREMORTEM_WEB_PORT (13000), PREMORTEM_API_PORT (18787), PREMORTEM_API_BASE_URL.',
+        'CORS_ORIGIN: allowed browser origin for API worker.'
       ]
     },
     {
-      id: 'providers',
-      heading: 'Providers',
+      id: 'database',
+      heading: 'Database',
       bullets: [
-        'GEMINI_API_KEY or Azure OpenAI vars for live LLM execution.',
-        'GITLAB_* OAuth and token vars for connect/publish flows.',
-        'GITHUB_TOKEN: GitHub publish path when provider is github.',
-        'STRIPE_*: billing checkout (optional locally).'
+        'DATABASE_URL: Supabase transaction pooler :6543 with pgbouncer=true.',
+        'DIRECT_URL: session pooler :5432 for Prisma migrations.',
+        'Offline: postgresql://postgres:postgres@127.0.0.1:5432/premortem via docker-compose.'
+      ]
+    },
+    {
+      id: 'supabase',
+      heading: 'Supabase',
+      bullets: [
+        'NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY: client auth.',
+        'SUPABASE_SERVICE_ROLE_KEY: server-side admin operations.',
+        'SUPABASE_STORAGE_BUCKET: artifact storage (premortem-artifacts).'
+      ]
+    },
+    {
+      id: 'llm',
+      heading: 'LLM providers',
+      bullets: [
+        'GEMINI_API_KEY, LLM_MODEL (default gemini-3-flash-preview).',
+        'Azure OpenAI: AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_MODEL.'
+      ]
+    },
+    {
+      id: 'gitlab',
+      heading: 'GitLab',
+      bullets: [
+        'GITLAB_CLIENT_ID, GITLAB_CLIENT_SECRET: OAuth app.',
+        'GITLAB_TOKEN: PAT with api scope for ingest/publish (server only).',
+        'Redirect: {NEXT_PUBLIC_APP_URL}/api/integrations/callback/gitlab.'
+      ],
+      callouts: [
+        {
+          variant: 'warning',
+          text: 'Do not mix localhost and 127.0.0.1 in NEXT_PUBLIC_APP_URL and GitLab OAuth redirect URI.'
+        }
+      ]
+    },
+    {
+      id: 'neo4j',
+      heading: 'Neo4j',
+      bullets: [
+        'NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD.',
+        'NEO4J_DISABLED=1: skip graph writes when Bolt is unavailable.'
+      ]
+    },
+    {
+      id: 'observability',
+      heading: 'Observability',
+      bullets: [
+        'Sentry: NEXT_PUBLIC_SENTRY_DSN, SENTRY_DSN, SENTRY_TRACES_SAMPLE_RATE.',
+        'PostHog: NEXT_PUBLIC_POSTHOG_KEY, NEXT_PUBLIC_POSTHOG_HOST, POSTHOG_API_KEY.',
+        'Langfuse: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL.',
+        'Phoenix: PHOENIX_PROJECT_NAME, PHOENIX_COLLECTOR_ENDPOINT, PHOENIX_API_KEY, PHOENIX_LLM_EVAL.'
+      ]
+    },
+    {
+      id: 'billing',
+      heading: 'Stripe billing',
+      bullets: [
+        'STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET.',
+        'STRIPE_PRICE_PRO, STRIPE_PRICE_TEAM, STRIPE_PRICE_PRO_ANNUAL, STRIPE_PRICE_TEAM_ANNUAL.'
+      ]
+    },
+    {
+      id: 'cloudflare',
+      heading: 'Cloudflare',
+      bullets: [
+        'CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ZONE_ID for deploy automation.'
       ]
     },
     {
       id: 'runtime-flags',
       heading: 'Runtime flags',
       bullets: [
-        'PREMORTEM_INGEST_LOCAL=1: mock repository ingest without live GitLab.',
-        'PREMORTEM_EXECUTOR=mock: deterministic specialist outputs in smoke tests.',
-        'PREMORTEM_PUBLISH_DRY_RUN=1: skip real GitLab issue creation.'
+        'PREMORTEM_AUTH_DISABLED=1: smoke/fixture only, never production.',
+        'PREMORTEM_INGEST_LOCAL=1: mock repository ingest.',
+        'PREMORTEM_PUBLISH_DRY_RUN=1, PREMORTEM_RECONCILE_DRY_RUN=1: skip remote side effects.',
+        'PREMORTEM_SKIP_DOCKER=1, PREMORTEM_PRODUCTION_MODE=1: dev stack toggles.'
+      ],
+      callouts: [
+        {
+          variant: 'local',
+          text: 'Copy .env.example to .env.local and fill values group by group.'
+        }
       ]
     }
   ],
-  relatedLinks: [{ href: marketingLinks.docsGettingStarted, label: 'Local setup' }]
+  relatedLinks: [
+    { href: marketingLinks.docsGettingStarted, label: 'Local setup' },
+    { href: marketingLinks.docsReferenceObservability, label: 'Observability' },
+    { href: marketingLinks.docsReferenceNeo4j, label: 'Neo4j & graph store' }
+  ]
 } as const;
 
 export const auditModelConceptDoc = {
@@ -651,6 +859,8 @@ export const troubleshootingDoc = {
   audience: 'Operators and developers unblocking production or local environments.',
   toc: [
     { id: 'onboarding', label: 'Onboarding' },
+    { id: 'auth', label: 'Auth & login' },
+    { id: 'dashboard', label: 'Empty dashboard' },
     { id: 'audits', label: 'Audits' },
     { id: 'publish', label: 'Publish & sync' }
   ],
@@ -659,10 +869,39 @@ export const troubleshootingDoc = {
       id: 'onboarding',
       heading: 'Onboarding',
       bullets: [
-        '502 on /api/*: confirm API is running on PREMORTEM_API_PORT and web BFF can reach it.',
-        '401 in /app: set PREMORTEM_AUTH_DISABLED=1 locally or complete Supabase auth.',
-        'Empty projects list: run ensureLocalDevelopmentFixture or register via POST /api/projects.'
+        '502 on /api/*: confirm API is running on PREMORTEM_API_PORT and web BFF can reach PREMORTEM_API_BASE_URL.',
+        'Empty projects list: register via Projects → Register Repository or POST /api/projects.',
+        'GitLab connect 307 slow: BFF proxy to API; verify API health at GET /api/health.'
       ]
+    },
+    {
+      id: 'auth',
+      heading: 'Auth & login',
+      bullets: [
+        'ERR_TOO_MANY_REDIRECTS on /login: middleware canonical host redirect. Use one host (127.0.0.1 vs localhost) in NEXT_PUBLIC_APP_URL and GitLab OAuth app.',
+        '401 in /app: set PREMORTEM_AUTH_DISABLED=1 only for smoke, or complete Supabase login.',
+        'OAuth state mismatch: clear cookies and reconnect GitLab from Settings.'
+      ],
+      callouts: [
+        {
+          variant: 'local',
+          text: 'Set NEXT_PUBLIC_APP_URL=http://127.0.0.1:13000 and match GitLab redirect URI exactly.'
+        }
+      ]
+    },
+    {
+      id: 'dashboard',
+      heading: 'Empty dashboard',
+      bullets: [
+        'Zeros on compliance/severity: workspace has no completed audits yet, not a bug.',
+        'Connect GitLab, register a project, then Run scan to populate metrics.',
+        'LOCAL_DEV_FIXTURE org may show fixture data when PREMORTEM_AUTH_DISABLED=1 in smoke only.'
+      ],
+      screenshot: {
+        src: '/landing/demo/1.png',
+        alt: 'Premortem Monitor Dashboard after audits complete',
+        caption: 'Dashboard populates after at least one audit run completes.'
+      }
     },
     {
       id: 'audits',
@@ -671,7 +910,7 @@ export const troubleshootingDoc = {
         'Audit stuck queued: check AUDIT_QUEUE / local-server executeAuditJob logs.',
         'Pause does not stop immediately: in-flight agent completes; next checkpoint honors paused.',
         'Resume fails without checkpoint: pause once to persist summary.checkpoint.',
-        'Entitlement 403: audit or repo quota exceeded; upgrade plan or archive projects.'
+        'Entitlement 403/402: audit or repo quota exceeded; see Billing & plan limits.'
       ]
     },
     {
@@ -679,14 +918,17 @@ export const troubleshootingDoc = {
       heading: 'Publish & sync',
       bullets: [
         'Publish 502: verify GitLab token scopes and project access.',
-        'Missing labels: enable work item attributes + ensureProjectLabels in Settings.',
+        '403 feature_locked: upgrade from Free to Starter for GitLab publish.',
+        'Missing labels: enable work item attributes in Settings.',
         'Reconciliation drift: compare driftFields; re-publish or edit GitLab issue manually.',
-        'Stripe checkout fails locally: expected with placeholder price IDs; use plan patch for dev.'
+        'Stripe checkout fails locally: use Settings plan patch or test price IDs.'
       ]
     }
   ],
   relatedLinks: [
     { href: marketingLinks.docsGettingStarted, label: 'Local setup' },
+    { href: marketingLinks.docsGuidesAuthSessions, label: 'Auth & sessions' },
+    { href: marketingLinks.docsReferenceBilling, label: 'Billing & plan limits' },
     { href: marketingLinks.app, label: 'Open /app' }
   ]
 } as const;
@@ -695,26 +937,83 @@ export const productFlowsDoc = {
   title: 'Product flows',
   lead: 'Lifecycle flows for onboarding, collaboration, and traceability across the Premortem console.',
   audience: 'Product and engineering leads mapping operator journeys.',
-  bullets: [
-    'Onboarding and personal org creation',
-    'Org switching and invitations',
-    'Connect provider and provider re-auth',
-    'Repo selection and branch selection',
-    'Audit history browsing and stale-state handling',
-    'Issue review diffs and version compare',
-    'Publish confirmation and notification delivery',
-    'Traceability view from prompt → finding → cluster → issue → published issue'
+  toc: [
+    { id: 'onboarding', label: 'Onboarding' },
+    { id: 'collaboration', label: 'Org & collaboration' },
+    { id: 'audit-lifecycle', label: 'Audit lifecycle' },
+    { id: 'review-publish', label: 'Review & publish' },
+    { id: 'traceability', label: 'Traceability' }
   ],
-  relatedLinks: [{ href: marketingLinks.docsConceptsDataFlow, label: 'Data flow' }]
+  sections: [
+    {
+      id: 'onboarding',
+      heading: 'Onboarding',
+      bullets: [
+        'Sign up via Supabase Auth → personal org created automatically.',
+        'Connect GitLab in Integrations & Scope → register first repository.',
+        'Run first audit from Dashboard or tutorial path.'
+      ],
+      screenshot: {
+        src: '/landing/demo/0.png',
+        alt: 'Premortem landing workflow overview',
+        caption: 'Marketing flow: Connect → Scan → Review before production.'
+      }
+    },
+    {
+      id: 'collaboration',
+      heading: 'Org & collaboration',
+      bullets: [
+        'Org switching when user belongs to multiple organizations.',
+        'Invitations and role-based access (roadmap: enterprise SSO).',
+        'Provider re-auth when OAuth tokens expire (WARNING on project cards).'
+      ]
+    },
+    {
+      id: 'audit-lifecycle',
+      heading: 'Audit lifecycle',
+      bullets: [
+        'Repo and branch selection per project card.',
+        'Manual scan vs continuous audit (~90s idle rotation when enabled).',
+        'Audit history browsing, milestone compare, stale-state badges on old runs.',
+        'Workflow Canvas for pipeline-level inspection.'
+      ]
+    },
+    {
+      id: 'review-publish',
+      heading: 'Review & publish',
+      bullets: [
+        'Issue review diffs and synthesis version compare before publish.',
+        'Publish confirmation with work item attribute labels.',
+        'Notification delivery via Slack webhook or email alerts (Settings).'
+      ]
+    },
+    {
+      id: 'traceability',
+      heading: 'Traceability',
+      bullets: [
+        'Lineage: prompt → finding → cluster → issue candidate → published GitLab issue.',
+        'Reconciliation events track matched, drifted, or failed sync states.',
+        'Graph snapshot links repo topology to specialist agent context.'
+      ]
+    }
+  ],
+  relatedLinks: [
+    { href: marketingLinks.docsConceptsDataFlow, label: 'Data flow' },
+    { href: marketingLinks.docsTutorialFirstAudit, label: 'Tutorial: first audit' },
+    { href: 'https://github.com/JustineDevs/premortem/blob/main/docs/product/flows.md', label: 'flows.md on GitHub' }
+  ]
 } as const;
 
 export const architectureDoc = {
   title: 'Architecture overview',
   lead: 'Core services and planned supporting infrastructure for Premortem v0.1.0.',
   audience: 'Engineers integrating with or extending the platform.',
+  githubSource:
+    'https://github.com/JustineDevs/premortem/blob/main/docs/architecture/adr-0001-canonical-product-and-system-design.md',
   toc: [
     { id: 'core', label: 'Core stack' },
-    { id: 'supporting', label: 'Supporting services' }
+    { id: 'supporting', label: 'Supporting services' },
+    { id: 'deep-dives', label: 'Repository deep dives' }
   ],
   coreStack: [
     'Supabase / Postgres for product data, auth-adjacent storage, and RLS-oriented multi-tenant ownership.',
@@ -732,9 +1031,27 @@ export const architectureDoc = {
     'OpenTelemetry + Grafana/Tempo/Loki for traces, logs, and metrics.',
     'Microsoft Entra ID if enterprise SSO becomes required.'
   ],
+  sections: [
+    {
+      id: 'deep-dives',
+      heading: 'Repository deep dives',
+      bullets: [
+        'ADR 0001: canonical product and system design (full architecture authority).',
+        'Graph strategy: docs/architecture/graph-strategy.md.',
+        'Observability: docs/architecture/observability.md.',
+        'Queue runbook: docs/runbooks/queueing.md.',
+        'Enterprise readiness: docs/architecture/enterprise-readiness.md.'
+      ]
+    }
+  ],
   relatedLinks: [
     { href: marketingLinks.docsReferenceApi, label: 'API routes' },
-    { href: marketingLinks.docsConceptsDataFlow, label: 'Data flow' }
+    { href: marketingLinks.docsConceptsDataFlow, label: 'Data flow' },
+    { href: marketingLinks.docsConceptsSecurity, label: 'Security & trust' },
+    {
+      href: 'https://github.com/JustineDevs/premortem/blob/main/docs/architecture/adr-0001-canonical-product-and-system-design.md',
+      label: 'ADR 0001 on GitHub'
+    }
   ]
 } as const;
 
@@ -742,10 +1059,18 @@ export const gitlabIntegrationDoc = {
   title: 'GitLab integration',
   lead: 'Connect GitLab for repository context, CI pipeline data, and governed issue publishing.',
   audience: 'Developers configuring OAuth, MCP, and publish workflows.',
+  githubSource: 'https://github.com/JustineDevs/premortem/blob/main/docs/architecture/mcp-toolbox.md',
+  screenshot: {
+    src: '/landing/demo/11.png',
+    alt: 'GitLab connected in Premortem Integrations settings',
+    caption: 'Connected Providers with GitLab OAuth scopes.'
+  },
   toc: [
     { id: 'provides', label: 'What GitLab provides' },
+    { id: 'oauth', label: 'OAuth setup' },
     { id: 'mcp', label: 'MCP and API' },
-    { id: 'reviewer', label: 'Reviewer path' }
+    { id: 'reviewer', label: 'Reviewer path' },
+    { id: 'reconcile', label: 'Reconciliation' }
   ],
   sections: [
     {
@@ -754,18 +1079,51 @@ export const gitlabIntegrationDoc = {
       body: 'Repository files, merge request context, CI pipeline configuration, and issue APIs for structured publish and reconciliation workflows.'
     },
     {
+      id: 'oauth',
+      heading: 'OAuth setup',
+      bullets: [
+        'Create GitLab OAuth application with redirect URI: {NEXT_PUBLIC_APP_URL}/api/integrations/callback/gitlab.',
+        'Scopes: read_user, api, read_repository (as shown in Settings UI).',
+        'Set GITLAB_CLIENT_ID and GITLAB_CLIENT_SECRET in .env.local / production secrets.',
+        'Use 127.0.0.1 consistently in local dev to avoid redirect loops.'
+      ],
+      codeBlocks: [
+        {
+          title: 'Connect URL (browser)',
+          code: 'GET /api/integrations/connect/gitlab?next=/app%3Ftab%3Dprojects'
+        }
+      ]
+    },
+    {
       id: 'mcp',
       heading: 'MCP and API',
-      body: 'Premortem uses GitLab MCP for agent context and REST APIs for publish flows. See the official GitLab MCP documentation for server setup and scopes.',
+      body: 'Premortem uses GitLab MCP for agent context and REST APIs for publish flows. Cursor IDE connects to gitlab.com/api/v4/mcp with OAuth; server-side publish uses PAT or OAuth token.',
       externalHref: 'https://docs.gitlab.com/user/gitlab_duo/model_context_protocol/'
     },
     {
       id: 'reviewer',
       heading: 'Reviewer path',
-      body: 'After an audit completes, reviewers approve issue candidates in /app before sync. Publish confirmation and reconciliation keep GitLab issues aligned with audit output.'
+      body: 'After an audit completes, reviewers approve issue candidates in /app before sync. Publish confirmation and reconciliation keep GitLab issues aligned with audit output.',
+      screenshot: {
+        src: '/landing/demo/9.png',
+        alt: 'GitLab issue synthesis and approve button',
+        caption: 'Approve & Create GitLab Issue after synthesis edit.'
+      }
+    },
+    {
+      id: 'reconcile',
+      heading: 'Reconciliation',
+      bullets: [
+        'POST /api/issues/reconcile compares local snapshot vs remote GitLab issue.',
+        'Drift fields: title, labels, state when remote issue edited outside Premortem.',
+        'PREMORTEM_RECONCILE_DRY_RUN=1 logs comparison without writes.'
+      ]
     }
   ],
-  relatedLinks: [{ href: marketingLinks.docsGuidesConnectGitlab, label: 'Guide: Connect GitLab' }]
+  relatedLinks: [
+    { href: marketingLinks.docsGuidesConnectGitlab, label: 'Guide: Connect GitLab' },
+    { href: marketingLinks.docsGuidesReviewPublish, label: 'Review & publish' }
+  ]
 } as const;
 
 export const releasesDoc = {
@@ -778,7 +1136,8 @@ export const releasesDoc = {
     { id: 'summary', label: 'Summary' },
     { id: 'included', label: 'Included' },
     { id: 'limits', label: 'Known limits' },
-    { id: 'upgrade', label: 'Upgrade notes' }
+    { id: 'upgrade', label: 'Upgrade notes' },
+    { id: 'verify', label: 'Verification' }
   ],
   included: [
     'Agent registry, policies, specialist prompts, and strict Zod validation.',
@@ -798,24 +1157,61 @@ export const releasesDoc = {
     'Rebuild generated Prisma client after schema changes.',
     'Set all required provider environment variables before publish or graph flows.'
   ],
-  relatedLinks: [{ href: marketingLinks.releases, label: 'Full changelog on GitHub' }]
+  relatedLinks: [
+    { href: marketingLinks.docsGuidesDeployProduction, label: 'Deploy to production' },
+    { href: marketingLinks.releases, label: 'Full changelog on GitHub' }
+  ]
 } as const;
 
-/** Reusable doc page renderer input shape */
-export type StructuredDoc = {
-  title: string;
-  lead: string;
-  audience?: string;
-  prerequisites?: readonly string[];
-  expectedResult?: string;
-  toc?: readonly { id: string; label: string }[];
-  sections?: readonly {
-    id: string;
-    heading: string;
-    bullets?: readonly string[];
-    body?: string;
-    externalHref?: string;
-  }[];
-  bullets?: readonly string[];
-  relatedLinks?: readonly DocNavItem[];
-};
+export const faqDoc = {
+  title: 'Frequently asked questions',
+  lead: 'Short answers for the most common launch, auth, and support questions.',
+  description: 'Short answers for the most common launch, auth, and support questions.',
+  toc: [
+    { id: 'accounts', label: 'Accounts' },
+    { id: 'launch', label: 'Launch' },
+    { id: 'support', label: 'Support' },
+    { id: 'privacy', label: 'Privacy and data' }
+  ],
+  sections: [
+    {
+      id: 'accounts',
+      heading: 'Accounts',
+      bullets: [
+        'Sign in with GitLab today. GitHub is still coming soon.',
+        'Forgot password flows use Supabase email recovery and the existing auth callback route.',
+        'If auth is unavailable in local development, check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.'
+      ]
+    },
+    {
+      id: 'launch',
+      heading: 'Launch',
+      bullets: [
+        'The public site, docs, and auth pages share the same visual system and branding.',
+        'Search indexing is supported through robots.txt, sitemap.xml, and social metadata.',
+        'Stripe is wired in test mode until live keys and production billing are enabled.'
+      ]
+    },
+    {
+      id: 'support',
+      heading: 'Support',
+      bullets: [
+        'Use the docs hub for setup, guides, and troubleshooting.',
+        'If a page errors inside the reviewer console, retry from the route-level error view.',
+        'For product issues, contact the team through the published support email.'
+      ]
+    },
+    {
+      id: 'privacy',
+      heading: 'Privacy and data',
+      bullets: [
+        'Premortem uses Supabase for auth and persistence while the rest of the stack keeps domain data in the configured services.',
+        'The product documents privacy and terms publicly, and the auth pages link to both before GitLab sign-in.'
+      ]
+    }
+  ],
+  relatedLinks: [
+    { href: marketingLinks.docsTroubleshooting, label: 'Troubleshooting' },
+    { href: marketingLinks.docsGuidesAuthSessions, label: 'Auth & sessions' }
+  ]
+} as const;

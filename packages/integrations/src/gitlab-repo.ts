@@ -1,3 +1,5 @@
+import { gitLabAuthHeaders } from './gitlab-auth';
+
 export interface GitLabTreeEntry {
   id: string;
   name: string;
@@ -6,9 +8,19 @@ export interface GitLabTreeEntry {
   mode: string;
 }
 
+export interface GitLabCommitSummary {
+  id: string;
+  shortId: string;
+  title: string;
+  authorName: string;
+  authoredAt: string;
+  committedAt: string;
+  webUrl: string;
+}
+
 async function gitlabRequest(baseUrl: string, token: string, apiPath: string) {
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/v4${apiPath}`, {
-    headers: { 'PRIVATE-TOKEN': token }
+    headers: gitLabAuthHeaders(token)
   });
 
   if (!response.ok) {
@@ -65,4 +77,50 @@ export async function fetchRepositoryFileRaw(input: {
     `/projects/${encodedProject}/repository/files/${encodedPath}/raw?ref=${encodeURIComponent(input.ref)}`
   );
   return response.text();
+}
+
+export async function fetchRepositoryCommitsByPath(input: {
+  baseUrl: string;
+  token: string;
+  externalProjectId: string;
+  filePath: string;
+  ref?: string;
+  maxCommits?: number;
+}) {
+  const encodedProject = encodeURIComponent(input.externalProjectId);
+  const params = new URLSearchParams({
+    per_page: String(input.maxCommits ?? 5),
+    path: input.filePath
+  });
+  if (input.ref?.trim()) {
+    params.set('ref_name', input.ref.trim());
+  }
+
+  const response = await gitlabRequest(
+    input.baseUrl,
+    input.token,
+    `/projects/${encodedProject}/repository/commits?${params.toString()}`
+  );
+
+  const rows = (await response.json()) as Array<{
+    id: string;
+    short_id?: string;
+    title: string;
+    author_name?: string;
+    authored_date: string;
+    committed_date: string;
+    web_url: string;
+  }>;
+
+  return rows.map(
+    (row): GitLabCommitSummary => ({
+      id: row.id,
+      shortId: row.short_id ?? row.id.slice(0, 8),
+      title: row.title,
+      authorName: row.author_name ?? 'unknown',
+      authoredAt: row.authored_date,
+      committedAt: row.committed_date,
+      webUrl: row.web_url
+    })
+  );
 }

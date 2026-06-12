@@ -8,6 +8,7 @@ import {
   failAgentRun,
   getAuditRunDetails,
   listRecentAuditRuns,
+  listRecentAuditRunsForOrganization,
   markAuditFailed,
   markAuditCompleted,
   markAuditRunning,
@@ -17,6 +18,7 @@ import {
   persistIssueCandidates,
   persistRejectedIssueCandidateArtifacts
 } from '@premortem/db';
+import { createOrganizationNotifications } from '@premortem/db';
 import type { CanonicalFinding, IssueCandidate } from '@premortem/agent-kit';
 import type { RuntimeCluster } from '../merge/cluster-findings';
 
@@ -26,6 +28,7 @@ export async function createQueuedAudit(input: {
   branch: string;
   commitSha?: string;
   triggeredById?: string;
+  triggerSource?: 'manual' | 'webhook' | 'scheduled' | 'api';
 }) {
   return createAuditRun(input);
 }
@@ -123,6 +126,7 @@ export async function saveIssueCandidates(input: {
   projectId: string;
   auditRunId: string;
   clusterIdByCategory: Map<string, string>;
+  clusterIdByFindingId?: Map<string, string>;
   issues: Array<{
     issue: IssueCandidate;
     validationErrors: string[];
@@ -135,7 +139,11 @@ export async function saveIssueCandidates(input: {
     projectId: input.projectId,
     auditRunId: input.auditRunId,
     issues: input.issues.map(({ issue, validationErrors, validationWarnings, validatorName }) => {
-      const clusterId = input.clusterIdByCategory.get(issue.category);
+      const clusterId =
+        input.clusterIdByCategory.get(issue.category) ??
+        issue.source_findings
+          .map((findingId) => input.clusterIdByFindingId?.get(findingId))
+          .find((value): value is string => Boolean(value));
       if (!clusterId) {
         throw new Error(`Missing cluster for issue candidate category: ${issue.category}`);
       }
@@ -170,6 +178,7 @@ export async function saveRejectedIssueArtifacts(input: {
   projectId: string;
   auditRunId: string;
   clusterIdByCategory: Map<string, string>;
+  clusterIdByFindingId?: Map<string, string>;
   issues: Array<{
     issue: IssueCandidate;
     validationErrors: string[];
@@ -182,7 +191,11 @@ export async function saveRejectedIssueArtifacts(input: {
     projectId: input.projectId,
     auditRunId: input.auditRunId,
     issues: input.issues.map(({ issue, validationErrors, validationWarnings, validatorName }) => ({
-      clusterId: input.clusterIdByCategory.get(issue.category),
+      clusterId:
+        input.clusterIdByCategory.get(issue.category) ??
+        issue.source_findings
+          .map((findingId) => input.clusterIdByFindingId?.get(findingId))
+          .find((value): value is string => Boolean(value)),
       title: issue.title,
       category: issue.category,
       severity: issue.severity,
@@ -225,6 +238,55 @@ export async function finishAudit(auditRunId: string, summary: Record<string, un
   });
 }
 
+export async function finishAuditWithNotifications(input: {
+  auditRunId: string;
+  organizationId: string;
+  projectId: string;
+  projectName?: string | null;
+  branch: string;
+  summary: Record<string, unknown>;
+}) {
+  await finishAudit(input.auditRunId, input.summary);
+  const findingCount = Number(input.summary.findingCount ?? 0);
+  const issueCandidateCount = Number(input.summary.issueCandidateCount ?? 0);
+
+  try {
+    await createOrganizationNotifications({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      kind: 'audit_completed',
+      title: `Audit completed for ${input.projectName ?? input.projectId}`,
+      body: `Branch ${input.branch} finished scanning and produced ${findingCount} findings.`,
+      metadata: {
+        auditRunId: input.auditRunId,
+        branch: input.branch,
+        summary: input.summary
+      }
+    });
+
+    if (issueCandidateCount > 0) {
+      await createOrganizationNotifications({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        kind: 'issues_ready',
+        title: `Review ${issueCandidateCount} issue candidates for ${input.projectName ?? input.projectId}`,
+        body: `Audit results are ready for review on branch ${input.branch}.`,
+        metadata: {
+          auditRunId: input.auditRunId,
+          branch: input.branch,
+          issueCandidateCount,
+          summary: input.summary
+        }
+      });
+    }
+  } catch (error) {
+    console.warn(
+      '[audit-persistence] notification fanout failed:',
+      error instanceof Error ? error.message : error
+    );
+  }
+}
+
 export async function failAudit(auditRunId: string, errorMessage: string) {
   await markAuditFailed(auditRunId, errorMessage);
   await createAuditRunEvent({
@@ -232,6 +294,36 @@ export async function failAudit(auditRunId: string, errorMessage: string) {
     eventType: AuditEvent.FAILED,
     payload: { errorMessage }
   });
+}
+
+export async function failAuditWithNotifications(input: {
+  auditRunId: string;
+  organizationId: string;
+  projectId: string;
+  projectName?: string | null;
+  branch: string;
+  errorMessage: string;
+}) {
+  await failAudit(input.auditRunId, input.errorMessage);
+  try {
+    await createOrganizationNotifications({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      kind: 'audit_failed',
+      title: `Audit failed for ${input.projectName ?? input.projectId}`,
+      body: `Branch ${input.branch} stopped with error: ${input.errorMessage}`,
+      metadata: {
+        auditRunId: input.auditRunId,
+        branch: input.branch,
+        errorMessage: input.errorMessage
+      }
+    });
+  } catch (error) {
+    console.warn(
+      '[audit-persistence] failure notification fanout failed:',
+      error instanceof Error ? error.message : error
+    );
+  }
 }
 
 export async function pauseAudit(auditRunId: string, summary: Record<string, unknown>) {
@@ -259,6 +351,6 @@ export async function getPersistedAuditRun(auditRunId: string) {
   return getAuditRunDetails(auditRunId);
 }
 
-export async function listAuditRuns(limit = 12) {
-  return listRecentAuditRuns(limit);
+export async function listAuditRuns(organizationId: string, limit = 12) {
+  return listRecentAuditRunsForOrganization(organizationId, limit);
 }

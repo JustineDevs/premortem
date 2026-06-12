@@ -24,6 +24,7 @@ const workspacePackages = [
 ];
 
 const nextConfig = {
+  allowedDevOrigins: ['127.0.0.1'],
   experimental: {
     externalDir: true,
     instrumentationHook: true,

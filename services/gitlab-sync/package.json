@@ -3,14 +3,16 @@
   "private": true,
   "type": "module",
   "main": "./dist/services/gitlab-sync/src/index.js",
+  "types": "./src/index.ts",
   "exports": {
-    ".": "./dist/services/gitlab-sync/src/index.js"
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/services/gitlab-sync/src/index.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
-    "lint": "echo lint gitlab-sync",
-    "test": "echo test gitlab-sync",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

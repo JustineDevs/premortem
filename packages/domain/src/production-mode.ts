@@ -5,7 +5,7 @@ export function isProductionMode(): boolean {
 
 /** Smoke/CI harness only: bypass Supabase and use LOCAL_DEV_FIXTURE IDs. */
 export function isLocalAuthBypassEnabled(): boolean {
-  return process.env.PREMORTEM_AUTH_DISABLED === '1';
+  return process.env.PREMORTEM_AUTH_DISABLED === '1' && !isProductionMode();
 }
 
 export function isSupabaseAuthConfiguredInEnv(): boolean {
@@ -58,6 +58,7 @@ export function validateProductionBootEnv(): string[] {
     'NEXT_PUBLIC_SUPABASE_URL',
     'NEXT_PUBLIC_SUPABASE_ANON_KEY',
     'SUPABASE_SERVICE_ROLE_KEY',
+    'ENCRYPTION_KEY',
     'NEO4J_URI',
     'NEO4J_PASSWORD'
   ] as const;
@@ -80,6 +81,10 @@ export function validateProductionBootEnv(): string[] {
     Boolean(process.env.GITLAB_CLIENT_ID?.trim() && process.env.GITLAB_CLIENT_SECRET?.trim());
   if (!hasGitLab) {
     missing.push('GITLAB_TOKEN or GITLAB_CLIENT_ID/SECRET');
+  }
+
+  if (process.env.PREMORTEM_AUTH_DISABLED === '1') {
+    missing.push('PREMORTEM_AUTH_DISABLED must be unset when PREMORTEM_PRODUCTION_MODE=1');
   }
 
   return missing;
@@ -108,6 +113,15 @@ export function allowsForceLocalIngest(): boolean {
 
 export function allowsPublishDryRun(): boolean {
   return !isProductionMode() && process.env.PREMORTEM_PUBLISH_DRY_RUN === '1';
+}
+
+/** Dev/smoke paths may exercise publish without Starter billing enforcement. */
+export function skipsPublishEntitlementCheck(): boolean {
+  if (isProductionMode()) return false;
+  if (allowsPublishDryRun()) return true;
+  if (isLocalAuthBypassEnabled()) return true;
+  if (hasConfiguredRuntimeCredentials()) return true;
+  return false;
 }
 
 export function allowsReconcileDryRun(): boolean {

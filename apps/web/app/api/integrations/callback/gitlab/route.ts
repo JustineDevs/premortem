@@ -1,15 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { CanonicalEvents } from '@premortem/observability';
-import { trackServerEvent } from '@premortem/observability';
-
-import { getApiBaseUrl } from '@/lib/runtime-config';
 import {
   exchangeGitLabCode,
-  fetchGitLabProfile,
   integrationOAuthCookieNames
 } from '@/lib/gitlab-oauth';
-import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
+import { gitlabOAuthRedirectUri } from '@/lib/runtime-config';
+import { persistGitLabConnection } from '@/lib/server/persist-gitlab-connection';
+import { resolveRequestActorContext } from '@/lib/server/request-context';
 
 function redirectWithNotice(request: NextRequest, next: string, notice: string, detail?: string) {
   const redirectUrl = new URL(next, request.url);
@@ -47,8 +44,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const origin = request.nextUrl.origin;
-    const redirectUri = `${origin}/api/integrations/callback/gitlab`;
+    const redirectUri = gitlabOAuthRedirectUri(request.nextUrl.origin);
     const baseUrl = process.env.GITLAB_BASE_URL ?? 'https://gitlab.com';
     const tokenPayload = await exchangeGitLabCode({
       code,
@@ -57,47 +53,19 @@ export async function GET(request: NextRequest) {
       redirectUri,
       baseUrl
     });
-    const profile = await fetchGitLabProfile(baseUrl, tokenPayload.access_token);
     const context = await resolveRequestActorContext();
-
-    const response = await fetch(`${getApiBaseUrl()}/api/workspace/integrations`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
-        ...actorHeaders(context)
-      },
-      body: JSON.stringify({
-        provider: 'gitlab',
-        externalAccountId: String(profile.id),
-        externalAccountName: profile.username,
-        accessToken: tokenPayload.access_token,
-        refreshToken: tokenPayload.refresh_token,
-        accessScope: {
-          summary: 'read_user, api, read_repository',
-          profileName: profile.name,
-          webUrl: profile.web_url
-        }
-      }),
-      cache: 'no-store'
+    const persisted = await persistGitLabConnection({
+      context,
+      accessToken: tokenPayload.access_token,
+      refreshToken: tokenPayload.refresh_token,
+      expiresInSeconds: tokenPayload.expires_in
     });
 
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
+    if (!persisted.ok) {
       return clearCookies(
-        redirectWithNotice(
-          request,
-          next,
-          'persist_failed',
-          typeof payload.error === 'string' ? payload.error : undefined
-        )
+        redirectWithNotice(request, next, 'persist_failed', persisted.error)
       );
     }
-
-    trackServerEvent(context.profileId, CanonicalEvents.gitlabConnected, {
-      provider: 'gitlab',
-      externalAccountId: String(profile.id)
-    });
 
     return clearCookies(redirectWithNotice(request, next, 'gitlab_connected'));
   } catch (error) {

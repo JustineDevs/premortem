@@ -64,9 +64,9 @@ export const ecosystemCards = [
     logo: 'github' as const,
     logoWidth: 107,
     logoHeight: 24,
-    body: 'Platform expansion (coming soon).',
+    body: 'GitHub sign-in and publishing are available when configured.',
     href: 'https://docs.github.com/en',
-    linkLabel: 'GitHub (soon)'
+    linkLabel: 'GitHub'
   }
 ] as const;
 

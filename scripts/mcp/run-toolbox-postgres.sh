@@ -2,16 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
+cd "$ROOT_DIR"
 
-if [ -f "$ROOT_DIR/.env.local" ]; then
-  set -a
-  . "$ROOT_DIR/.env.local"
-  set +a
-elif [ -f "$ROOT_DIR/.env" ]; then
-  set -a
-  . "$ROOT_DIR/.env"
-  set +a
-fi
+eval "$(
+  node <<'EOF'
+import { loadPremortemLocalEnv } from './scripts/load-local-env.mjs';
+
+loadPremortemLocalEnv();
+console.log(`export DATABASE_URL=${JSON.stringify(process.env.DATABASE_URL ?? '')}`);
+EOF
+)"
 
 if [ -n "${POSTGRES_HOST:-}" ] && [ -n "${POSTGRES_USER:-}" ] && [ -n "${POSTGRES_PASSWORD:-}" ]; then
   exec npx -y @toolbox-sdk/server --prebuilt=postgres --stdio

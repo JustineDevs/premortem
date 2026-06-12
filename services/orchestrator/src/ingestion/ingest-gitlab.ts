@@ -1,18 +1,36 @@
 import {
-  EMPTY_CI_HISTORY as MCP_EMPTY_CI,
+  fetchRepositoryCommitsByPath,
   fetchGitLabContextViaMcp,
-  fetchOpenGitLabIssues,
-  fetchRecentGitLabPipelines,
   fetchRepositoryFileRaw,
   fetchRepositoryTree,
   isGitLabMcpEnabled
 } from '@premortem/integrations';
 
-import { EMPTY_CI_HISTORY, type IngestionBundle } from './ingest-project';
+import {
+  buildSourceSnapshot,
+  EMPTY_CI_HISTORY,
+  type GitHistorySnapshot,
+  parseOwnershipHints,
+  selectSourceFilePaths,
+  type IngestionBundle,
+  summarizeTextPreview
+} from './ingest-project';
 
 const CI_FILE_NAMES = ['.gitlab-ci.yml', '.gitlab-ci.yaml'];
-const MANIFEST_NAMES = ['package.json', 'pnpm-workspace.yaml', 'turbo.json', 'docker-compose.yml', 'wrangler.toml'];
+const MANIFEST_NAMES = [
+  'package.json',
+  'pnpm-workspace.yaml',
+  'turbo.json',
+  'docker-compose.yml',
+  'wrangler.toml',
+  'pnpm-lock.yaml',
+  'package-lock.json',
+  'yarn.lock',
+  'bun.lockb'
+];
 const DOC_FILES = ['README.md', 'readme.md', 'docs/README.md'];
+const SCHEMA_NAMES = ['schema.prisma', 'openapi.yaml', 'openapi.yml'];
+const OWNERSHIP_FILES = ['CODEOWNERS', '.github/CODEOWNERS'];
 
 function uniqueTopLevelDirs(paths: string[], prefix: string) {
   const names = new Set<string>();
@@ -43,6 +61,9 @@ export async function ingestGitLabProject(input: {
   const pipeline_files: string[] = [];
   const ci_config: Record<string, unknown> = {};
   const package_manifests: string[] = [];
+  const source_files: IngestionBundle['source_files'] = [];
+  const ownership_hints: IngestionBundle['ownership_hints'] = [];
+  const git_history: GitHistorySnapshot[] = [];
 
   for (const fileName of CI_FILE_NAMES) {
     if (!repo_tree.includes(fileName)) continue;
@@ -55,11 +76,8 @@ export async function ingestGitLabProject(input: {
         filePath: fileName
       });
       pipeline_files.push(fileName);
-      ci_config[fileName] = {
-        present: true,
-        lineCount: content.split('\n').length,
-        preview: content.split('\n').slice(0, 24).join('\n')
-      };
+      ci_config[fileName] = { present: true, ...summarizeTextPreview(content, 24) };
+      source_files.push(buildSourceSnapshot(fileName, content, 'config'));
     } catch {
       // skip unreadable CI file
     }
@@ -68,6 +86,78 @@ export async function ingestGitLabProject(input: {
   for (const fileName of MANIFEST_NAMES) {
     if (repo_tree.includes(fileName)) {
       package_manifests.push(fileName);
+      try {
+        const content = await fetchRepositoryFileRaw({
+          baseUrl: input.baseUrl,
+          token: input.token,
+          externalProjectId: input.externalProjectId,
+          ref: input.branch,
+          filePath: fileName
+        });
+        source_files.push(buildSourceSnapshot(fileName, content, 'manifest'));
+      } catch {
+        // skip unreadable manifest file
+      }
+    }
+  }
+
+  for (const schemaName of SCHEMA_NAMES) {
+    const matched = repo_tree.find((entry) => entry.endsWith(schemaName));
+    if (!matched) continue;
+    try {
+      const content = await fetchRepositoryFileRaw({
+        baseUrl: input.baseUrl,
+        token: input.token,
+        externalProjectId: input.externalProjectId,
+        ref: input.branch,
+        filePath: matched
+      });
+      source_files.push(buildSourceSnapshot(matched, content, 'schema'));
+    } catch {
+      // skip unreadable schema file
+    }
+  }
+
+  for (const ownershipFile of OWNERSHIP_FILES) {
+    if (!repo_tree.includes(ownershipFile)) continue;
+    try {
+      const content = await fetchRepositoryFileRaw({
+        baseUrl: input.baseUrl,
+        token: input.token,
+        externalProjectId: input.externalProjectId,
+        ref: input.branch,
+        filePath: ownershipFile
+      });
+      source_files.push(buildSourceSnapshot(ownershipFile, content, 'ownership'));
+      ownership_hints.push(...parseOwnershipHints(content, ownershipFile));
+    } catch {
+      // skip unreadable ownership file
+    }
+  }
+
+  for (const sourcePath of selectSourceFilePaths(repo_tree)) {
+    try {
+      const content = await fetchRepositoryFileRaw({
+        baseUrl: input.baseUrl,
+        token: input.token,
+        externalProjectId: input.externalProjectId,
+        ref: input.branch,
+        filePath: sourcePath
+      });
+      source_files.push(buildSourceSnapshot(sourcePath, content, 'source'));
+      const commits = await fetchRepositoryCommitsByPath({
+        baseUrl: input.baseUrl,
+        token: input.token,
+        externalProjectId: input.externalProjectId,
+        ref: input.branch,
+        filePath: sourcePath,
+        maxCommits: 5
+      });
+      if (commits.length > 0) {
+        git_history.push({ path: sourcePath, commits });
+      }
+    } catch {
+      // skip unreadable source file
     }
   }
 
@@ -110,43 +200,12 @@ export async function ingestGitLabProject(input: {
         mcpOpenIssueCount: mcpContext.existing_issues.length
       };
     } catch (error) {
-      mcpMetadata = {
-        ingestionTransport: 'gitlab-mcp-fallback-rest',
-        mcpError: error instanceof Error ? error.message : String(error)
-      };
+      throw new Error(
+        `GitLab MCP ingest failed: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
-  }
-
-  const needsRestFallback =
-    !isGitLabMcpEnabled() ||
-    mcpMetadata.ingestionTransport === 'gitlab-mcp-fallback-rest' ||
-    ci_history.pipelines.length === 0 ||
-    existing_issues.length === 0;
-
-  if (needsRestFallback) {
-    const [restCi, restIssues] = await Promise.all([
-      fetchRecentGitLabPipelines({
-        baseUrl: input.baseUrl,
-        token: input.token,
-        externalProjectId: input.externalProjectId,
-        ref: input.branch
-      }).catch(() => EMPTY_CI_HISTORY),
-      fetchOpenGitLabIssues({
-        baseUrl: input.baseUrl,
-        token: input.token,
-        externalProjectId: input.externalProjectId
-      }).catch(() => [])
-    ]);
-
-    if (ci_history.pipelines.length === 0) {
-      ci_history = restCi.pipelines.length > 0 ? restCi : MCP_EMPTY_CI;
-    }
-    if (existing_issues.length === 0) {
-      existing_issues = restIssues;
-    }
-    if (!mcpMetadata.ingestionTransport) {
-      mcpMetadata = { ingestionTransport: 'gitlab-rest' };
-    }
+  } else {
+    mcpMetadata = { ingestionTransport: 'gitlab-mcp-disabled' };
   }
 
   const apps = uniqueTopLevelDirs(repo_tree, 'apps');
@@ -163,6 +222,9 @@ export async function ingestGitLabProject(input: {
     pipeline_files,
     services,
     apps,
+    source_files,
+    ownership_hints,
+    git_history,
     ci_history,
     existing_issues,
     metadata: {
@@ -172,6 +234,10 @@ export async function ingestGitLabProject(input: {
       serviceCount: services.length,
       treeEntryCount: repo_tree.length,
       docs,
+      sourceFileCount: source_files.length,
+      ownershipHintCount: ownership_hints.length,
+      gitHistoryPathCount: git_history.length,
+      gitHistoryCommitCount: git_history.reduce((count, entry) => count + entry.commits.length, 0),
       ciHistorySampled: ci_history.totals.sampled,
       openIssueCount: existing_issues.length,
       ...mcpMetadata

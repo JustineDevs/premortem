@@ -4,7 +4,9 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
-import { authProviderHref, type AuthMode } from '@/lib/auth-links';
+import { authLinks, type AuthMode } from '@/lib/auth-links';
+import { marketingLinks } from '@/lib/marketing-links';
+import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 
 import { assets } from '../landing/assets';
 import { GitLabLogo } from '../landing/icons/gitlab-logo';
@@ -50,6 +52,10 @@ export function AuthProviderForm({
   const noticeKey = searchParams.get('notice') ?? searchParams.get('error');
   const redirectNotice = noticeKey ? notices[noticeKey] : null;
   const [runtimeConfigured, setRuntimeConfigured] = useState<boolean | null>(null);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [termsNotice, setTermsNotice] = useState(false);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const nextPath = searchParams.get('next') ?? authLinks.defaultNext;
 
   useEffect(() => {
     void fetch('/api/auth/status')
@@ -62,9 +68,50 @@ export function AuthProviderForm({
 
   const notice =
     redirectNotice ??
-    (runtimeConfigured === false
-      ? notices.config
-      : null);
+    (termsNotice ? { message: 'Accept the Privacy Policy and Terms of Service to continue.', tone: 'warn' as const } : null) ??
+    (runtimeConfigured === false ? notices.config : null);
+
+  async function handleGitLabOAuth() {
+    if (!agreedToTerms) {
+      setTermsNotice(true);
+      return;
+    }
+
+    if (isSigningIn) return;
+
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      return;
+    }
+
+    setIsSigningIn(true);
+    try {
+      const redirectTo = new URL(authLinks.callback, window.location.origin);
+      redirectTo.searchParams.set('next', nextPath);
+      redirectTo.searchParams.set('mode', mode);
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'gitlab',
+        options: {
+          redirectTo: redirectTo.toString(),
+          scopes: 'read_user api read_repository'
+        }
+      });
+
+      if (error) {
+        window.location.assign(`${authLinks.login}?error=oauth`);
+        return;
+      }
+
+      if (data.url) {
+        window.location.assign(data.url);
+      }
+    } catch {
+      window.location.assign(`${authLinks.login}?error=oauth`);
+    } finally {
+      setIsSigningIn(false);
+    }
+  }
 
   return (
     <div className="landing-auth-shell">
@@ -88,15 +135,45 @@ export function AuthProviderForm({
           </aside>
         ) : null}
 
+        <label className="landing-auth-terms">
+          <input
+            type="checkbox"
+            className="landing-auth-terms__input"
+            checked={agreedToTerms}
+            onChange={(event) => {
+              setAgreedToTerms(event.target.checked);
+              if (event.target.checked) {
+                setTermsNotice(false);
+              }
+            }}
+          />
+          <span className="landing-auth-terms__copy" style={body14}>
+            I agree to the{' '}
+            <Link href={marketingLinks.privacy} className="landing-route-link">
+              Privacy Policy
+            </Link>{' '}
+            and{' '}
+            <Link href={marketingLinks.terms} className="landing-route-link">
+              Terms of Service
+            </Link>
+            .
+          </span>
+        </label>
+
         <div className="landing-auth-card__providers">
-          <a
-            href={authProviderHref('gitlab', mode)}
+          <button
+            type="button"
             className="landing-auth-provider landing-auth-provider--gitlab"
             data-border="true"
+            onClick={() => void handleGitLabOAuth()}
+            aria-disabled={!agreedToTerms || isSigningIn}
+            disabled={isSigningIn}
           >
             <GitLabLogo />
-            <span style={{ ...navLink, color: 'rgb(255, 255, 255)' }}>Continue with GitLab</span>
-          </a>
+            <span style={{ ...navLink, color: 'rgb(255, 255, 255)' }}>
+              {isSigningIn ? 'Redirecting' : 'Continue with GitLab'}
+            </span>
+          </button>
 
           <button
             type="button"
@@ -114,7 +191,7 @@ export function AuthProviderForm({
               className="landing-auth-provider__github-icon"
             />
             <span style={{ ...navLink, color: 'rgb(255, 255, 255)' }}>Continue with GitHub</span>
-            <span className="landing-auth-provider__soon" style={label14}>
+            <span className="landing-auth-provider__soon">
               Coming soon
             </span>
           </button>

@@ -3,11 +3,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
-import type { WorkflowGraphEdge, WorkflowGraphNode } from './workflow-graph-panel';
+import type { WorkflowGraphEdge, WorkflowGraphNode } from './workflow-graph.types';
 
 interface GraphArtifactPayload {
-  nodes?: Array<{ id: string; label: string; kind?: string }>;
-  edges?: Array<{ from: string; to: string; type?: string }>;
+  nodes?: Array<{ id: string; label: string; kind?: string; props?: Record<string, unknown> }>;
+  edges?: Array<{ from: string; to: string; type?: string; props?: Record<string, unknown> }>;
 }
 
 const RUNTIME_KINDS = new Set(['pipeline_run', 'ci_job', 'issue', 'service']);
@@ -28,7 +28,9 @@ function mapArtifactToGraph(payload: GraphArtifactPayload): {
     id: node.id,
     label: node.label,
     type: node.kind ?? 'repo',
-    lane: laneForKind(node.kind ?? 'repo')
+    lane: laneForKind(node.kind ?? 'repo'),
+    source: 'artifact',
+    props: node.props
   }));
 
   const nodeIds = new Set(nodes.map((node) => node.id));
@@ -38,7 +40,8 @@ function mapArtifactToGraph(payload: GraphArtifactPayload): {
       id: `artifact-edge-${index}`,
       from: edge.from,
       to: edge.to,
-      label: edge.type
+      label: edge.type,
+      props: edge.props
     }))
     .filter((edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to));
 

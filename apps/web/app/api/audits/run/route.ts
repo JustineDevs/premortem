@@ -2,14 +2,14 @@ import { NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
 
 import { validateInput, recordAuditStep } from '@premortem/security';
+import { recordActivityEvent } from '@premortem/db';
 import {
   fetchRuntimeAuditSnapshot,
   fetchRuntimeProjects,
-  pollRuntimeAuditUntilComplete,
   submitRuntimeAudit
 } from '@/lib/premortem-api/client';
 import { mapSandboxScanToAuditRun } from '@/lib/premortem-api/map-sandbox-audit';
-import { mapSnapshotToAuditRun } from '@/lib/premortem-api/map-runtime-to-console';
+import { bffErrorResponse } from '@/lib/server/bff-errors';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
 
 export async function POST(request: Request) {
@@ -22,17 +22,59 @@ export async function POST(request: Request) {
   if (body.customSnippet?.trim()) {
     const runId = randomUUID();
     const guard = validateInput(body.customSnippet);
+    const context = await resolveRequestActorContext(request);
     if (!guard.passed) {
-      recordAuditStep(runId, 'input_guardrail', 'sandbox', 'blocked', guard.violation);
+      await recordAuditStep(
+        runId,
+        'input_guardrail',
+        'sandbox',
+        'blocked',
+        guard.violation,
+        async (entry) => {
+          await recordActivityEvent({
+            organizationId: context.organizationId,
+            actorId: context.profileId,
+            eventType: 'sandbox.audit_step.blocked',
+            objectType: 'sandbox_scan',
+            objectId: runId,
+            summary: `${entry.step} ${entry.status}: ${entry.detail ?? 'blocked'}`
+          });
+        }
+      );
+      await recordActivityEvent({
+        organizationId: context.organizationId,
+        actorId: context.profileId,
+        eventType: 'sandbox.static_scan.blocked',
+        objectType: 'sandbox_scan',
+        objectId: runId,
+        summary: `Sandbox scan blocked by input guardrail: ${guard.violation}`
+      });
       return NextResponse.json({ error: guard.violation }, { status: 400 });
     }
-    recordAuditStep(runId, 'input_guardrail', 'sandbox', 'passed');
+    await recordAuditStep(runId, 'input_guardrail', 'sandbox', 'passed', undefined, async (entry) => {
+      await recordActivityEvent({
+        organizationId: context.organizationId,
+        actorId: context.profileId,
+        eventType: 'sandbox.audit_step.passed',
+        objectType: 'sandbox_scan',
+        objectId: runId,
+        summary: `${entry.step} ${entry.status}`
+      });
+    });
     const audit = mapSandboxScanToAuditRun(body.customSnippet);
+    await recordActivityEvent({
+      organizationId: context.organizationId,
+      actorId: context.profileId,
+      eventType: 'sandbox.static_scan.completed',
+      objectType: 'sandbox_scan',
+      objectId: audit.id,
+      summary: `Sandbox static scan completed with score ${audit.score}`
+    });
     return NextResponse.json({ success: true, audit, sandbox: true });
   }
 
   try {
-    const context = await resolveRequestActorContext();
+    const context = await resolveRequestActorContext(request);
     const headers = actorHeaders(context);
 
     let projectId = body.projectId;
@@ -57,20 +99,18 @@ export async function POST(request: Request) {
       headers
     });
 
-    const snapshot = await pollRuntimeAuditUntilComplete(submission.auditRunId, 120000, headers);
-    const projects = await fetchRuntimeProjects(headers);
-    const projectRow = projects.find(
-      (project) => String((project as { id: string }).id) === snapshot.projectId
-    ) as { name?: string } | undefined;
-    const projectName = projectRow?.name ?? snapshot.projectId;
-    const audit = mapSnapshotToAuditRun(snapshot, projectName);
-
-    return NextResponse.json({ success: true, audit, snapshot });
-  } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Audit run failed' },
-      { status: error instanceof Error && error.message === 'Unauthorized' ? 401 : 502 }
+      {
+        success: true,
+        async: true,
+        auditRunId: submission.auditRunId,
+        runStatus: submission.runStatus,
+        message: 'Audit queued. Open Audits to track progress while the swarm runs.'
+      },
+      { status: 202 }
     );
+  } catch (error) {
+    return bffErrorResponse(error, 'Audit run failed');
   }
 }
 
@@ -82,13 +122,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    const context = await resolveRequestActorContext();
+    const context = await resolveRequestActorContext(request);
     const snapshot = await fetchRuntimeAuditSnapshot(auditRunId, actorHeaders(context));
     return NextResponse.json({ snapshot });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to load audit snapshot' },
-      { status: 502 }
-    );
+    return bffErrorResponse(error, 'Failed to load audit snapshot');
   }
 }

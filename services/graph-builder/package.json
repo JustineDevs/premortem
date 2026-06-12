@@ -5,8 +5,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
-    "lint": "echo lint graph-builder",
-    "test": "echo test graph-builder",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

@@ -1,5 +1,6 @@
 import type { GraphSnapshotPayload } from '@premortem/graph-model';
 import { readGraphSnapshotFromNeo4j } from '@premortem/integrations';
+import type { GitHistorySnapshot, SourceFileSnapshot, OwnershipHint } from '../ingestion/ingest-project';
 
 import { buildGraphFromIngestion } from './build-graph-snapshot';
 import { EMPTY_CI_HISTORY } from '../ingestion/ingest-project';
@@ -49,6 +50,9 @@ export function rebuildGraphFromSnapshotMetadata(input: {
       has_ci: Boolean(metadata.hasCi),
       package_manifests: [],
       pipeline_files: [],
+      source_files: [] as SourceFileSnapshot[],
+      ownership_hints: [] as OwnershipHint[],
+      git_history: [] as GitHistorySnapshot[],
       apps,
       services,
       ci_history: EMPTY_CI_HISTORY,

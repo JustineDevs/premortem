@@ -7,7 +7,7 @@ import {
   MCPToolset,
   type StreamableHTTPConnectionParams
 } from '@google/adk';
-import { tracePremortemAgentMission } from '@premortem/observability';
+import { tracePremortemAgentMission, trace as otelTrace } from '@premortem/observability';
 
 import { buildPhoenixMcpConnection, describePhoenixRuntime } from './phoenix-mcp';
 
@@ -156,6 +156,7 @@ async function bootstrapPremortemAgentMissionCore(input: {
   gitlabBaseUrl?: string;
   gitlabToken?: string;
 }) {
+  otelTrace.getActiveSpan()?.setAttribute('premortem.audit_run_id', input.auditRunId);
   const credentials = resolveAgentBuilderCredentials(input);
   const trace = createMissionTrace(credentials.model);
   recordMissionStep(trace, 'mission.start', {

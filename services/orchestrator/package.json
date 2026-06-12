@@ -13,8 +13,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
-    "lint": "echo lint orchestrator",
-    "test": "echo test orchestrator",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

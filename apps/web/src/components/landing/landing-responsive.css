@@ -42,6 +42,12 @@
   height: auto !important;
 }
 
+.landing-scale-host[data-layout='responsive'] {
+  overflow-x: clip;
+  overflow-y: visible;
+  height: auto;
+}
+
 .landing-scale-host[data-layout='responsive'] .landing-scale-canvas {
   transform: none !important;
   width: 100% !important;
@@ -230,7 +236,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.landing-scale-host[data-layout='responsive'] .landing-solutions-ecosystem .landing-block-ecosystem-strip {
+.landing-scale-host[data-layout='responsive'] .landing-solutions-mid__col--workflow .landing-block-ecosystem-strip--grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -420,8 +426,13 @@
   .landing-scale-host[data-layout='responsive'] .landing-block-product-map,
   .landing-scale-host[data-layout='responsive'] .landing-block-persona-grid,
   .landing-scale-host[data-layout='responsive'] .landing-block-ecosystem-strip,
-  .landing-scale-host[data-layout='responsive'] .landing-block-doc-hub {
+  .landing-scale-host[data-layout='responsive'] .landing-block-doc-hub,
+  .landing-scale-host[data-layout='responsive'] .landing-block-audio__layout {
     grid-template-columns: 1fr;
+  }
+
+  .landing-scale-host[data-layout='responsive'] .landing-block-audio__deck {
+    grid-template-columns: auto minmax(0, 1fr);
   }
 
   .landing-scale-host[data-layout='responsive'] .landing-block-ecosystem-strip__card {
@@ -432,18 +443,34 @@
     border-bottom-width: 0;
   }
 
+  .landing-scale-host[data-layout='responsive'] .landing .landing-doc-panel {
+    overflow: visible;
+    height: auto;
+  }
+
   .landing-scale-host[data-layout='responsive'] .landing-doc-layout {
     grid-template-columns: 1fr;
+    height: auto;
   }
 
   .landing-scale-host[data-layout='responsive'] .landing-doc-nav {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    max-height: min(42vh, 360px);
     border-right: 0;
     border-bottom: 1px solid rgb(228, 227, 222);
-    max-height: none;
+  }
+
+  .landing-scale-host[data-layout='responsive'] .landing-doc-main {
+    height: auto;
+    overflow: visible;
   }
 
   .landing-scale-host[data-layout='responsive'] .landing-doc-content-row {
     grid-template-columns: 1fr;
+    overflow: visible;
+    flex: none;
   }
 
   .landing-scale-host[data-layout='responsive'] .landing-doc-toc {

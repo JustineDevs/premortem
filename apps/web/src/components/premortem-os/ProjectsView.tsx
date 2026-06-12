@@ -39,7 +39,7 @@ interface ProjectsViewProps {
 export function ProjectsView({
   projects,
   gitlabIntegration = null,
-  gitlabAccessPhase = gitlabIntegration ? 'repository_access' : 'identity_only',
+  gitlabAccessPhase = 'identity_only',
   onProjectsChanged,
   onTriggerScan,
   onRegisterProject
@@ -63,7 +63,7 @@ export function ProjectsView({
   const [newProjName, setNewProjName] = useState('');
   const [newProjUrl, setNewProjUrl] = useState('');
   const [newProjBranch, setNewProjBranch] = useState('main');
-  const [newProjProvider, setNewProjProvider] = useState<ProviderType>('github');
+  const [newProjProvider, setNewProjProvider] = useState<ProviderType>('gitlab');
   const [formErrors, setFormErrors] = useState<{ name?: string; url?: string }>({});
   const [newProjSnippet, setNewProjSnippet] = useState(`// Configure your custom vulnerable code here
 import express from 'express';
@@ -113,7 +113,7 @@ app.get('/unsecured-route', (req, res) => {
     setNewProjName('');
     setNewProjUrl('');
     setNewProjBranch('main');
-    setNewProjProvider('github');
+    setNewProjProvider('gitlab');
     setFormErrors({});
     setShowAdvancedForm(false);
   };
@@ -146,7 +146,7 @@ app.get('/unsecured-route', (req, res) => {
       <RepositoryDiscoveryPanel
         gitlabIntegration={gitlabIntegration}
         gitlabAccessPhase={gitlabAccessPhase}
-        autoDiscoverOnMount={autoDiscoverCatalog || Boolean(gitlabIntegration)}
+        autoDiscoverOnMount={autoDiscoverCatalog || gitlabAccessPhase === 'repository_access'}
         skipDiscoverSessionCache={autoDiscoverCatalog}
         onProjectsChanged={onProjectsChanged}
       />
@@ -188,7 +188,7 @@ app.get('/unsecured-route', (req, res) => {
                 <input
                   type="url"
                   required
-                  placeholder="e.g. https://github.com/organization/vault-api"
+                  placeholder="e.g. https://gitlab.com/org/repo"
                   value={newProjUrl}
                   onChange={(e) => {
                     setNewProjUrl(e.target.value);
@@ -225,8 +225,8 @@ app.get('/unsecured-route', (req, res) => {
                   onChange={(e) => setNewProjProvider(e.target.value as ProviderType)}
                   className="w-full p-2.5 bg-[#FDFDFD] border border-[#EAE6DF] rounded focus:outline-none focus:border-emerald-950 font-sans cursor-pointer text-xs font-semibold"
                 >
-                  <option value="github">GitHub Repositories (Public/Server)</option>
-                  <option value="gitlab">GitLab Enterprise Instances</option>
+                  <option value="gitlab">GitLab (recommended)</option>
+                  <option value="github">GitHub</option>
                   <option value="bitbucket">BitBucket Cloud Workspaces</option>
                   <option value="azure">Azure DevOps Pipelines Git</option>
                   <option value="gitea">Gitea On-Prem Server (Secure)</option>
@@ -244,7 +244,7 @@ app.get('/unsecured-route', (req, res) => {
                   Repository Source Code Snippet (For Live Audit analysis)
                 </label>
                 <span className="text-[10px] text-[#868A81] font-mono">
-                  This custom code will be scanned by Gemini live when you execute an audit.
+                  Optional snippet stored on the project; full orchestrator audits run when you launch a scan.
                 </span>
               </div>
               <textarea

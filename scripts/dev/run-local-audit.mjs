@@ -54,7 +54,7 @@ console.log(`  auditRunId: ${submitted.auditRunId}`);
 await executeAuditJob({
   job: submitted.job,
   rootDir,
-  registryAgents: buildWorkerRegisteredAgents()
+  registryAgents: buildWorkerRegisteredAgents(rootDir)
 });
 
 const snapshot = await getAuditRunSnapshot(submitted.auditRunId);

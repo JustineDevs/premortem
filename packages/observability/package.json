@@ -12,11 +12,10 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "lint": "echo lint observability",
-    "test": "echo test observability",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@arizeai/phoenix-client": "^6.10.0",
     "@arizeai/phoenix-otel": "^1.0.2",
     "@langfuse/client": "^4.6.1",
     "@sentry/node": "^9.47.1",

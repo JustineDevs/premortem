@@ -21,7 +21,10 @@ export function ProviderConnectCards({
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {integrationConnectOptions.map((option) => {
-        const isConnected = connected.has(option.id) || connected.has(option.name.toLowerCase());
+        const isConnected =
+          option.id === 'gitlab'
+            ? gitLabAccess.phase === 'repository_access'
+            : connected.has(option.id) || connected.has(option.name.toLowerCase());
         const isAvailable = option.status === 'available';
         const needsRepositoryAccess =
           option.id === 'gitlab' &&

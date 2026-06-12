@@ -1,32 +1,76 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "baseUrl": ".",
     "paths": {
-      "@premortem/db": ["packages/db/src"],
-      "@premortem/domain": ["packages/domain/src"],
-      "@premortem/agent-kit": ["packages/agent-kit/src"],
-      "@premortem/graph-model": ["packages/graph-model/src"],
-      "@premortem/gitlab-client": ["packages/gitlab-client/src"],
-      "@premortem/ui": ["packages/ui/src"],
-      "@premortem/llm": ["packages/llm/src"],
-      "@premortem/evals": ["packages/evals/src"],
-      "@premortem/integrations": ["packages/integrations/src"],
-      "@premortem/observability": ["packages/observability/src"],
-      "@premortem/workflow": ["packages/workflow/src"],
-      "@premortem/orchestrator": ["services/orchestrator/src"],
-      "@premortem/agent-builder": ["services/agent-builder/src"],
-      "@premortem/security": ["packages/security/src"],
-      "@premortem/gitlab-sync": ["services/gitlab-sync/src"],
-      "@premortem/dashboard": ["apps/dashboard/src"]
+      "@premortem/db": [
+        "packages/db/src"
+      ],
+      "@premortem/domain": [
+        "packages/domain/src"
+      ],
+      "@premortem/agent-kit": [
+        "packages/agent-kit/src"
+      ],
+      "@premortem/graph-model": [
+        "packages/graph-model/src"
+      ],
+      "@premortem/gitlab-client": [
+        "packages/gitlab-client/src"
+      ],
+      "@premortem/ui": [
+        "packages/ui/src"
+      ],
+      "@premortem/llm": [
+        "packages/llm/src"
+      ],
+      "@premortem/evals": [
+        "packages/evals/src"
+      ],
+      "@premortem/integrations": [
+        "packages/integrations/src"
+      ],
+      "@premortem/observability": [
+        "packages/observability/src"
+      ],
+      "@premortem/workflow": [
+        "packages/workflow/src"
+      ],
+      "@premortem/orchestrator": [
+        "services/orchestrator/src"
+      ],
+      "@premortem/agent-builder": [
+        "services/agent-builder/src"
+      ],
+      "@premortem/security": [
+        "packages/security/src"
+      ],
+      "@premortem/gitlab-sync": [
+        "services/gitlab-sync/src"
+      ],
+      "@premortem/dashboard": [
+        "apps/dashboard/src"
+      ],
+      "@premortem/storage": [
+        "packages/storage/src"
+      ],
+      "@premortem/billing": [
+        "packages/billing/src"
+      ]
     }
   }
 }

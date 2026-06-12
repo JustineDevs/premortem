@@ -1,5 +1,6 @@
 import {
   MarketingAutoplayDemo,
+  MarketingAudioPlayer,
   MarketingCallout,
   MarketingLinkGrid,
   MarketingScreenshot,
@@ -22,13 +23,21 @@ export default function HowItWorksPage() {
       <MarketingSectionHeading>Interactive demo</MarketingSectionHeading>
       <MarketingAutoplayDemo variant="how-it-works" />
 
+      <MarketingSectionHeading>Listen</MarketingSectionHeading>
+      <MarketingAudioPlayer
+        src={howItWorksPage.audioBrief.src}
+        title={howItWorksPage.audioBrief.title}
+        description={howItWorksPage.audioBrief.description}
+        durationLabel={howItWorksPage.audioBrief.durationLabel}
+      />
+
       <MarketingSectionHeading>Three steps</MarketingSectionHeading>
       <MarketingStepGrid />
 
       <MarketingScreenshot
         src={howItWorksPage.screenshot.src}
         alt={howItWorksPage.screenshot.alt}
-        crop="preview"
+        crop="console"
         caption="Workflow panel from the landing page: same audit path powers /app."
       />
 

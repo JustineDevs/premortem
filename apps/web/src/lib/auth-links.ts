@@ -5,6 +5,8 @@ export type AuthProvider = 'gitlab' | 'github';
 export const authLinks = {
   signup: '/signup',
   login: '/login',
+  forgotPassword: '/forgot-password',
+  resetPassword: '/reset-password',
   callback: '/auth/callback',
   defaultNext: '/app',
   logout: '/api/auth/logout'

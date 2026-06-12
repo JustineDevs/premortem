@@ -1,12 +1,5 @@
 {
   "name": "@premortem/docs",
   "private": true,
-  "type": "module",
-  "scripts": {
-    "build": "echo build docs",
-    "dev": "echo dev docs",
-    "lint": "echo lint docs",
-    "test": "echo test docs",
-    "typecheck": "echo typecheck docs"
-  }
+  "type": "module"
 }

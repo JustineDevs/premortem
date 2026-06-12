@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://premortem.dev/schemas/prediction-outcome.v1.json",
+  "$id": "https://premortem.jstn.site/schemas/prediction-outcome.v1.json",
   "title": "Premortem Prediction Outcome v1",
   "description": "Structured predicted outcome from a specialist or synthesis stage. Required when context supports prediction.",
   "type": "object",

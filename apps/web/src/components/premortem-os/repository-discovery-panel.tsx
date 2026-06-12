@@ -29,7 +29,7 @@ interface RepositoryDiscoveryPanelProps {
 
 export function RepositoryDiscoveryPanel({
   gitlabIntegration,
-  gitlabAccessPhase = gitlabIntegration ? 'repository_access' : 'identity_only',
+  gitlabAccessPhase = 'identity_only',
   autoDiscoverOnMount = false,
   skipDiscoverSessionCache = false,
   onProjectsChanged
@@ -339,7 +339,8 @@ export function RepositoryDiscoveryPanel({
             />
           </label>
           <p className="text-[10px] text-[#868A81]">
-            Public watch runs audits only. Issue publish stays disabled until you connect GitLab with write access.
+            Public watch registers a public GitLab repo for read-only scans. Connect GitLab in Settings
+            (read_repository scope) before running audits. Issue publish stays disabled until you grant write access.
           </p>
           <div className="flex justify-end">
             <button

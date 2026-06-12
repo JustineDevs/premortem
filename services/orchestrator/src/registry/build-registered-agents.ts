@@ -16,7 +16,7 @@ function resolveExecutorMode() {
 export function buildRegisteredAgents(rootDir: string, llmConfig?: LlmExecutorConfig) {
   const mode = resolveExecutorMode();
   if (mode === 'llm') {
-    return buildWorkerRegisteredAgents(llmConfig);
+    return buildWorkerRegisteredAgents(rootDir, llmConfig);
   }
   return createRegisteredAgents({
     rootDir,

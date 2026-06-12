@@ -1,8 +1,9 @@
 import { createReconciliationEvent, prisma, resolveGitLabCredentialsForProject } from '@premortem/db';
+import { gitLabAuthHeaders } from '@premortem/integrations';
 
 async function fetchGitLabIssue(baseUrl: string, token: string, projectId: string, issueIid: string) {
   const response = await fetch(`${baseUrl}/api/v4/projects/${encodeURIComponent(projectId)}/issues/${issueIid}`, {
-    headers: { 'private-token': token }
+    headers: gitLabAuthHeaders(token)
   });
 
   if (!response.ok) throw new Error(`GitLab issue fetch failed: ${response.status} ${await response.text()}`);
@@ -15,11 +16,14 @@ async function fetchGitLabIssue(baseUrl: string, token: string, projectId: strin
   }>;
 }
 
-function detectDrift(local: {
-  publishedTitle: string;
-  publishedBodyMd: string;
-  labels: unknown;
-}, remote: { title?: string; description?: string; labels?: string[]; state?: string }) {
+function detectDrift(
+  local: {
+    publishedTitle: string;
+    publishedBodyMd: string;
+    labels: unknown;
+  },
+  remote: { title?: string; description?: string; labels?: string[]; state?: string }
+) {
   const driftFields: string[] = [];
 
   if (remote.title && remote.title !== local.publishedTitle) driftFields.push('title');
@@ -28,6 +32,96 @@ function detectDrift(local: {
   if (remote.state === 'closed') driftFields.push('state');
 
   return driftFields;
+}
+
+type PublishedIssueWithProject = {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  externalIssueIid: string | null;
+  publishedTitle: string;
+  publishedBodyMd: string;
+  labels: unknown;
+  syncStatus: string;
+  url: string | null;
+  project: { externalProjectId: string };
+};
+
+async function reconcilePublishedIssueRecord(item: PublishedIssueWithProject) {
+  if (!item.externalIssueIid) {
+    return { skipped: true as const, reason: 'missing_external_iid' as const };
+  }
+
+  const credentials = await resolveGitLabCredentialsForProject(item.projectId);
+  if (!credentials) {
+    await createReconciliationEvent({
+      organizationId: item.organizationId,
+      publishedIssueId: item.id,
+      status: 'failed',
+      errorMessage: 'No GitLab credentials available for project'
+    });
+    return { failed: true as const };
+  }
+
+  try {
+    const remote = await fetchGitLabIssue(
+      credentials.baseUrl,
+      credentials.token,
+      item.project.externalProjectId,
+      item.externalIssueIid
+    );
+    const state = String(remote.state ?? 'opened');
+    const driftFields = detectDrift(
+      {
+        publishedTitle: item.publishedTitle,
+        publishedBodyMd: item.publishedBodyMd,
+        labels: item.labels
+      },
+      remote
+    );
+    const drifted = driftFields.length > 0;
+    const syncStatus = state === 'closed' ? 'closed' : drifted ? 'drifted' : 'reconciled';
+
+    await prisma.publishedIssue.update({
+      where: { id: item.id },
+      data: {
+        syncStatus,
+        publishedTitle: remote.title ?? item.publishedTitle,
+        publishedBodyMd: remote.description ?? item.publishedBodyMd,
+        labels: (remote.labels ?? item.labels) as string[],
+        url: remote.web_url ?? item.url,
+        lastSyncedAt: new Date(),
+        closedAt: state === 'closed' ? new Date() : null
+      }
+    });
+
+    await createReconciliationEvent({
+      organizationId: item.organizationId,
+      publishedIssueId: item.id,
+      status: drifted ? 'drifted' : 'matched',
+      driftFields,
+      localSnapshot: {
+        title: item.publishedTitle,
+        labels: item.labels as unknown,
+        syncStatus: item.syncStatus
+      },
+      remoteSnapshot: {
+        title: remote.title,
+        labels: remote.labels,
+        state: remote.state
+      }
+    });
+
+    return { reconciled: true as const, drifted };
+  } catch (error) {
+    await createReconciliationEvent({
+      organizationId: item.organizationId,
+      publishedIssueId: item.id,
+      status: 'failed',
+      errorMessage: error instanceof Error ? error.message : 'Reconciliation failed'
+    });
+    return { failed: true as const };
+  }
 }
 
 export async function reconcilePublishedIssues(input?: { organizationId?: string }) {
@@ -43,81 +137,75 @@ export async function reconcilePublishedIssues(input?: { organizationId?: string
   let failedCount = 0;
 
   for (const item of publishedIssues) {
-    if (!item.externalIssueIid) continue;
-
-    const credentials = await resolveGitLabCredentialsForProject(item.projectId);
-    if (!credentials) {
+    const result = await reconcilePublishedIssueRecord(item);
+    if ('failed' in result && result.failed) {
       failedCount += 1;
-      await createReconciliationEvent({
-        organizationId: item.organizationId,
-        publishedIssueId: item.id,
-        status: 'failed',
-        errorMessage: 'No GitLab credentials available for project'
-      });
       continue;
     }
-
-    try {
-      const remote = await fetchGitLabIssue(
-        credentials.baseUrl,
-        credentials.token,
-        item.project.externalProjectId,
-        item.externalIssueIid
-      );
-      const state = String(remote.state ?? 'opened');
-      const driftFields = detectDrift(
-        {
-          publishedTitle: item.publishedTitle,
-          publishedBodyMd: item.publishedBodyMd,
-          labels: item.labels
-        },
-        remote
-      );
-      const drifted = driftFields.length > 0;
-      const syncStatus = state === 'closed' ? 'closed' : drifted ? 'drifted' : 'reconciled';
-
-      await prisma.publishedIssue.update({
-        where: { id: item.id },
-        data: {
-          syncStatus,
-          publishedTitle: remote.title ?? item.publishedTitle,
-          publishedBodyMd: remote.description ?? item.publishedBodyMd,
-          labels: (remote.labels ?? item.labels) as string[],
-          url: remote.web_url ?? item.url,
-          lastSyncedAt: new Date(),
-          closedAt: state === 'closed' ? new Date() : null
-        }
-      });
-
-      await createReconciliationEvent({
-        organizationId: item.organizationId,
-        publishedIssueId: item.id,
-        status: drifted ? 'drifted' : 'matched',
-        driftFields,
-        localSnapshot: {
-          title: item.publishedTitle,
-          labels: item.labels as unknown,
-          syncStatus: item.syncStatus
-        },
-        remoteSnapshot: {
-          title: remote.title,
-          labels: remote.labels,
-          state: remote.state
-        }
-      });
-
+    if ('skipped' in result && result.skipped) continue;
+    if ('reconciled' in result && result.reconciled) {
       reconciledCount += 1;
-      if (drifted) driftedCount += 1;
-    } catch (error) {
-      failedCount += 1;
-      await createReconciliationEvent({
-        organizationId: item.organizationId,
-        publishedIssueId: item.id,
-        status: 'failed',
-        errorMessage: error instanceof Error ? error.message : 'Reconciliation failed'
-      });
+      if (result.drifted) driftedCount += 1;
     }
   }
 
   return { reconciledCount, driftedCount, failedCount };
+}
+
+export async function reconcilePublishedIssuesByGitLabRef(input: {
+  externalProjectId: string;
+  externalIssueIid: string;
+}) {
+  const publishedIssues = await prisma.publishedIssue.findMany({
+    where: {
+      externalIssueIid: input.externalIssueIid,
+      project: { externalProjectId: input.externalProjectId }
+    },
+    include: { project: true },
+    take: 10
+  });
+
+  if (publishedIssues.length === 0) {
+    return { reconciledCount: 0, driftedCount: 0, failedCount: 0, matched: false };
+  }
+
+  let reconciledCount = 0;
+  let driftedCount = 0;
+  let failedCount = 0;
+
+  for (const item of publishedIssues) {
+    const result = await reconcilePublishedIssueRecord(item);
+    if ('failed' in result && result.failed) failedCount += 1;
+    else if ('reconciled' in result && result.reconciled) {
+      reconciledCount += 1;
+      if (result.drifted) driftedCount += 1;
+    }
+  }
+
+  return { reconciledCount, driftedCount, failedCount, matched: true };
+}
+
+export interface GitLabIssueWebhookPayload {
+  object_kind?: string;
+  project?: { path_with_namespace?: string; id?: number };
+  object_attributes?: { iid?: number; state?: string };
+}
+
+export async function handleGitLabIssueWebhook(payload: GitLabIssueWebhookPayload) {
+  if (payload.object_kind !== 'issue') {
+    return { ok: true, skipped: true, reason: 'unsupported_object_kind' as const };
+  }
+
+  const externalIssueIid = payload.object_attributes?.iid;
+  const externalProjectId = payload.project?.path_with_namespace;
+  if (!externalIssueIid || !externalProjectId) {
+    return { ok: false, error: 'Missing GitLab project or issue reference' };
+  }
+
+  const result = await reconcilePublishedIssuesByGitLabRef({
+    externalProjectId,
+    externalIssueIid: String(externalIssueIid)
+  });
+
+  return { ok: true, ...result };
 }

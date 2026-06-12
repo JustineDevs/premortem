@@ -12,7 +12,16 @@ export {
   MarketingFeatureList
 } from './marketing-ecosystem-blocks';
 export { MarketingDocLayout } from './marketing-doc-layout';
+export { MarketingDocsRouteLayout } from './marketing-docs-route-layout';
+export { MarketingDocSidebar } from './marketing-doc-sidebar';
 export { MarketingStructuredDocPage } from './marketing-doc-page';
+export {
+  MarketingDocCallout,
+  MarketingDocCodeBlock,
+  MarketingDocGithubSource,
+  MarketingDocScreenshot,
+  MarketingDocSearch
+} from './marketing-doc-primitives';
 export {
   MarketingDocArticle,
   MarketingDocSection,
@@ -21,3 +30,4 @@ export {
 } from './marketing-doc-article';
 export { MarketingPricingTable } from './marketing-pricing-table';
 export { MarketingAutoplayDemo } from './marketing-autoplay-demo';
+export { MarketingAudioPlayer } from './marketing-audio-player';

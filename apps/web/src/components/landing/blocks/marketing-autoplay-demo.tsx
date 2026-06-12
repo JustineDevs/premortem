@@ -3,16 +3,22 @@
 import { useEffect, useState } from 'react';
 
 import {
-  marketingDemoSequence,
-  solutionsDemoHighlights,
-  type MarketingDemoStepId
-} from '@/content/marketing/pricing';
+  marketingDemoFrames,
+  marketingDemoStepStartIndex
+} from '@/content/marketing/demo-frames';
+import { solutionsDemoHighlights, type MarketingDemoStepId } from '@/content/marketing/pricing';
 import { premortemSteps } from '@/content/marketing/shared';
 
-import { MarketingCinematicDemoStage } from './marketing-cinematic-demo-stage';
+import { MarketingDemoScreenshotStage } from './marketing-demo-screenshot-stage';
 import { body14, label14, mono12 } from '../text-styles';
 
 const STEP_MS = 3800;
+
+const stepOrder: Record<MarketingDemoStepId, number> = {
+  connect: 0,
+  run: 1,
+  review: 2
+};
 
 type MarketingAutoplayDemoProps = {
   variant?: 'how-it-works' | 'solutions';
@@ -25,13 +31,14 @@ export function MarketingAutoplayDemo({
 }: MarketingAutoplayDemoProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [personaIndex, setPersonaIndex] = useState(0);
-  const frame = marketingDemoSequence[activeIndex] ?? marketingDemoSequence[0];
-  const activeStepId = frame.stepId as MarketingDemoStepId;
+  const frame = marketingDemoFrames[activeIndex] ?? marketingDemoFrames[0];
+  const activeStepId = frame.stepId;
+  const activeStepOrder = stepOrder[activeStepId];
 
   useEffect(() => {
     if (!autoplay) return;
     const timer = window.setInterval(() => {
-      setActiveIndex((current) => (current + 1) % marketingDemoSequence.length);
+      setActiveIndex((current) => (current + 1) % marketingDemoFrames.length);
     }, STEP_MS);
     return () => window.clearInterval(timer);
   }, [autoplay]);
@@ -46,22 +53,26 @@ export function MarketingAutoplayDemo({
 
   const persona = solutionsDemoHighlights[personaIndex] ?? solutionsDemoHighlights[0];
 
+  function jumpToStep(stepId: MarketingDemoStepId) {
+    setActiveIndex(marketingDemoStepStartIndex[stepId]);
+  }
+
   return (
     <section
       className="landing-block-demo"
-      aria-label="Premortem workflow demo (simulated)"
+      aria-label="Premortem workflow demo"
       data-demo-variant={variant}
     >
       <div className="landing-block-demo__steps" aria-label="Workflow steps">
         {premortemSteps.map((step, index) => {
           const isActive = step.id === activeStepId;
-          const isPast = index < activeIndex;
+          const isPast = index < activeStepOrder;
           return (
             <button
               key={step.id}
               type="button"
               className={`landing-block-demo__step${isActive ? ' landing-block-demo__step--active' : ''}${isPast ? ' landing-block-demo__step--past' : ''}`}
-              onClick={() => setActiveIndex(index)}
+              onClick={() => jumpToStep(step.id)}
               aria-current={isActive ? 'step' : undefined}
             >
               <span className="landing-block-demo__step-index">{index + 1}</span>
@@ -82,8 +93,13 @@ export function MarketingAutoplayDemo({
         </div>
 
         <div className="landing-block-demo__preview-wrap">
-          <MarketingCinematicDemoStage key={frame.stepId} stepId={activeStepId} phase={frame.phase} />
-          <div className="landing-block-demo__caption" key={`${frame.stepId}-caption`}>
+          <MarketingDemoScreenshotStage
+            key={frame.id}
+            src={frame.screenshot.src}
+            alt={frame.screenshot.alt}
+            phase={frame.phase}
+          />
+          <div className="landing-block-demo__caption" key={`${frame.id}-caption`}>
             <h3 className="landing-block-demo__headline" style={label14}>
               {frame.headline}
             </h3>

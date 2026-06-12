@@ -16,6 +16,7 @@ interface BuildCanvasModelInput {
   runtimeEventTypes: string[];
   isSimulating: boolean;
   simulationIndex: number;
+  providerConnected: boolean;
 }
 
 export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
@@ -25,7 +26,8 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
     auditSnapshot,
     runtimeEventTypes,
     isSimulating,
-    simulationIndex
+    simulationIndex,
+    providerConnected
   } = input;
 
   const totalFindingsCount = matchingAudit?.findings?.length || 0;
@@ -35,18 +37,21 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
   const findingIds = findingsList.map((f) => f.id);
   const publishedFindingIds = findingsList.filter((f) => f.gitlabIssueId).map((f) => f.id);
 
-  let scannerState: 'completed' | 'failed' | 'running' | 'queued' = 'completed';
+  let scannerState: 'completed' | 'failed' | 'running' | 'queued' = matchingAudit ? 'completed' : 'queued';
   if (selectedProj.status === 'SCANNING') scannerState = 'running';
   else if (selectedProj.status === 'FAILED') scannerState = 'failed';
+  else if (!matchingAudit) scannerState = 'queued';
 
-  let reviewState: 'completed' | 'reviewable' | 'queued' = 'reviewable';
-  if (totalFindingsCount === 0 || resolvedFindings.length === totalFindingsCount) {
+  let reviewState: 'completed' | 'reviewable' | 'queued' = matchingAudit && totalFindingsCount > 0 ? 'reviewable' : 'queued';
+  if (matchingAudit && (totalFindingsCount === 0 || resolvedFindings.length === totalFindingsCount)) {
     reviewState = 'completed';
   }
 
   let publishState: 'completed' | 'published' | 'queued' = 'queued';
   if (publishedFindings.length > 0) publishState = 'published';
-  else if (totalFindingsCount === 0) publishState = 'completed';
+  else if (matchingAudit && totalFindingsCount === 0) publishState = 'completed';
+
+  const connectState: CanvasNode['status'] = providerConnected ? 'completed' : 'queued';
 
   const clusterCount = auditSnapshot?.clusters?.length ?? 0;
   const graphNodeCount =
@@ -106,7 +111,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
       label: 'Connect Provider',
       type: 'input',
       description: 'Ingest GitLab repository metadata & branches context',
-      status: getSimulatedStatus(0, 'completed'),
+      status: getSimulatedStatus(0, connectState),
       targetLinkTab: 'settings',
       metadata: {
         title: 'GitLab Provider Auth Gateway',
@@ -283,7 +288,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
       to: 'node-run-audit',
       label: 'Configs Context Influx',
       transformationDetail:
-        'CI/CD pipeline maps and Docker variables are injected directly into the Gemini prompt context window alongside source file snippets.'
+        'CI/CD pipeline maps and configuration metadata are passed to the orchestrator alongside source file snippets.'
     },
     {
       id: 'edge-audit-cluster',

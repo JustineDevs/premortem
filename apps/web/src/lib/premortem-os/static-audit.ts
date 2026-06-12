@@ -1,3 +1,5 @@
+const SANDBOX_SOURCE = 'sandbox-snippet.ts';
+
 export function performStaticAudit(codeToScan: string): { overallScore: number; findings: any[] } {
   const findings: any[] = [];
   
@@ -14,16 +16,16 @@ export function performStaticAudit(codeToScan: string): { overallScore: number; 
       title: "SQL Query String Concatenation Vulnerability",
       severity: "CRITICAL" as const,
       category: "sql-injection",
-      filepath: "dbHandler.ts",
-      line: 11,
-      description: "Detected immediate SQL query string concatenation inside database execution commands. This permits remote SQL Injection bypassing standard application authentication parameters and profiles.",
+      filepath: SANDBOX_SOURCE,
+      line: 1,
+      description: "Detected SQL query string concatenation inside database execution commands. This is a demo scanner finding, not a repository-aware orchestrator finding.",
       evidence: "SELECT * FROM accounts WHERE username = '\" + user + \"' AND pw = '\" + password + \"'",
       trace: [
-        { step: 1, description: "Unsanitized user parameters received in transaction body request context", location: "processLogin" },
-        { step: 2, description: "Raw parameter strings concatenated directly into live query execution thread", location: "dbHandler.ts:11" }
+        { step: 1, description: "Unsanitized user parameters received in transaction body request context", location: SANDBOX_SOURCE },
+        { step: 2, description: "Raw parameter strings concatenated directly into live query execution thread", location: SANDBOX_SOURCE }
       ],
       recommendation: "Replace custom concatenated query strings with fully parameterized input placeholders (like ? or postgres bindings).",
-      aiReasoning: "Fallback Analysis: Raw parameters injection bypasses application authentication safeguards. Attackers can access administrative credentials using malicious inputs.",
+      aiReasoning: "Static pattern match: raw parameter injection bypasses application authentication safeguards.",
       suggestedPatchCode: "const [rows] = await connection.query(\n  \"SELECT * FROM accounts WHERE username = ? AND pw = ?\",\n  [user, password]\n);"
     });
   }
@@ -37,16 +39,16 @@ export function performStaticAudit(codeToScan: string): { overallScore: number; 
       title: "Plaintext Sensitive Credentials Output in Process Logs",
       severity: "MEDIUM" as const,
       category: "pii-exposure",
-      filepath: "authController.ts",
-      line: 15,
-      description: "Critical user credential parameters, tokens, or password strings are written directly into process standard logs without formatting filters.",
+      filepath: SANDBOX_SOURCE,
+      line: 1,
+      description: "Critical user credential parameters, tokens, or password strings are written directly into process standard logs. This is a demo scanner finding, not a repository-aware orchestrator finding.",
       evidence: "console.log(\"Authenticated username match payload: \", user, \" pw: \", password);",
       trace: [
-        { step: 1, description: "User credentials resolved inside middleware parameters", location: "processLogin" },
-        { step: 2, description: "Raw credentials parameters dumped straight into standard stdout logs stream", location: "authController.ts:15" }
+        { step: 1, description: "User credentials resolved inside middleware parameters", location: SANDBOX_SOURCE },
+        { step: 2, description: "Raw credentials parameters dumped straight into standard stdout logs stream", location: SANDBOX_SOURCE }
       ],
       recommendation: "Ensure console logs utilize structured logging filters or remove standard debug streams inside production modules entirely.",
-      aiReasoning: "Fallback Analysis: High exposure debug prints dump passwords, leading to access token exposures on common log search arrays.",
+      aiReasoning: "Static pattern match: debug prints may expose passwords or tokens in log streams.",
       suggestedPatchCode: "console.log(\"Authenticated match query executed safely for user: \", user);"
     });
   }
@@ -61,16 +63,16 @@ export function performStaticAudit(codeToScan: string): { overallScore: number; 
       title: "Unencrypted Transit Communication Protocol (HTTP)",
       severity: "HIGH" as const,
       category: "unencrypted-transit",
-      filepath: "clientDispatch.ts",
-      line: 9,
-      description: "Transmitting confidential user transaction data, patient vital metrics, or tokens over unsecure protocols (Port 80/HTTP). Traffic can be monitored via wire sniffers.",
+      filepath: SANDBOX_SOURCE,
+      line: 1,
+      description: "Transmitting confidential data over unsecure protocols (Port 80/HTTP). This is a demo scanner finding, not a repository-aware orchestrator finding.",
       evidence: "port: 80",
       trace: [
-        { step: 1, description: "System serializes data structures for transport package", location: "dispatchRoutine" },
-        { step: 2, description: "Network connection requested over plain-text unencrypted interface coordinates", location: "clientDispatch.ts:9" }
+        { step: 1, description: "System serializes data structures for transport package", location: SANDBOX_SOURCE },
+        { step: 2, description: "Network connection requested over plain-text unencrypted interface coordinates", location: SANDBOX_SOURCE }
       ],
       recommendation: "Update the host bindings and options to enforce secure TLS/SSL protocol handshakes on Port 443 (HTTPS).",
-      aiReasoning: "Fallback Analysis: Transporting sensitive healthcare vitals or transaction hashes over plain HTTP invites intermediate packet sniffing.",
+      aiReasoning: "Static pattern match: sensitive payloads over plain HTTP invite packet sniffing.",
       suggestedPatchCode: "port: 443, // Enabled standard HTTPS SSL TLS encryption"
     });
   }
@@ -85,35 +87,34 @@ export function performStaticAudit(codeToScan: string): { overallScore: number; 
       title: "Hardcoded default AWS Access Credentials Keys",
       severity: "HIGH" as const,
       category: "hardcoded-secrets",
-      filepath: "awsStorageConfig.ts",
-      line: 5,
-      description: "Detection of hardcoded backup programmatic cloud configuration hashes or AWS secret strings compiled inside source lines.",
-      evidence: "const accessID = \"AKIAID8481EXAMPLE2\";",
+      filepath: SANDBOX_SOURCE,
+      line: 1,
+      description: "Detection of hardcoded programmatic cloud configuration hashes or AWS secret strings compiled inside source lines. This is a demo scanner finding, not a repository-aware orchestrator finding.",
+      evidence: "const accessID = \"AKIA...\";",
       trace: [
-        { step: 1, description: "Application launches AWS storage gateway parameters", location: "configureBucket" },
-        { step: 2, description: "Credentials resolve to default hardcoded strings defined in source control", location: "awsStorageConfig.ts:5" }
+        { step: 1, description: "Application launches AWS storage gateway parameters", location: SANDBOX_SOURCE },
+        { step: 2, description: "Credentials resolve to hardcoded strings defined in source control", location: SANDBOX_SOURCE }
       ],
       recommendation: "Load AWS access profiles or programmatic credentials strictly from process environment parameters or cloud config resources.",
-      aiReasoning: "Fallback Analysis: Leaking static console access ID parameters inside public or private repositories leads to cloud asset compromises.",
+      aiReasoning: "Static pattern match: static access IDs in source control increase cloud compromise risk.",
       suggestedPatchCode: "const accessKeyId = process.env.AWS_ACCESS_KEY_ID;\nconst secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;\nif (!accessKeyId || !secretAccessKey) {\n  throw new Error('Required AWS secrets are missing from environmental variables.');\n}"
     });
   }
 
-  // Fallback default safe finding if nothing matched
   if (findings.length === 0) {
     findings.push({
-      title: "Workspace Security Verification Routine Passed",
+      title: "No matching static security patterns",
       severity: "LOW" as const,
       category: "compliance-success",
-      filepath: "sourceCode.ts",
+      filepath: SANDBOX_SOURCE,
       line: 1,
-      description: "The analyzed script segment successfully matches secure operational parameters. No SQL string injections, hardcoded keys, plain text print logs, or unencrypted port transports detected.",
-      evidence: "// Clean source stream verified",
+      description: "The pasted snippet did not match the playground's static rules (SQL concatenation, credential logging, plain HTTP, or hardcoded cloud keys). This is a demo scanner only. Run a full repository audit from Projects for orchestrator findings.",
+      evidence: "// No rule matches in pasted snippet",
       trace: [
-        { step: 1, description: "Secure check routine instantiated", location: "analyzer" }
+        { step: 1, description: "Static playground rules evaluated", location: SANDBOX_SOURCE }
       ],
-      recommendation: "Continue maintaining dependency updates, standard environment bindings, and strict SSL transports.",
-      aiReasoning: "Fallback Analysis: Zero vulnerability matches detected under standard verification criteria.",
+      recommendation: "For repository-wide analysis, register a project and launch a Premortem security scan.",
+      aiReasoning: "Static demo pattern scan only; this is not a substitute for a full orchestrator audit.",
       suggestedPatchCode: ""
     });
   }

@@ -17,6 +17,23 @@ export function extractBearerToken(request: Request): string | null {
   return token.length > 0 ? token : null;
 }
 
+export function extractApiKeyToken(request: Request): string | null {
+  const header = request.headers.get('x-premortem-api-key') ?? request.headers.get('authorization');
+  if (!header) return null;
+
+  if (header.startsWith('ApiKey ')) {
+    const token = header.slice('ApiKey '.length).trim();
+    return token.length > 0 ? token : null;
+  }
+
+  if (request.headers.get('x-premortem-api-key')) {
+    const token = header.trim();
+    return token.length > 0 ? token : null;
+  }
+
+  return null;
+}
+
 export async function verifySupabaseAccessToken(
   accessToken: string
 ): Promise<VerifiedSupabaseUser | null> {
