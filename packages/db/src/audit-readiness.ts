@@ -5,7 +5,8 @@ import { prisma } from './client';
 import { fetchWithTimeout } from './fetch-with-timeout';
 import {
   resolveGitLabCredentialsForOrganization,
-  resolveGitLabCredentialsForProject
+  resolveGitLabCredentialsForProject,
+  decodeStoredToken
 } from './provider-tokens';
 import { getOrganizationLlmSettings } from './workspace';
 
@@ -90,7 +91,7 @@ export async function verifyGitLabRepoReadAccess(input: {
   const encoded = encodeURIComponent(input.externalProjectId);
   const response = await fetchWithTimeout(
     `${input.baseUrl.replace(/\/$/, '')}/api/v4/projects/${encoded}`,
-    { headers: { 'PRIVATE-TOKEN': input.token } }
+    { headers: gitLabAuthHeaders(input.token) }
   );
 
   if (!response.ok) {
@@ -119,7 +120,7 @@ async function verifyGitLabMemberAccess(input: {
   const encodedProject = encodeURIComponent(input.externalProjectId);
 
   const userResponse = await fetchWithTimeout(`${base}/api/v4/user`, {
-    headers: { 'PRIVATE-TOKEN': input.token }
+    headers: gitLabAuthHeaders(input.token)
   });
   if (!userResponse.ok) return null;
 
@@ -128,7 +129,7 @@ async function verifyGitLabMemberAccess(input: {
 
   const memberResponse = await fetchWithTimeout(
     `${base}/api/v4/projects/${encodedProject}/members/all/${user.id}`,
-    { headers: { 'PRIVATE-TOKEN': input.token } }
+    { headers: gitLabAuthHeaders(input.token) }
   );
   if (!memberResponse.ok) return null;
 
@@ -166,7 +167,7 @@ export async function verifyGitLabIssueWriteAccess(input: {
 }
 
 function decodeStoredProviderToken(value: string) {
-  return value.startsWith('plain:') ? value.slice('plain:'.length) : value;
+  return decodeStoredToken(value);
 }
 
 async function readGitLabPatScopes(baseUrl: string, token: string): Promise<string[] | null> {
@@ -229,6 +230,19 @@ export async function verifyGitLabIssueCreateAccess(input: {
   }
 
   return created;
+}
+
+export async function probeGitLabIssueWriteAccess(input: {
+  baseUrl: string;
+  token: string;
+  externalProjectId: string;
+}): Promise<boolean> {
+  try {
+    await verifyGitLabIssueWriteAccess(input);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function canCreateGitLabIssues(input: {
@@ -303,11 +317,15 @@ function externalProjectIdFromRepoUrl(repoUrl: string, fallback: string): string
   }
 }
 
-/** Validates repo read + issue-write permissions when registering a GitLab project. */
+/** Validates repo access when registering a GitLab project. */
 export async function verifyGitLabRegistrationAccess(input: {
   organizationId: string;
   repoUrl?: string;
   externalProjectId?: string;
+  connectionId?: string;
+  baseUrl?: string;
+  token?: string;
+  requireIssueWrite?: boolean;
 }) {
   if (allowsLocalIngestBypass()) return;
 
@@ -324,26 +342,41 @@ export async function verifyGitLabRegistrationAccess(input: {
     );
   }
 
-  const credentials = await resolveGitLabCredentialsForOrganization(input.organizationId);
-  if (!credentials?.token) {
-    throw new AuditReadinessError(
-      'Connect GitLab in Settings before registering a repository.',
-      'gitlab_not_connected',
-      'gitlab',
-      'gitlab'
-    );
+  let baseUrl = input.baseUrl;
+  let token = input.token;
+
+  if (!baseUrl || !token) {
+    const credentials = await resolveGitLabCredentialsForOrganization(input.organizationId, {
+      connectionId: input.connectionId
+    });
+    if (!credentials?.token) {
+      throw new AuditReadinessError(
+        'Connect GitLab in Settings before registering a repository.',
+        'gitlab_not_connected',
+        'gitlab',
+        'gitlab'
+      );
+    }
+    baseUrl = credentials.baseUrl;
+    token = credentials.token;
   }
 
-  await verifyGitLabIssueWriteAccess({
-    baseUrl: credentials.baseUrl,
-    token: credentials.token,
+  await verifyGitLabRepoReadAccess({
+    baseUrl,
+    token,
     externalProjectId
   });
+
+  if (input.requireIssueWrite !== false) {
+    await verifyGitLabIssueWriteAccess({
+      baseUrl,
+      token,
+      externalProjectId
+    });
+  }
 }
 
-async function verifyGitLabProjectPermissions(projectId: string) {
-  if (allowsLocalIngestBypass()) return;
-
+async function resolveGitLabProjectCredentials(projectId: string) {
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project || project.provider !== 'gitlab' || !project.externalProjectId) {
     if (isProductionMode()) {
@@ -354,7 +387,7 @@ async function verifyGitLabProjectPermissions(projectId: string) {
         'gitlab'
       );
     }
-    return;
+    return null;
   }
 
   const credentials = await resolveGitLabCredentialsForProject(projectId);
@@ -367,17 +400,43 @@ async function verifyGitLabProjectPermissions(projectId: string) {
     );
   }
 
+  return {
+    project,
+    credentials
+  };
+}
+
+async function verifyGitLabProjectReadAccessForScan(projectId: string) {
+  if (allowsLocalIngestBypass()) return;
+
+  const resolved = await resolveGitLabProjectCredentials(projectId);
+  if (!resolved) return;
+
+  await verifyGitLabRepoReadAccess({
+    baseUrl: resolved.credentials.baseUrl,
+    token: resolved.credentials.token,
+    externalProjectId: resolved.project.externalProjectId!
+  });
+}
+
+/** Validates GitLab issue write/create access before publishing to GitLab. */
+export async function assertGitLabPublishReadiness(projectId: string) {
+  if (allowsLocalIngestBypass()) return;
+
+  const resolved = await resolveGitLabProjectCredentials(projectId);
+  if (!resolved) return;
+
   await verifyGitLabIssueWriteAccess({
-    baseUrl: credentials.baseUrl,
-    token: credentials.token,
-    externalProjectId: project.externalProjectId
+    baseUrl: resolved.credentials.baseUrl,
+    token: resolved.credentials.token,
+    externalProjectId: resolved.project.externalProjectId!
   });
 
   if (isProductionMode()) {
     await verifyGitLabIssueCreateAccess({
-      baseUrl: credentials.baseUrl,
-      token: credentials.token,
-      externalProjectId: project.externalProjectId
+      baseUrl: resolved.credentials.baseUrl,
+      token: resolved.credentials.token,
+      externalProjectId: resolved.project.externalProjectId!
     });
   }
 }
@@ -387,5 +446,5 @@ export async function assertAuditReadiness(input: {
   projectId: string;
 }) {
   await verifyLlmConfiguration(input.organizationId);
-  await verifyGitLabProjectPermissions(input.projectId);
+  await verifyGitLabProjectReadAccessForScan(input.projectId);
 }
