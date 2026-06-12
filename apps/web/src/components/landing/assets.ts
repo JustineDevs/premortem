@@ -1,7 +1,7 @@
 export const assets = {
   heroScreenshot: '/landing/hero-screenshot.png',
   workflowHeader: '/landing/premortem-header.png',
-  workflowPreview: '/landing/workflow-preview.png',
+  consoleAuditsPreview: '/landing/console-audits-preview.png',
   googleCloud: '/landing/google-cloud-wordmark.png',
   gitlab: '/landing/gitlab-wordmark.png',
   github: '/landing/github-wordmark.png',

@@ -30,18 +30,22 @@ export function WorkflowPanel() {
         className="framer-14nxad0"
         style={{ objectFit: 'contain' }}
       />
-      <img
-        src={assets.workflowPreview}
-        alt="Premortem dashboard preview"
+      <iframe
+        src="https://www.youtube-nocookie.com/embed/Nf_SvtWH_vo?rel=0&modestbranding=1&playsinline=1"
+        title="Premortem dashboard preview video"
         width={837}
         height={368}
         className="framer-qv74g5"
         style={{
+          border: 0,
           borderBottomLeftRadius: 10,
           borderBottomRightRadius: 10,
           boxShadow: '0px 1px 2px 0px rgba(0, 0, 0, 0.25)',
-          objectFit: 'cover'
+          backgroundColor: 'rgb(0, 0, 0)'
         }}
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+        loading="lazy"
       />
     </div>
   );
