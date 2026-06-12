@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { premortemBrand } from '@/lib/premortem-os/branding';
 import { authLinks } from '@/lib/auth-links';
+import { formatIntegrationNotice } from '@/lib/integration-notices';
 import {
   GitBranch, 
   Settings, 
@@ -46,6 +47,30 @@ import { DEFAULT_VENDOR_ROUTING, type VendorRoutingTier } from '@/lib/premortem-
 import { useWorkspace } from '@/hooks/use-workspace';
 import { useReconciliationEvents } from '@/hooks/use-os-console-data';
 
+type NotificationInboxItem = {
+  id: string;
+  organizationId: string;
+  projectId: string | null;
+  kind: string;
+  title: string;
+  body: string | null;
+  url: string | null;
+  readAt: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+type ProjectAutomationDraft = {
+  autoRunOnPush: boolean;
+  autoPublishApprovedIssues: boolean;
+  auditDefaultBranchOnly: boolean;
+  enabledAgents: string;
+  severityThreshold: 'low' | 'medium' | 'high' | 'critical';
+  labelsTemplate: string;
+  ignorePaths: string;
+  notificationSettings: string;
+};
+
 const getIconSlugByName = (name: string) => {
   const lowercase = name.toLowerCase();
   if (lowercase.includes('github')) return 'github';
@@ -58,7 +83,7 @@ const getIconSlugByName = (name: string) => {
   return 'git';
 };
 
-export function SettingsView({ projects: _projects }: { projects?: Project[] }) {
+export function SettingsView({ projects }: { projects?: Project[] }) {
   const {
     workspace,
     isLoading,
@@ -71,6 +96,8 @@ export function SettingsView({ projects: _projects }: { projects?: Project[] }) 
     patchProfile,
     patchOrganization,
     patchBillingPlan,
+    createApiKey,
+    revokeApiKey,
     startCheckout,
     reconcileIssues,
     syncIntegration
@@ -98,6 +125,8 @@ export function SettingsView({ projects: _projects }: { projects?: Project[] }) 
   const [newProvName, setNewProvName] = useState('');
   const [newProvHost, setNewProvHost] = useState('');
   const [newProvModel, setNewProvModel] = useState('');
+  const [newApiKeyLabel, setNewApiKeyLabel] = useState('');
+  const [createdApiKeySecret, setCreatedApiKeySecret] = useState<string | null>(null);
   const [activeTier, setActiveTier] = useState<'free' | 'pro' | 'team' | 'enterprise'>('free');
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [slackWebhook, setSlackWebhook] = useState('');
@@ -105,15 +134,28 @@ export function SettingsView({ projects: _projects }: { projects?: Project[] }) 
   const [isSlackConnected, setIsSlackConnected] = useState(false);
   const [alertEmails, setAlertEmails] = useState('');
   const [alertSeverity, setAlertSeverity] = useState('HIGH');
+  const [notificationInbox, setNotificationInbox] = useState<NotificationInboxItem[]>([]);
+  const [notificationInboxLoading, setNotificationInboxLoading] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [projectSettingsDraft, setProjectSettingsDraft] = useState<ProjectAutomationDraft>({
+    autoRunOnPush: false,
+    autoPublishApprovedIssues: false,
+    auditDefaultBranchOnly: true,
+    enabledAgents: '',
+    severityThreshold: 'medium',
+    labelsTemplate: '',
+    ignorePaths: '',
+    notificationSettings: '{}'
+  });
 
-  React.useEffect(() => {
+  useEffect(() => {
     void fetch('/api/auth/status')
       .then((response) => response.json())
       .then((payload) => setAuthConfigured(Boolean(payload.configured)))
       .catch(() => setAuthConfigured(false));
   }, []);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!workspace) return;
     setProfileDraft({
       fullName: workspace.profile.fullName ?? '',
@@ -143,8 +185,60 @@ export function SettingsView({ projects: _projects }: { projects?: Project[] }) 
     setAlertSeverity(workspace.notifications.alertSeverity);
   }, [workspace]);
 
+  useEffect(() => {
+    if (!projects || projects.length === 0) {
+      setSelectedProjectId('');
+      return;
+    }
+    setSelectedProjectId((current) => {
+      if (current && projects.some((project) => project.id === current)) {
+        return current;
+      }
+      return projects[0]!.id;
+    });
+  }, [projects]);
+
+  useEffect(() => {
+    if (!selectedProjectId) return;
+    const selectedProject = projects?.find((project) => project.id === selectedProjectId);
+    if (!selectedProject) return;
+    const settings = selectedProject.projectSettings;
+    setProjectSettingsDraft({
+      autoRunOnPush: settings?.autoRunOnPush ?? false,
+      autoPublishApprovedIssues: settings?.autoPublishApprovedIssues ?? false,
+      auditDefaultBranchOnly: settings?.auditDefaultBranchOnly ?? true,
+      enabledAgents: Array.isArray(settings?.enabledAgents) ? settings.enabledAgents.join(', ') : '',
+      severityThreshold: settings?.severityThreshold ?? 'medium',
+      labelsTemplate: Array.isArray(settings?.labelsTemplate) ? settings.labelsTemplate.join(', ') : '',
+      ignorePaths: Array.isArray(settings?.ignorePaths) ? settings.ignorePaths.join(', ') : '',
+      notificationSettings: JSON.stringify(settings?.notificationSettings ?? {}, null, 2)
+    });
+  }, [projects, selectedProjectId]);
+
+  useEffect(() => {
+    if (!workspace || activeSubTab !== 'notifications') return;
+    const controller = new AbortController();
+    setNotificationInboxLoading(true);
+    void fetch('/api/workspace/notifications?limit=25', { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error('Failed to load notifications.');
+        }
+        return response.json() as Promise<{ notifications?: NotificationInboxItem[] }>;
+      })
+      .then((payload) => setNotificationInbox(payload.notifications ?? []))
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setNotificationInbox([]);
+      })
+      .finally(() => setNotificationInboxLoading(false));
+
+    return () => controller.abort();
+  }, [workspace, activeSubTab]);
+
   const integrations = workspace?.integrations ?? [];
   const policies = workspace?.policies ?? [];
+  const apiKeys = workspace?.apiKeys ?? [];
   const usageStats = workspace?.usage ?? {
     scans: { used: 0, limit: 0 },
     tokens: { used: 0, limit: 0 },
@@ -159,24 +253,100 @@ export function SettingsView({ projects: _projects }: { projects?: Project[] }) 
     }, 3050);
   };
 
-  React.useEffect(() => {
+  const selectedProject = projects?.find((project) => project.id === selectedProjectId) ?? null;
+
+  const saveSelectedProjectSettings = async () => {
+    if (!selectedProject) {
+      alert('Select a project first.');
+      return;
+    }
+
+    let parsedNotificationSettings: Record<string, unknown> = {};
+    try {
+      parsedNotificationSettings = projectSettingsDraft.notificationSettings.trim()
+        ? (JSON.parse(projectSettingsDraft.notificationSettings) as Record<string, unknown>)
+        : {};
+    } catch {
+      alert('Notification settings must be valid JSON.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/projects/${selectedProject.id}/settings`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          autoRunOnPush: projectSettingsDraft.autoRunOnPush,
+          autoPublishApprovedIssues: projectSettingsDraft.autoPublishApprovedIssues,
+          auditDefaultBranchOnly: projectSettingsDraft.auditDefaultBranchOnly,
+          enabledAgents: projectSettingsDraft.enabledAgents
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean),
+          severityThreshold: projectSettingsDraft.severityThreshold,
+          labelsTemplate: projectSettingsDraft.labelsTemplate
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean),
+          ignorePaths: projectSettingsDraft.ignorePaths
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean),
+          notificationSettings: parsedNotificationSettings
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      showToast(`Saved automation settings for ${selectedProject.name}.`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to save project settings.');
+    }
+  };
+
+  const reloadNotifications = async () => {
+    setNotificationInboxLoading(true);
+    try {
+      const response = await fetch('/api/workspace/notifications?limit=25');
+      if (!response.ok) {
+        throw new Error('Failed to load notifications.');
+      }
+      const payload = (await response.json()) as { notifications?: NotificationInboxItem[] };
+      setNotificationInbox(payload.notifications ?? []);
+    } catch {
+      setNotificationInbox([]);
+    } finally {
+      setNotificationInboxLoading(false);
+    }
+  };
+
+  const markNotificationsRead = async (notificationIds?: string[]) => {
+    try {
+      const response = await fetch('/api/workspace/notifications/read', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ notificationIds })
+      });
+      if (!response.ok) {
+        throw new Error('Failed to mark notifications read.');
+      }
+      await reloadNotifications();
+      showToast('Notification inbox updated.');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to update notifications.');
+    }
+  };
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const notice = params.get('integration_notice');
     if (!notice) return;
 
-    const messages: Record<string, string> = {
-      gitlab_connected: 'GitLab connected successfully. Repository access is ready.',
-      coming_soon: 'That provider connector is coming soon.',
-      denied: 'Provider authorization was cancelled.',
-      config: 'GitLab OAuth is not configured. Set GITLAB_CLIENT_ID and GITLAB_CLIENT_SECRET.',
-      invalid_state: 'OAuth state mismatch. Please try connecting again.',
-      oauth_failed: 'Provider OAuth failed. Check credentials and redirect URI.',
-      persist_failed: 'Connected to GitLab but failed to save the connection.'
-    };
-
     const detail = params.get('integration_detail');
-    showToast(detail ? `${messages[notice] ?? 'Integration updated.'} (${detail})` : messages[notice] ?? 'Integration updated.');
+    showToast(formatIntegrationNotice(notice, detail));
 
     params.delete('integration_notice');
     params.delete('integration_detail');
@@ -236,6 +406,33 @@ export function SettingsView({ projects: _projects }: { projects?: Project[] }) 
       showToast(`Removed custom provider "${item.name}".`);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to remove provider.');
+    }
+  };
+
+  const handleCreateApiKey = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const label = newApiKeyLabel.trim();
+    if (!label) {
+      alert('Provide a label for the API key.');
+      return;
+    }
+
+    try {
+      const result = await createApiKey(label);
+      setCreatedApiKeySecret(result.apiKey.apiKey);
+      setNewApiKeyLabel('');
+      showToast(`Created API key ${result.apiKey.key.label}.`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to create API key.');
+    }
+  };
+
+  const handleRevokeApiKey = async (keyId: string, label: string) => {
+    try {
+      await revokeApiKey(keyId);
+      showToast(`Revoked API key ${label}.`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to revoke API key.');
     }
   };
 
@@ -505,6 +702,182 @@ export function SettingsView({ projects: _projects }: { projects?: Project[] }) 
                   </div>
                 </form>
 
+                <div className="border border-[#EAE6DF] bg-white rounded-lg p-5 space-y-4">
+                  <div className="flex flex-col gap-1">
+                    <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-neutral-900 flex items-center gap-1.5">
+                      <Zap size={14} className="text-emerald-700" />
+                      Project automation settings
+                    </h4>
+                    <p className="text-xs text-[#717A75]">
+                      Configure default audit behavior, allowlisted agents, ignored paths, and notification defaults per project.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label className="space-y-1.5">
+                      <span className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">
+                        Project
+                      </span>
+                      <select
+                        value={selectedProjectId}
+                        onChange={(event) => setSelectedProjectId(event.target.value)}
+                        className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs font-medium"
+                      >
+                        {projects?.length ? (
+                          projects.map((project) => (
+                            <option key={project.id} value={project.id}>
+                              {project.name}
+                            </option>
+                          ))
+                        ) : (
+                          <option value="">No projects connected</option>
+                        )}
+                      </select>
+                    </label>
+                    <div className="p-3 bg-[#FAF8F5] border border-[#EAE6DF] rounded text-xs text-[#717A75]">
+                      {selectedProject ? (
+                        <>
+                          <p className="font-bold text-[#1E2522]">{selectedProject.name}</p>
+                          <p className="mt-1">
+                            {selectedProject.projectSettings
+                              ? 'Loaded project-specific defaults from the workspace.'
+                              : 'This project uses workspace defaults until saved.'}
+                          </p>
+                        </>
+                      ) : (
+                        <p>Select a project to edit its automation policy.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {[
+                      {
+                        key: 'autoRunOnPush',
+                        label: 'Auto run on push',
+                        description: 'Launch audits automatically when the tracked branch updates.'
+                      },
+                      {
+                        key: 'autoPublishApprovedIssues',
+                        label: 'Auto publish approved issues',
+                        description: 'Push approved findings back to GitLab without a manual publish step.'
+                      },
+                      {
+                        key: 'auditDefaultBranchOnly',
+                        label: 'Audit default branch only',
+                        description: 'Keep automated runs scoped to the canonical branch.'
+                      }
+                    ].map((item) => (
+                      <label key={item.key} className="flex items-start justify-between gap-3 border border-[#EAE6DF] bg-[#FAF8F5] rounded p-3 cursor-pointer">
+                        <div className="space-y-0.5">
+                          <span className="text-[#1E2522] font-medium block">{item.label}</span>
+                          <span className="text-[11px] text-[#717A75]">{item.description}</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={projectSettingsDraft[item.key as keyof ProjectAutomationDraft] as boolean}
+                          onChange={(event) =>
+                            setProjectSettingsDraft((prev) => ({
+                              ...prev,
+                              [item.key]: event.target.checked
+                            }))
+                          }
+                          className="accent-emerald-950 mt-1"
+                        />
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <label className="space-y-1.5">
+                      <span className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">
+                        Enabled agents, comma separated
+                      </span>
+                      <textarea
+                        value={projectSettingsDraft.enabledAgents}
+                        onChange={(event) =>
+                          setProjectSettingsDraft((prev) => ({ ...prev, enabledAgents: event.target.value }))
+                        }
+                        rows={3}
+                        className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs font-mono"
+                      />
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">
+                        Severity threshold
+                      </span>
+                      <select
+                        value={projectSettingsDraft.severityThreshold}
+                        onChange={(event) =>
+                          setProjectSettingsDraft((prev) => ({
+                            ...prev,
+                            severityThreshold: event.target.value as ProjectAutomationDraft['severityThreshold']
+                          }))
+                        }
+                        className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs font-medium"
+                      >
+                        <option value="low">Low and above</option>
+                        <option value="medium">Medium and above</option>
+                        <option value="high">High and critical</option>
+                        <option value="critical">Critical only</option>
+                      </select>
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">
+                        Labels template, comma separated
+                      </span>
+                      <textarea
+                        value={projectSettingsDraft.labelsTemplate}
+                        onChange={(event) =>
+                          setProjectSettingsDraft((prev) => ({ ...prev, labelsTemplate: event.target.value }))
+                        }
+                        rows={3}
+                        className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs font-mono"
+                      />
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">
+                        Ignore paths, comma separated
+                      </span>
+                      <textarea
+                        value={projectSettingsDraft.ignorePaths}
+                        onChange={(event) =>
+                          setProjectSettingsDraft((prev) => ({ ...prev, ignorePaths: event.target.value }))
+                        }
+                        rows={3}
+                        className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs font-mono"
+                      />
+                    </label>
+                    <label className="space-y-1.5 md:col-span-2">
+                      <span className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">
+                        Notification settings JSON
+                      </span>
+                      <textarea
+                        value={projectSettingsDraft.notificationSettings}
+                        onChange={(event) =>
+                          setProjectSettingsDraft((prev) => ({
+                            ...prev,
+                            notificationSettings: event.target.value
+                          }))
+                        }
+                        rows={5}
+                        className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs font-mono"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void saveSelectedProjectSettings()}
+                      disabled={!selectedProject}
+                      className="py-2 px-4 bg-emerald-950 font-bold text-white rounded hover:bg-emerald-900 transition-all cursor-pointer disabled:cursor-not-allowed disabled:bg-zinc-300"
+                    >
+                      Save Project Automation
+                    </button>
+                  </div>
+                </div>
+
                 <div className="border border-[#EAE6DF] bg-white rounded-lg p-5">
                   <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-neutral-900 mb-4 flex items-center gap-1.5">
                     <ShieldCheck size={14} className="text-emerald-700" />
@@ -571,6 +944,88 @@ export function SettingsView({ projects: _projects }: { projects?: Project[] }) 
                       </button>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              <div className="bg-[#FAF8F5] border border-[#EAE6DF] rounded-lg p-6 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <h3 className="text-md font-bold text-[#1E2522] font-display mb-1 flex items-center gap-2">
+                      <Key size={16} />
+                      Programmatic Access Keys
+                    </h3>
+                    <p className="text-xs text-[#717A75]">
+                      Use scoped API keys for server-to-server access, workspace exports, and automation.
+                    </p>
+                  </div>
+                  <a
+                    href="/api/workspace/activity/export?format=csv"
+                    className="inline-flex items-center gap-2 py-2 px-4 bg-white border border-[#EAE6DF] font-bold text-[#1E2522] rounded hover:bg-zinc-50 transition-all cursor-pointer text-xs"
+                  >
+                    <Download size={14} />
+                    Export Activity CSV
+                  </a>
+                </div>
+
+                {createdApiKeySecret ? (
+                  <div className="border border-emerald-200 bg-emerald-50 rounded p-4 space-y-2">
+                    <p className="text-xs font-bold text-emerald-900 uppercase tracking-wide">
+                      Copy this API key now. It is shown only once.
+                    </p>
+                    <code className="block text-[11px] font-mono break-all text-emerald-950">
+                      {createdApiKeySecret}
+                    </code>
+                  </div>
+                ) : null}
+
+                <form onSubmit={handleCreateApiKey} className="flex flex-col md:flex-row gap-3">
+                  <input
+                    type="text"
+                    value={newApiKeyLabel}
+                    onChange={(event) => setNewApiKeyLabel(event.target.value)}
+                    placeholder="e.g. Finance export job"
+                    className="flex-1 p-2.5 bg-white border border-[#EAE6DF] rounded text-xs font-mono"
+                  />
+                  <button
+                    type="submit"
+                    className="py-2 px-4 bg-emerald-950 font-bold text-white rounded hover:bg-emerald-900 transition-all cursor-pointer text-xs uppercase tracking-wide"
+                  >
+                    Create API Key
+                  </button>
+                </form>
+
+                <div className="space-y-2">
+                  {apiKeys.length === 0 ? (
+                    <p className="text-xs text-[#717A75] italic">No API keys issued yet.</p>
+                  ) : (
+                    apiKeys.map((key) => (
+                      <div
+                        key={key.id}
+                        className="border border-[#EAE6DF] bg-white rounded p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3 text-xs"
+                      >
+                        <div className="space-y-0.5">
+                          <p className="font-bold text-[#1E2522]">{key.label}</p>
+                          <p className="text-[11px] font-mono text-[#717A75]">
+                            {key.keyPrefix}
+                            {key.lastUsedAt ? ` · last used ${new Date(key.lastUsedAt).toLocaleString()}` : ' · never used'}
+                            {key.revokedAt ? ` · revoked ${new Date(key.revokedAt).toLocaleString()}` : ''}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={Boolean(key.revokedAt)}
+                          onClick={() => void handleRevokeApiKey(key.id, key.label)}
+                          className={`py-1.5 px-3 rounded border font-bold uppercase tracking-wide text-[10px] ${
+                            key.revokedAt
+                              ? 'border-zinc-200 bg-zinc-50 text-zinc-400 cursor-not-allowed'
+                              : 'border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100 cursor-pointer'
+                          }`}
+                        >
+                          {key.revokedAt ? 'Revoked' : 'Revoke'}
+                        </button>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -771,7 +1226,8 @@ export function SettingsView({ projects: _projects }: { projects?: Project[] }) 
                   <div>
                     <h3 className="text-sm font-bold text-[#1E2522] font-display">Publish Reconciliation</h3>
                     <p className="text-xs text-[#717A75] mt-1">
-                      Compare published GitLab issues against Premortem snapshots and record drift events.
+                      GitLab Issue webhooks sync closes and edits automatically. While /app is open, Premortem
+                      also polls every 5 minutes. Use Run Reconciliation for an immediate sweep.
                     </p>
                   </div>
                   <button
@@ -1423,6 +1879,94 @@ export function SettingsView({ projects: _projects }: { projects?: Project[] }) 
                     <p className="text-xs text-[#717A75]">
                       Propagate live threat detections details to security dispatch platforms, slack channels systems, or operational email lists.
                     </p>
+                  </div>
+
+                  <div className="border border-[#EAE6DF] bg-white rounded p-4.5 space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h4 className="font-bold text-neutral-900 font-display uppercase tracking-wide">
+                          Notification inbox
+                        </h4>
+                        <p className="text-[11px] text-[#717A75]">
+                          Workspace notifications are persisted and can be marked read from the console.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void reloadNotifications()}
+                        className="py-1.5 px-3 border border-[#EAE6DF] bg-[#FAF8F5] text-zinc-800 text-xs font-semibold rounded hover:bg-[#FAF8F5]/80 transition-all cursor-pointer"
+                      >
+                        Refresh
+                      </button>
+                    </div>
+
+                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                      {notificationInboxLoading ? (
+                        <p className="text-xs text-[#717A75] italic">Loading notifications...</p>
+                      ) : notificationInbox.length === 0 ? (
+                        <p className="text-xs text-[#717A75] italic">No notifications yet.</p>
+                      ) : (
+                        notificationInbox.map((notification) => (
+                          <div
+                            key={notification.id}
+                            className={`border rounded p-3 space-y-2 ${
+                              notification.readAt ? 'bg-white border-[#EAE6DF]' : 'bg-emerald-50/40 border-emerald-200'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[9px] font-mono font-bold uppercase tracking-wide text-zinc-500">
+                                    {notification.kind.replace(/_/g, ' ')}
+                                  </span>
+                                  {!notification.readAt ? (
+                                    <span className="text-[9px] font-mono font-bold uppercase tracking-wide text-emerald-700">
+                                      New
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <p className="font-bold text-[#1E2522]">{notification.title}</p>
+                                {notification.body ? (
+                                  <p className="text-[11px] text-[#717A75] leading-relaxed">{notification.body}</p>
+                                ) : null}
+                              </div>
+                              {!notification.readAt ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void markNotificationsRead([notification.id])}
+                                  className="py-1 px-2 border border-emerald-200 bg-emerald-50 text-emerald-800 text-[10px] font-bold uppercase tracking-wide rounded cursor-pointer"
+                                >
+                                  Mark read
+                                </button>
+                              ) : null}
+                            </div>
+                            <div className="flex items-center justify-between gap-3 text-[10px] font-mono text-[#8A958F]">
+                              <span>{new Date(notification.createdAt).toLocaleString()}</span>
+                              {notification.url ? (
+                                <a href={notification.url} className="text-emerald-900 underline font-bold">
+                                  Open link
+                                </a>
+                              ) : null}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void markNotificationsRead(
+                            notificationInbox.filter((notification) => !notification.readAt).map((notification) => notification.id)
+                          )
+                        }
+                        disabled={notificationInbox.every((notification) => notification.readAt)}
+                        className="py-1.5 px-3 border border-[#EAE6DF] bg-[#FAF8F5] text-zinc-800 text-xs font-semibold rounded hover:bg-[#FAF8F5]/80 transition-all cursor-pointer disabled:cursor-not-allowed disabled:text-zinc-400"
+                      >
+                        Mark all read
+                      </button>
+                    </div>
                   </div>
 
                   {/* Slack integration details card */}

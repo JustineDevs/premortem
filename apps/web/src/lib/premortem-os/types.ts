@@ -13,6 +13,16 @@ export interface Project {
   apiEndpointsCount: number;
   unencryptedEndpointsCount: number;
   scanCodeSnippet?: string;
+  projectSettings?: {
+    autoRunOnPush: boolean;
+    autoPublishApprovedIssues: boolean;
+    auditDefaultBranchOnly: boolean;
+    enabledAgents: string[];
+    severityThreshold: 'low' | 'medium' | 'high' | 'critical';
+    labelsTemplate: string[];
+    ignorePaths: string[];
+    notificationSettings: Record<string, unknown>;
+  } | null;
 }
 
 export type SeverityType = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
@@ -91,6 +101,8 @@ export interface AuditRun {
   lineage?: RuntimeLineageEntry[];
   graphSnapshot?: RuntimeGraphSnapshot | null;
   runtimeEventTypes?: string[];
+  /** Local playground scan only; never persisted to workspace audit history. */
+  isSandbox?: boolean;
 }
 
 export interface RiskCluster {

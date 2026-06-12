@@ -1,6 +1,15 @@
 import { captureServerException } from '@premortem/observability';
 
-import { handleAuditCancel, handleAuditCreate, handleAuditList, handleAuditPause, handleAuditRead, handleAuditResume } from '../routes/audits';
+import {
+  handleAuditCancel,
+  handleAuditCreate,
+  handleAuditGraphRead,
+  handleAuditList,
+  handleAuditPause,
+  handleAuditRead,
+  handleAuditResume,
+  handleAuditSemanticGraphRead
+} from '../routes/audits';
 import {
   handleIssueApprove,
   handleIssueEdit,
@@ -12,11 +21,16 @@ import {
 } from '../routes/issues';
 import {
   handleWorkspaceBillingPatch,
+  handleWorkspaceActivityExport,
+  handleWorkspaceApiKeyDelete,
+  handleWorkspaceApiKeysPost,
   handleWorkspaceGet,
   handleWorkspaceIntegrationSync,
   handleWorkspaceIntegrationsPost,
   handleWorkspaceLlmPatch,
   handleWorkspaceNotificationsPatch,
+  handleWorkspaceNotificationsGet,
+  handleWorkspaceNotificationsRead,
   handleWorkspaceOrganizationPatch,
   handleWorkspacePoliciesPatch,
   handleWorkspaceProfilePatch,
@@ -24,13 +38,19 @@ import {
   handleWorkspaceRuntimeStopAll,
   handleWorkspaceWorkItemAttributesPatch
 } from '../routes/workspace';
-import { handleProjectCreate, handleProjectList, handlePublicProjectCreate } from '../routes/projects';
+import {
+  handleProjectCreate,
+  handleProjectList,
+  handleProjectSettingsPatch,
+  handlePublicProjectCreate
+} from '../routes/projects';
 import {
   handleIntegrationRepositoriesDisable,
   handleIntegrationRepositoriesEnable,
   handleIntegrationRepositoriesList
 } from '../routes/repositories';
 import { handleReconciliationList } from '../routes/reconciliation';
+import { handleGitLabIssueWebhookPost } from '../routes/webhooks';
 import type { AppEnv, ExecutionContextLike } from './types';
 import { withCorsRouter } from './cors';
 import { ApiUnauthorizedError } from './request-context';
@@ -45,7 +65,11 @@ async function routeRequest(request: Request, env: AppEnv = {}, _ctx?: Execution
   const requestId = resolveRequestId(request);
   const url = new URL(request.url);
 
-  if (url.pathname !== '/health' && !checkRateLimit(rateLimitKey(request, url.pathname))) {
+  if (env.APP_ENV === 'production' && !env.RATE_LIMITER) {
+    throw new Error('Missing RATE_LIMITER binding in production');
+  }
+
+  if (url.pathname !== '/health' && !(await checkRateLimit(rateLimitKey(request, url.pathname), env))) {
     return attachRequestId(
       Response.json({ error: 'Rate limit exceeded. Retry shortly.', code: 'rate_limited', requestId }, { status: 429 }),
       requestId
@@ -103,6 +127,14 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
     return handleWorkspaceNotificationsPatch(request);
   }
 
+  if (url.pathname === '/api/workspace/notifications' && request.method === 'GET') {
+    return handleWorkspaceNotificationsGet(request);
+  }
+
+  if (url.pathname === '/api/workspace/notifications/read' && request.method === 'POST') {
+    return handleWorkspaceNotificationsRead(request);
+  }
+
   if (url.pathname === '/api/workspace/llm' && request.method === 'PATCH') {
     return handleWorkspaceLlmPatch(request);
   }
@@ -145,12 +177,30 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
     return handleWorkspaceBillingPatch(request);
   }
 
+  if (url.pathname === '/api/workspace/api-keys' && request.method === 'POST') {
+    return handleWorkspaceApiKeysPost(request);
+  }
+
+  const workspaceApiKeyMatch = url.pathname.match(/^\/api\/workspace\/api-keys\/([^/]+)$/);
+  if (workspaceApiKeyMatch && request.method === 'DELETE') {
+    return handleWorkspaceApiKeyDelete(request, workspaceApiKeyMatch[1]!);
+  }
+
+  if (url.pathname === '/api/workspace/activity/export' && request.method === 'GET') {
+    return handleWorkspaceActivityExport(request);
+  }
+
   if (url.pathname === '/api/projects' && request.method === 'GET') {
     return handleProjectList(request);
   }
 
   if (url.pathname === '/api/projects' && request.method === 'POST') {
     return handleProjectCreate(request);
+  }
+
+  const projectSettingsMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/settings$/);
+  if (projectSettingsMatch && request.method === 'PATCH') {
+    return handleProjectSettingsPatch(request, projectSettingsMatch[1]!);
   }
 
   if (url.pathname === '/api/audits' && request.method === 'POST') {
@@ -163,22 +213,32 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
 
   const auditMatch = url.pathname.match(/^\/api\/audits\/([^/]+)$/);
   if (auditMatch && request.method === 'GET') {
-    return handleAuditRead(auditMatch[1]!);
+    return handleAuditRead(request, auditMatch[1]!);
+  }
+
+  const auditGraphMatch = url.pathname.match(/^\/api\/audits\/([^/]+)\/graph$/);
+  if (auditGraphMatch && request.method === 'GET') {
+    return handleAuditGraphRead(request, auditGraphMatch[1]!);
+  }
+
+  const auditSemanticGraphMatch = url.pathname.match(/^\/api\/audits\/([^/]+)\/semantic-graph$/);
+  if (auditSemanticGraphMatch && request.method === 'GET') {
+    return handleAuditSemanticGraphRead(request, auditSemanticGraphMatch[1]!);
   }
 
   const auditCancelMatch = url.pathname.match(/^\/api\/audits\/([^/]+)\/cancel$/);
   if (auditCancelMatch && request.method === 'POST') {
-    return handleAuditCancel(auditCancelMatch[1]!);
+    return handleAuditCancel(request, auditCancelMatch[1]!);
   }
 
   const auditPauseMatch = url.pathname.match(/^\/api\/audits\/([^/]+)\/pause$/);
   if (auditPauseMatch && request.method === 'POST') {
-    return handleAuditPause(auditPauseMatch[1]!);
+    return handleAuditPause(request, auditPauseMatch[1]!);
   }
 
   const auditResumeMatch = url.pathname.match(/^\/api\/audits\/([^/]+)\/resume$/);
   if (auditResumeMatch && request.method === 'POST') {
-    return handleAuditResume(auditResumeMatch[1]!, env);
+    return handleAuditResume(request, auditResumeMatch[1]!, env);
   }
 
   if (url.pathname === '/api/reconciliation' && request.method === 'GET') {
@@ -217,6 +277,10 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
 
   if (url.pathname === '/api/issues/reconcile' && request.method === 'POST') {
     return handleIssueReconcile(request);
+  }
+
+  if (url.pathname === '/api/webhooks/gitlab' && request.method === 'POST') {
+    return handleGitLabIssueWebhookPost(request, env);
   }
 
   if (url.pathname === '/health') {

@@ -5,6 +5,7 @@ import {
   EntitlementError,
   listOrganizationProjects,
   registerPublicGitLabProject,
+  updateProjectSettings,
   verifyGitLabRegistrationAccess
 } from '@premortem/db';
 import { ProjectConnectionStatus } from '@premortem/domain';
@@ -31,7 +32,10 @@ export async function handleProjectCreate(request: Request) {
   }
 
   const actor = await resolveApiActorContext(request);
-  const organizationId = body.organizationId ?? actor.organizationId;
+  if (body.organizationId && body.organizationId !== actor.organizationId) {
+    return Response.json({ error: 'organizationId is not allowed for this session.' }, { status: 403 });
+  }
+  const organizationId = actor.organizationId;
 
   try {
     await assertCanRegisterProject(organizationId);
@@ -46,7 +50,8 @@ export async function handleProjectCreate(request: Request) {
     try {
       await verifyGitLabRegistrationAccess({
         organizationId,
-        repoUrl: body.repoUrl.trim()
+        repoUrl: body.repoUrl.trim(),
+        requireIssueWrite: false
       });
     } catch (error) {
       if (error instanceof AuditReadinessError) {
@@ -82,6 +87,7 @@ export async function handleProjectCreate(request: Request) {
       repoUrl: project.repoUrl ?? `https://gitlab.com/${project.externalProjectId}`,
       branch: project.defaultBranch ?? 'main',
       connectionStatus: project.status ?? ProjectConnectionStatus.ACTIVE,
+      projectSettings: project.projectSettings ?? null,
       lastAuditScore: null,
       lastAuditDate: null,
       infrastructureCount: 0,
@@ -105,20 +111,25 @@ export async function handleProjectCreate(request: Request) {
 export async function handleProjectList(request: Request) {
   const actor = await resolveApiActorContext(request);
   const url = new URL(request.url);
-  const organizationId = url.searchParams.get('organizationId') ?? actor.organizationId;
+  const requestedOrgId = url.searchParams.get('organizationId');
+  if (requestedOrgId && requestedOrgId !== actor.organizationId) {
+    return Response.json({ error: 'organizationId is not allowed for this session.' }, { status: 403 });
+  }
+  const organizationId = actor.organizationId;
   const projects = await listOrganizationProjects(organizationId);
 
-  return Response.json({
-    projects: projects.map((project) => ({
-      id: project.id,
-      name: project.name,
-      provider: project.provider,
-      repoUrl: project.repoUrl ?? `https://gitlab.com/${project.externalProjectId}`,
-      branch: project.defaultBranch,
-      connectionStatus: project.status ?? ProjectConnectionStatus.ACTIVE,
-      lastAuditScore: null,
-      lastAuditDate: null,
-      infrastructureCount: 0,
+    return Response.json({
+      projects: projects.map((project) => ({
+        id: project.id,
+        name: project.name,
+        provider: project.provider,
+        repoUrl: project.repoUrl ?? `https://gitlab.com/${project.externalProjectId}`,
+        branch: project.defaultBranch,
+        connectionStatus: project.status ?? ProjectConnectionStatus.ACTIVE,
+        projectSettings: project.projectSettings ?? null,
+        lastAuditScore: null,
+        lastAuditDate: null,
+        infrastructureCount: 0,
       apiEndpointsCount: 0,
       unencryptedEndpointsCount: 0,
       scanCodeSnippet:
@@ -129,6 +140,35 @@ export async function handleProjectList(request: Request) {
           : undefined
     }))
   });
+}
+
+export async function handleProjectSettingsPatch(request: Request, projectId: string) {
+  const body = (await request.json()) as {
+    autoRunOnPush?: boolean;
+    autoPublishApprovedIssues?: boolean;
+    auditDefaultBranchOnly?: boolean;
+    enabledAgents?: string[];
+    severityThreshold?: 'low' | 'medium' | 'high' | 'critical';
+    labelsTemplate?: string[];
+    ignorePaths?: string[];
+    notificationSettings?: Record<string, unknown>;
+  };
+  const actor = await resolveApiActorContext(request);
+
+  const projectSettings = await updateProjectSettings({
+    organizationId: actor.organizationId,
+    projectId,
+    autoRunOnPush: body.autoRunOnPush,
+    autoPublishApprovedIssues: body.autoPublishApprovedIssues,
+    auditDefaultBranchOnly: body.auditDefaultBranchOnly,
+    enabledAgents: body.enabledAgents,
+    severityThreshold: body.severityThreshold,
+    labelsTemplate: body.labelsTemplate,
+    ignorePaths: body.ignorePaths,
+    notificationSettings: body.notificationSettings
+  });
+
+  return Response.json({ ok: true, projectSettings });
 }
 
 export async function handlePublicProjectCreate(request: Request) {

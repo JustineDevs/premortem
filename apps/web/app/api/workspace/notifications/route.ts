@@ -22,3 +22,22 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed' }, { status: 502 });
   }
 }
+
+export async function GET(request: Request) {
+  try {
+    const context = await resolveRequestActorContext();
+    const url = new URL(request.url);
+    const query = url.search ? `?${url.searchParams.toString()}` : '';
+    const response = await fetch(`${getApiBaseUrl()}/api/workspace/notifications${query}`, {
+      method: 'GET',
+      headers: {
+        accept: 'application/json',
+        ...actorHeaders(context)
+      },
+      cache: 'no-store'
+    });
+    return NextResponse.json(await response.json(), { status: response.status });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed' }, { status: 502 });
+  }
+}

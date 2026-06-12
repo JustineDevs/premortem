@@ -420,7 +420,8 @@ export async function persistGraphSnapshot(input: {
 export async function listOrganizationProjects(organizationId: string) {
   return prisma.project.findMany({
     where: { organizationId },
-    orderBy: { createdAt: 'desc' }
+    orderBy: { createdAt: 'desc' },
+    include: { projectSettings: true }
   });
 }
 
@@ -478,14 +479,70 @@ export async function createOrganizationProject(input: {
         externalProjectId,
         createdById: input.createdById,
         metadata: asJsonObject(metadata)
-      }
+      },
+      include: { projectSettings: true }
     });
 
     await tx.projectSetting.create({
       data: { projectId: project.id }
     });
 
-    return project;
+    return {
+      ...project,
+      projectSettings: await tx.projectSetting.findUnique({
+        where: { projectId: project.id }
+      })
+    };
+  });
+}
+
+export async function updateProjectSettings(input: {
+  organizationId: string;
+  projectId: string;
+  autoRunOnPush?: boolean;
+  autoPublishApprovedIssues?: boolean;
+  auditDefaultBranchOnly?: boolean;
+  enabledAgents?: string[];
+  severityThreshold?: 'low' | 'medium' | 'high' | 'critical';
+  labelsTemplate?: string[];
+  ignorePaths?: string[];
+  notificationSettings?: Record<string, unknown>;
+}) {
+  const project = await prisma.project.findFirstOrThrow({
+    where: {
+      id: input.projectId,
+      organizationId: input.organizationId
+    }
+  });
+
+  const current = await prisma.projectSetting.findUnique({
+    where: { projectId: project.id }
+  });
+
+  return prisma.projectSetting.upsert({
+    where: { projectId: project.id },
+    update: {
+      autoRunOnPush: input.autoRunOnPush ?? current?.autoRunOnPush,
+      autoPublishApprovedIssues:
+        input.autoPublishApprovedIssues ?? current?.autoPublishApprovedIssues,
+      auditDefaultBranchOnly: input.auditDefaultBranchOnly ?? current?.auditDefaultBranchOnly,
+      enabledAgents: input.enabledAgents ?? (current?.enabledAgents as Prisma.JsonArray | undefined),
+      severityThreshold: input.severityThreshold ?? current?.severityThreshold,
+      labelsTemplate: input.labelsTemplate ?? (current?.labelsTemplate as Prisma.JsonArray | undefined),
+      ignorePaths: input.ignorePaths ?? (current?.ignorePaths as Prisma.JsonArray | undefined),
+      notificationSettings: (input.notificationSettings ?? current?.notificationSettings ?? {}) as Prisma.InputJsonValue
+    },
+    create: {
+      projectId: project.id,
+      autoRunOnPush: input.autoRunOnPush ?? false,
+      autoPublishApprovedIssues: input.autoPublishApprovedIssues ?? false,
+      auditDefaultBranchOnly: input.auditDefaultBranchOnly ?? true,
+      enabledAgents: (input.enabledAgents ?? []) as Prisma.InputJsonValue,
+      severityThreshold: input.severityThreshold ?? 'medium',
+      labelsTemplate: (input.labelsTemplate ?? []) as Prisma.InputJsonValue,
+      ignorePaths: (input.ignorePaths ?? []) as Prisma.InputJsonValue,
+      notificationSettings: (input.notificationSettings ?? {}) as Prisma.InputJsonValue
+    }
   });
 }
 
