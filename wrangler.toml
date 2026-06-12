@@ -1,5 +1,60 @@
-name = "premortem-root"
+name = "premortem"
+main = "apps/api/src/index.ts"
 compatibility_date = "2026-06-08"
+workers_dev = false
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+APP_ENV = "production"
+
+[triggers]
+crons = ["*/1 * * * *"]
+
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
+[[queues.producers]]
+binding = "AUDIT_QUEUE"
+queue = "premortem-audit-jobs"
+
+[[queues.consumers]]
+queue = "premortem-audit-jobs"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "premortem-audit-jobs-dlq"
+
+[[routes]]
+pattern = "api.premortem.jstn.site/*"
+zone_name = "jstn.site"
 
 [env.dev]
-vars = { APP_NAME = "premortem" }
+name = "premortem"
+workers_dev = true
+
+[env.dev.vars]
+APP_ENV = "development"
+
+[[env.dev.durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
+[[env.dev.queues.producers]]
+binding = "AUDIT_QUEUE"
+queue = "premortem-audit-jobs-dev"
+
+[[env.dev.queues.consumers]]
+queue = "premortem-audit-jobs-dev"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "premortem-audit-jobs-dlq-dev"
+
+[[env.dev.routes]]
+pattern = "api.premortem.jstn.site/*"
+zone_name = "jstn.site"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiter"]
