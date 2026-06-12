@@ -35,6 +35,8 @@ pnpm --filter @premortem/api build
 cd apps/api && pnpm run deploy
 ```
 
+Wrangler 4 requires Node.js 22 or newer for the deploy step.
+
 Set Worker secrets in Cloudflare (not in git):
 
 ```bash
