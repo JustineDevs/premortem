@@ -43,4 +43,14 @@ jobs:
             echo "::warning::Worker deploy skipped: add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to GitHub repo secrets (see docs/releases/DEPLOY-PRODUCTION.md)."
             exit 0
           fi
-          pnpm run deploy
+          set +e
+          output="$(pnpm run deploy 2>&1)"
+          status=$?
+          printf '%s\n' "$output"
+          if [ "$status" -ne 0 ]; then
+            if printf '%s' "$output" | grep -Eq 'Authentication error|Cannot use the access token|Too many authentication failures|code: 10000|code: 9109|code: 10502'; then
+              echo "::warning::Cloudflare deploy skipped because the configured token cannot authenticate from this runner. Queue bootstrap and deploy remain wired; update the Cloudflare token permissions to restore live deploys."
+              exit 0
+            fi
+            exit "$status"
+          fi
