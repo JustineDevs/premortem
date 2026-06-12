@@ -3,15 +3,16 @@ import type { Metadata } from 'next';
 import { PasswordResetForm } from '@/components/auth/password-reset-form';
 import { MarketingPageLayout } from '@/components/landing/marketing-page-layout';
 import { authLinks } from '@/lib/auth-links';
+import { buildSeoMetadata, canonicalSupportKeywords } from '@/lib/seo-metadata';
 
-export const metadata: Metadata = {
+export const metadata: Metadata = buildSeoMetadata({
   title: 'Set new password | Premortem',
   description: 'Create a new password for your Premortem account.',
-  robots: {
-    index: false,
-    follow: false
-  }
-};
+  canonical: '/reset-password',
+  keywords: canonicalSupportKeywords,
+  noIndex: true,
+  includeCanonicalSiteKeywords: false
+});
 
 export default function ResetPasswordPage() {
   return (

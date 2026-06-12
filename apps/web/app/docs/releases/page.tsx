@@ -7,10 +7,13 @@ import {
 import { MarketingBulletList, MarketingParagraph } from '@/components/landing/marketing-content';
 import { releasesDoc } from '@/content/marketing/docs-index';
 
-export const metadata = {
+import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
+export const metadata = buildSeoMetadata({
   title: 'Release notes | Premortem Docs',
-  description: releasesDoc.lead
-};
+  description: releasesDoc.lead,
+  canonical: '/docs/releases',
+  keywords: canonicalDocsKeywords
+});
 
 export default function ReleasesDocPage() {
   return (

@@ -11,11 +11,14 @@ import { MarketingSectionHeading } from '@/components/landing/marketing-content'
 import { MarketingPageLayout } from '@/components/landing/marketing-page-layout';
 import { howItWorksPage } from '@/content/marketing/how-it-works';
 import { marketingLinks } from '@/lib/marketing-links';
+import { buildSeoMetadata, canonicalWorkflowKeywords } from '@/lib/seo-metadata';
 
-export const metadata = {
+export const metadata = buildSeoMetadata({
   title: 'How it works | Premortem',
-  description: 'Connect GitLab, run a multi-lens Premortem audit, and review structured findings.'
-};
+  description: 'Connect GitLab, run a multi-lens Premortem audit, and review structured findings.',
+  canonical: '/how-it-works',
+  keywords: canonicalWorkflowKeywords
+});
 
 export default function HowItWorksPage() {
   return (

@@ -1,10 +1,13 @@
 import { MarketingStructuredDocPage } from '@/components/landing/blocks';
 import { firstAuditTutorialDoc } from '@/content/marketing/docs-index';
 
-export const metadata = {
+import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
+export const metadata = buildSeoMetadata({
   title: 'Tutorial: first audit | Premortem Docs',
-  description: firstAuditTutorialDoc.lead
-};
+  description: firstAuditTutorialDoc.lead,
+  canonical: '/docs/tutorials/first-audit',
+  keywords: canonicalDocsKeywords
+});
 
 export default function FirstAuditTutorialPage() {
   return <MarketingStructuredDocPage doc={firstAuditTutorialDoc} />;

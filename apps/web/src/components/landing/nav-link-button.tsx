@@ -23,7 +23,7 @@ export function NavLinkButton({
 }: NavLinkButtonProps) {
   const pathname = usePathname();
   const isActive =
-    pathname === href || (matchPrefix && href !== '/' && pathname.startsWith(`${href}/`));
+    pathname === href || (matchPrefix && href !== '/' && pathname?.startsWith(`${href}/`));
 
   return (
     <Link
@@ -48,7 +48,7 @@ type DocsNavLinkProps = {
 export function DocsNavLink({ href, children, matchPrefix = false, scroll }: DocsNavLinkProps) {
   const pathname = usePathname();
   const isActive =
-    pathname === href || (matchPrefix && href !== '/' && pathname.startsWith(`${href}/`));
+    pathname === href || (matchPrefix && href !== '/' && pathname?.startsWith(`${href}/`));
 
   return (
     <Link

@@ -7,8 +7,12 @@
     "jsx": "preserve",
     "noEmit": true,
     "paths": {
-      "@premortem/security": ["../../packages/security/src"],
-      "@/*": ["./src/*"]
+      "@premortem/security": [
+        "../../packages/security/src"
+      ],
+      "@/*": [
+        "./src/*"
+      ]
     },
     "plugins": [
       {
@@ -20,7 +24,8 @@
       "react",
       "react-dom"
     ],
-    "isolatedModules": true
+    "isolatedModules": true,
+    "strictNullChecks": true
   },
   "include": [
     "next-env.d.ts",

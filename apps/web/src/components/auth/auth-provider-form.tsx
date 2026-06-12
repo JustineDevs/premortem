@@ -49,13 +49,13 @@ export function AuthProviderForm({
   alternateLabel
 }: AuthProviderFormProps) {
   const searchParams = useSearchParams();
-  const noticeKey = searchParams.get('notice') ?? searchParams.get('error');
+  const noticeKey = searchParams?.get('notice') ?? searchParams?.get('error');
   const redirectNotice = noticeKey ? notices[noticeKey] : null;
   const [runtimeConfigured, setRuntimeConfigured] = useState<boolean | null>(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [termsNotice, setTermsNotice] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
-  const nextPath = searchParams.get('next') ?? authLinks.defaultNext;
+  const nextPath = searchParams?.get('next') ?? authLinks.defaultNext;
 
   useEffect(() => {
     void fetch('/api/auth/status')

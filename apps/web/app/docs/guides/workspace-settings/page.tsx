@@ -1,10 +1,13 @@
 import { MarketingStructuredDocPage } from '@/components/landing/blocks';
 import { workspaceSettingsGuideDoc } from '@/content/marketing/docs-additional-content';
 
-export const metadata = {
+import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
+export const metadata = buildSeoMetadata({
   title: 'Workspace settings | Premortem Docs',
-  description: workspaceSettingsGuideDoc.lead
-};
+  description: workspaceSettingsGuideDoc.lead,
+  canonical: '/docs/guides/workspace-settings',
+  keywords: canonicalDocsKeywords
+});
 
 export default function WorkspaceSettingsDocPage() {
   return <MarketingStructuredDocPage doc={workspaceSettingsGuideDoc} />;

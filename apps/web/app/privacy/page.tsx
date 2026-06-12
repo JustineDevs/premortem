@@ -6,11 +6,14 @@ import {
 } from '@/components/landing/marketing-content';
 import { MarketingPageLayout } from '@/components/landing/marketing-page-layout';
 import { marketingLinks } from '@/lib/marketing-links';
+import { buildSeoMetadata, canonicalLegalKeywords } from '@/lib/seo-metadata';
 
-export const metadata = {
+export const metadata = buildSeoMetadata({
   title: 'Privacy | Premortem',
-  description: 'Privacy policy for Premortem.'
-};
+  description: 'Privacy policy for Premortem.',
+  canonical: '/privacy',
+  keywords: canonicalLegalKeywords
+});
 
 export default function PrivacyPage() {
   return (

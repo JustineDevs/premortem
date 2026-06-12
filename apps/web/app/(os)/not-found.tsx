@@ -1,9 +1,11 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { FileQuestion } from 'lucide-react';
 
 import { OsEmptyState } from '@/components/premortem-os/os-empty-state';
 import { marketingLinks } from '@/lib/marketing-links';
 import { premortemBrand } from '@/lib/premortem-os/branding';
+import { buildSeoMetadata } from '@/lib/seo-metadata';
 
 const quickRoutes = [
   { href: '/app', label: 'Dashboard' },
@@ -12,10 +14,13 @@ const quickRoutes = [
   { href: '/docs', label: 'Docs' }
 ] as const;
 
-export const metadata = {
+export const metadata: Metadata = buildSeoMetadata({
   title: `Route not found | ${premortemBrand.productName}`,
-  description: 'The reviewer console route was not recognized.'
-};
+  description: 'The reviewer console route was not recognized.',
+  canonical: '/app/not-found',
+  noIndex: true,
+  includeCanonicalSiteKeywords: false
+});
 
 export default function OsNotFoundPage() {
   return (

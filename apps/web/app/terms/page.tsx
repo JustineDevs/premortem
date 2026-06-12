@@ -6,11 +6,14 @@ import {
 } from '@/components/landing/marketing-content';
 import { MarketingPageLayout } from '@/components/landing/marketing-page-layout';
 import { marketingLinks } from '@/lib/marketing-links';
+import { buildSeoMetadata, canonicalLegalKeywords } from '@/lib/seo-metadata';
 
-export const metadata = {
+export const metadata = buildSeoMetadata({
   title: 'Terms | Premortem',
-  description: 'Terms of service for Premortem.'
-};
+  description: 'Terms of service for Premortem.',
+  canonical: '/terms',
+  keywords: canonicalLegalKeywords
+});
 
 export default function TermsPage() {
   return (

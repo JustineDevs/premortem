@@ -3,11 +3,16 @@ import { Suspense } from 'react';
 import { AuthProviderForm } from '@/components/auth/auth-provider-form';
 import { MarketingPageLayout } from '@/components/landing/marketing-page-layout';
 import { authLinks } from '@/lib/auth-links';
+import { buildSeoMetadata, canonicalSupportKeywords } from '@/lib/seo-metadata';
 
-export const metadata = {
+export const metadata = buildSeoMetadata({
   title: 'Sign up | Premortem',
-  description: 'Create a Premortem account with GitLab.'
-};
+  description: 'Create a Premortem account with GitLab.',
+  canonical: '/signup',
+  keywords: canonicalSupportKeywords,
+  noIndex: true,
+  includeCanonicalSiteKeywords: false
+});
 
 export default function SignUpPage() {
   return (

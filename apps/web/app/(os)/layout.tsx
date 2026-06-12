@@ -26,7 +26,11 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: `${premortemBrand.consoleTitle} | ${premortemBrand.productName}`,
-  description: `Run on your repo before it breaks production. ${premortemBrand.productName} reviewer console at ${premortemBrand.domain}.`
+  description: `Run on your repo before it breaks production. ${premortemBrand.productName} reviewer console at ${premortemBrand.domain}.`,
+  robots: {
+    index: false,
+    follow: false
+  }
 };
 
 export default async function PremortemOsLayout({ children }: { children: React.ReactNode }) {

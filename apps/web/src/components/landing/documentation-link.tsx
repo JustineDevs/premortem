@@ -9,7 +9,8 @@ import { navLink } from './text-styles';
 
 export function DocumentationLink() {
   const pathname = usePathname();
-  const isActive = pathname === marketingLinks.docs || pathname.startsWith(`${marketingLinks.docs}/`);
+  const isActive =
+    pathname === marketingLinks.docs || pathname?.startsWith(`${marketingLinks.docs}/`);
 
   return (
     <Link

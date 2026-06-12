@@ -7,10 +7,13 @@ import {
 import { MarketingBulletList } from '@/components/landing/marketing-content';
 import { architectureDoc } from '@/content/marketing/docs-index';
 
-export const metadata = {
+import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
+export const metadata = buildSeoMetadata({
   title: 'Architecture overview | Premortem Docs',
-  description: architectureDoc.lead
-};
+  description: architectureDoc.lead,
+  canonical: '/docs/architecture',
+  keywords: canonicalDocsKeywords
+});
 
 export default function ArchitectureDocPage() {
   return (

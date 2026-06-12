@@ -5,11 +5,14 @@ import {
 } from '@/components/landing/blocks';
 import { MarketingParagraph } from '@/components/landing/marketing-content';
 import { docsHubCards, docsHubIntro } from '@/content/marketing/docs-index';
+import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
 
-export const metadata = {
+export const metadata = buildSeoMetadata({
   title: 'Documentation | Premortem',
-  description: docsHubIntro.lead
-};
+  description: docsHubIntro.lead,
+  canonical: '/docs',
+  keywords: canonicalDocsKeywords
+});
 
 export default function DocsHubPage() {
   return (

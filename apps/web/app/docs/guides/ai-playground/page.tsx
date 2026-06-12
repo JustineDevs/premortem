@@ -1,10 +1,13 @@
 import { MarketingStructuredDocPage } from '@/components/landing/blocks';
 import { aiPlaygroundGuideDoc } from '@/content/marketing/docs-additional-content';
 
-export const metadata = {
+import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
+export const metadata = buildSeoMetadata({
   title: 'AI Code Playground | Premortem Docs',
-  description: aiPlaygroundGuideDoc.lead
-};
+  description: aiPlaygroundGuideDoc.lead,
+  canonical: '/docs/guides/ai-playground',
+  keywords: canonicalDocsKeywords
+});
 
 export default function AiPlaygroundDocPage() {
   return <MarketingStructuredDocPage doc={aiPlaygroundGuideDoc} />;

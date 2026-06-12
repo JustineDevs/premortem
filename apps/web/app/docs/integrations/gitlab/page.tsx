@@ -1,10 +1,13 @@
 import { MarketingStructuredDocPage } from '@/components/landing/blocks';
 import { gitlabIntegrationDoc } from '@/content/marketing/docs-index';
 
-export const metadata = {
+import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
+export const metadata = buildSeoMetadata({
   title: 'GitLab integration | Premortem Docs',
-  description: gitlabIntegrationDoc.lead
-};
+  description: gitlabIntegrationDoc.lead,
+  canonical: '/docs/integrations/gitlab',
+  keywords: canonicalDocsKeywords
+});
 
 export default function GitlabIntegrationDocPage() {
   return <MarketingStructuredDocPage doc={gitlabIntegrationDoc} />;

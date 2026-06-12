@@ -13,11 +13,14 @@ import { MarketingPageLayout } from '@/components/landing/marketing-page-layout'
 import { productsPage } from '@/content/marketing/products';
 import { premortemFeatures, productMapTiles } from '@/content/marketing/shared';
 import { marketingLinks } from '@/lib/marketing-links';
+import { buildSeoMetadata, canonicalProductKeywords } from '@/lib/seo-metadata';
 
-export const metadata = {
+export const metadata = buildSeoMetadata({
   title: 'Products | Premortem',
-  description: 'Premortem products for predictive repository audits.'
-};
+  description: 'Premortem products for predictive repository audits, issue synthesis, and GitLab publish.',
+  canonical: '/products',
+  keywords: canonicalProductKeywords
+});
 
 export default function ProductsPage() {
   return (

@@ -1,10 +1,13 @@
 import { MarketingStructuredDocPage } from '@/components/landing/blocks';
 import { runAuditGuideDoc } from '@/content/marketing/docs-index';
 
-export const metadata = {
+import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
+export const metadata = buildSeoMetadata({
   title: 'Run an audit | Premortem Docs',
-  description: runAuditGuideDoc.lead
-};
+  description: runAuditGuideDoc.lead,
+  canonical: '/docs/guides/run-audit',
+  keywords: canonicalDocsKeywords
+});
 
 export default function RunAuditGuidePage() {
   return <MarketingStructuredDocPage doc={runAuditGuideDoc} />;

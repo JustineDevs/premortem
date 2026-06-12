@@ -1,10 +1,13 @@
 import { MarketingStructuredDocPage } from '@/components/landing/blocks';
 import { dataFlowConceptDoc } from '@/content/marketing/docs-index';
 
-export const metadata = {
+import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
+export const metadata = buildSeoMetadata({
   title: 'Data flow | Premortem Docs',
-  description: dataFlowConceptDoc.lead
-};
+  description: dataFlowConceptDoc.lead,
+  canonical: '/docs/concepts/data-flow',
+  keywords: canonicalDocsKeywords
+});
 
 export default function DataFlowConceptPage() {
   return <MarketingStructuredDocPage doc={dataFlowConceptDoc} />;

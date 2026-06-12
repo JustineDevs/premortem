@@ -1,9 +1,19 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 
 import { MarketingPageLayout } from '@/components/landing/marketing-page-layout';
 import { authLinks } from '@/lib/auth-links';
 import { marketingLinks } from '@/lib/marketing-links';
+import { buildSeoMetadata } from '@/lib/seo-metadata';
 import { body14, label14, sectionTitle } from '@/components/landing/text-styles';
+
+export const metadata: Metadata = buildSeoMetadata({
+  title: 'Page not found | Premortem',
+  description: 'The requested Premortem page could not be found.',
+  canonical: '/404',
+  noIndex: true,
+  includeCanonicalSiteKeywords: false
+});
 
 const recoveryActions = [
   {

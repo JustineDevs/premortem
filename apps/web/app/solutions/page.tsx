@@ -12,11 +12,14 @@ import { solutionsPage } from '@/content/marketing/solutions';
 import { premortemFeatures } from '@/content/marketing/shared';
 import { howItWorksPage } from '@/content/marketing/how-it-works';
 import { marketingLinks } from '@/lib/marketing-links';
+import { buildSeoMetadata, canonicalSolutionKeywords } from '@/lib/seo-metadata';
 
-export const metadata = {
+export const metadata = buildSeoMetadata({
   title: 'Solutions | Premortem',
-  description: 'How teams use Premortem for predictive audits and structured issue delivery.'
-};
+  description: 'How teams use Premortem for predictive audits, structured issue delivery, and reviewer trust.',
+  canonical: '/solutions',
+  keywords: canonicalSolutionKeywords
+});
 
 export default function SolutionsPage() {
   return (

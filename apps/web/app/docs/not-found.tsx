@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 
 import { MarketingDocAudienceCards, MarketingDocHub, MarketingDocLayout, MarketingDocSearch } from '@/components/landing/blocks';
@@ -5,6 +6,7 @@ import { MarketingParagraph } from '@/components/landing/marketing-content';
 import { label14, body14 } from '@/components/landing/text-styles';
 import { docsHubCards } from '@/content/marketing/docs-index';
 import { marketingLinks } from '@/lib/marketing-links';
+import { buildSeoMetadata } from '@/lib/seo-metadata';
 
 const recoveryCards = [
   {
@@ -27,10 +29,13 @@ const recoveryCards = [
   }
 ] as const;
 
-export const metadata = {
+export const metadata: Metadata = buildSeoMetadata({
   title: 'Documentation not found | Premortem',
-  description: 'The docs route was not recognized. Search the docs or jump back to the hub.'
-};
+  description: 'The docs route was not recognized. Search the docs or jump back to the hub.',
+  canonical: '/docs/not-found',
+  noIndex: true,
+  includeCanonicalSiteKeywords: false
+});
 
 export default function DocsNotFoundPage() {
   return (
