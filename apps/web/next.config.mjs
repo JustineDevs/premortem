@@ -25,10 +25,10 @@ const workspacePackages = [
 
 const nextConfig = {
   allowedDevOrigins: ['127.0.0.1'],
+  transpilePackages: workspacePackages,
   experimental: {
     externalDir: true,
     instrumentationHook: true,
-    serverComponentsExternalPackages: workspacePackages,
   },
   webpack: (config) => {
     config.resolve.modules = [
