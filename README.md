@@ -374,10 +374,10 @@ Premortem is built on open source, managed services, and community projects. We 
 
 | Project | Role in Premortem |
 | --- | --- |
-| <a href="https://ai.google.dev/"><img src="https://cdn.simpleicons.org/googlegemini/8E75B2" alt="Google Gemini" width="28" height="28" align="middle" /></a> [Google Gemini API](https://ai.google.dev/) | Primary LLM executor for specialist swarm |
-| <a href="./services/orchestrator/"><img src="./public/logo/png/Premortem_abstract.png" alt="Premortem orchestrator" width="28" height="28" align="middle" /></a> [@premortem/orchestrator](./services/orchestrator/) | Queue-backed audit pipeline, specialist swarm, clustering, and publish path (primary runtime) |
+| <a href="https://ai.google.dev/"><img src="./public/logo/brand/gemini-color.png" alt="Google Gemini" width="28" height="28" align="middle" /></a> [Google Gemini API](https://ai.google.dev/) | Primary LLM executor for specialist swarm |
+| <a href="./services/orchestrator/"><img src="./public/logo/svg/premortem-mark.svg" alt="Premortem orchestrator" width="28" height="28" align="middle" /></a> [@premortem/orchestrator](./services/orchestrator/) | Queue-backed audit pipeline, specialist swarm, clustering, and publish path (primary runtime) |
 | [Optional `services/agent-builder`](./services/agent-builder/) | Mission trace bootstrap hooks used by the orchestrator; not the sole production runtime |
-| <a href="https://azure.microsoft.com/products/ai-services/openai-service"><img src="https://cdn.simpleicons.org/microsoftazure/0078D4" alt="Microsoft Azure" width="28" height="28" align="middle" /></a> [Azure OpenAI](https://azure.microsoft.com/products/ai-services/openai-service) | Optional alternate LLM backend |
+| <a href="https://azure.microsoft.com/products/ai-services/openai-service"><img src="./public/logo/brand/azure-openai.svg" alt="Microsoft Azure OpenAI" width="28" height="28" align="middle" /></a> [Azure OpenAI](https://azure.microsoft.com/products/ai-services/openai-service) | Optional alternate LLM backend |
 | <a href="https://zod.dev/"><img src="https://cdn.simpleicons.org/zod/3E67B1" alt="Zod" width="28" height="28" align="middle" /></a> [Zod](https://zod.dev/) | Structured LLM and API output validation |
 | <a href="https://www.promptfoo.dev/"><img src="https://www.promptfoo.dev/favicon.ico" alt="promptfoo" width="28" height="28" align="middle" /></a> [promptfoo](https://www.promptfoo.dev/) | Canonical prompt evaluation gate (`pnpm run eval:prompts`) |
 

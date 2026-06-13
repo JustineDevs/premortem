@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   actions: read
+  deployments: write
 
 jobs:
   deploy-api:
@@ -19,6 +20,9 @@ jobs:
        (github.event.workflow_run.head_branch == 'main' ||
         github.event.workflow_run.head_branch == 'master'))
     runs-on: ubuntu-latest
+    environment:
+      name: production-api
+      url: https://api.premortem.jstn.site
     env:
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
       DIRECT_URL: postgresql://ci:ci@127.0.0.1:5432/ci
@@ -62,6 +66,9 @@ jobs:
        (github.event.workflow_run.head_branch == 'main' ||
         github.event.workflow_run.head_branch == 'master'))
     runs-on: ubuntu-latest
+    environment:
+      name: production-web
+      url: https://premortem.jstn.site
     env:
       NEXT_PUBLIC_APP_URL: https://premortem.jstn.site
       PREMORTEM_API_BASE_URL: https://api.premortem.jstn.site

@@ -3,6 +3,28 @@ name: ci
 on:
   push:
     branches: [main, master]
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.mdx'
+      - 'docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'SECURITY.md'
+      - 'LICENSE'
+      - 'VERSION'
+      - 'public/**'
+      - 'apps/**/public/**'
+      - '**/*.png'
+      - '**/*.jpg'
+      - '**/*.jpeg'
+      - '**/*.gif'
+      - '**/*.svg'
+      - '**/*.webp'
+      - '**/*.ico'
+      - '**/*.m4a'
+      - '**/*.mp3'
+      - '**/*.mp4'
+      - '**/*.webm'
   pull_request:
 
 jobs:
