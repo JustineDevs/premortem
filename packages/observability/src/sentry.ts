@@ -5,6 +5,10 @@ import { isPhoenixEnabled, initPhoenixTracing } from './phoenix';
 
 let sentryInitialized = false;
 
+function isCloudflareWorkerRuntime() {
+  return typeof (globalThis as { WebSocketPair?: unknown }).WebSocketPair !== 'undefined';
+}
+
 function gitLabFetchUrl(url: string) {
   return /gitlab\.com\/api\/v4/i.test(url) || /\/api\/v4\/projects\//i.test(url);
 }
@@ -41,14 +45,14 @@ export function initServerObservability(serviceName: string) {
   initPhoenixTracing(serviceName);
 
   const dsn = process.env.SENTRY_DSN;
-  if (!dsn || sentryInitialized) return;
+  if (!dsn || sentryInitialized || isCloudflareWorkerRuntime()) return;
 
   Sentry.init(getServerSentryInitOptions(serviceName));
   sentryInitialized = true;
 }
 
 export function captureServerException(error: unknown, context?: Record<string, unknown>) {
-  if (!process.env.SENTRY_DSN) {
+  if (!process.env.SENTRY_DSN || isCloudflareWorkerRuntime()) {
     console.error('captureServerException', error, context);
     return;
   }
@@ -64,6 +68,6 @@ export function captureServerException(error: unknown, context?: Record<string, 
 }
 
 export function captureServerMessage(message: string, level: Sentry.SeverityLevel = 'info') {
-  if (!process.env.SENTRY_DSN) return;
+  if (!process.env.SENTRY_DSN || isCloudflareWorkerRuntime()) return;
   Sentry.captureMessage(message, level);
 }
