@@ -47,19 +47,37 @@ jobs:
             echo "::warning::Worker deploy skipped: add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to GitHub repo secrets (see docs/releases/DEPLOY-PRODUCTION.md)."
             exit 0
           fi
-          set +e
-          output="$(pnpm run deploy 2>&1)"
-          status=$?
-          printf '%s\n' "$output"
-          if [ "$status" -ne 0 ]; then
+          attempts=0
+          max_attempts=4
+          while :; do
+            set +e
+            output="$(pnpm run deploy 2>&1)"
+            status=$?
+            set -e
+            printf '%s\n' "$output"
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
             if printf '%s' "$output" | grep -Eq 'Authentication error|Cannot use the access token|Too many authentication failures|code: 10000|code: 9109|code: 10502'; then
               echo "::warning::Cloudflare deploy skipped because the configured token cannot authenticate from this runner. Queue bootstrap and deploy remain wired; update the Cloudflare token permissions to restore live deploys."
               exit 0
             fi
+            if printf '%s' "$output" | grep -Eq 'Rate limited|code: 10429'; then
+              attempts=$((attempts + 1))
+              if [ "$attempts" -lt "$max_attempts" ]; then
+                sleep_seconds=$((attempts * 30))
+                echo "::warning::Cloudflare deploy rate-limited. Retrying in ${sleep_seconds}s (attempt ${attempts}/${max_attempts})."
+                sleep "$sleep_seconds"
+                continue
+              fi
+              echo "::error::Cloudflare deploy was rate-limited after ${max_attempts} attempts."
+              exit "$status"
+            fi
             exit "$status"
-          fi
+          done
 
   deploy-web:
+    needs: deploy-api
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
@@ -92,14 +110,31 @@ jobs:
             echo "::warning::Web deploy skipped: add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to GitHub repo secrets."
             exit 0
           fi
-          set +e
-          output="$(pnpm run deploy 2>&1)"
-          status=$?
-          printf '%s\n' "$output"
-          if [ "$status" -ne 0 ]; then
+          attempts=0
+          max_attempts=4
+          while :; do
+            set +e
+            output="$(pnpm run deploy 2>&1)"
+            status=$?
+            set -e
+            printf '%s\n' "$output"
+            if [ "$status" -eq 0 ]; then
+              exit 0
+            fi
             if printf '%s' "$output" | grep -Eq 'Authentication error|Cannot use the access token|Too many authentication failures|code: 10000|code: 9109|code: 10502'; then
               echo "::warning::Web deploy skipped because the configured token cannot authenticate from this runner. Update the Cloudflare token permissions to restore live deploys."
               exit 0
             fi
+            if printf '%s' "$output" | grep -Eq 'Rate limited|code: 10429'; then
+              attempts=$((attempts + 1))
+              if [ "$attempts" -lt "$max_attempts" ]; then
+                sleep_seconds=$((attempts * 30))
+                echo "::warning::Cloudflare deploy rate-limited. Retrying in ${sleep_seconds}s (attempt ${attempts}/${max_attempts})."
+                sleep "$sleep_seconds"
+                continue
+              fi
+              echo "::error::Cloudflare deploy was rate-limited after ${max_attempts} attempts."
+              exit "$status"
+            fi
             exit "$status"
-          fi
+          done
