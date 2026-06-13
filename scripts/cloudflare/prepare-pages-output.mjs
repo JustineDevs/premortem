@@ -14,4 +14,11 @@ if (!existsSync(sourceDir)) {
 rmSync(targetDir, { recursive: true, force: true });
 execFileSync('cp', ['-RL', sourceDir, targetDir], { stdio: 'inherit' });
 
+const workerPath = path.join(targetDir, 'worker.js');
+const pagesWorkerPath = path.join(targetDir, '_worker.js');
+if (existsSync(workerPath)) {
+  rmSync(pagesWorkerPath, { force: true });
+  execFileSync('mv', [workerPath, pagesWorkerPath], { stdio: 'inherit' });
+}
+
 console.log(`Prepared Cloudflare Pages output at ${path.relative(repoRoot, targetDir)}`);
