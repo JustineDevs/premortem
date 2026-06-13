@@ -8,7 +8,7 @@ Reference starter: [Arize-ai/gemini-hackathon](https://github.com/Arize-ai/gemin
 
 | Layer | Implementation |
 | --- | --- |
-| Agent runtime | `@google/adk` root agent in `@premortem/agent-builder` (`premortem_predictive_audit_agent`) |
+| Agent runtime | `@google/adk` root agent in `@premortem/agent-builder` (`premortem_predictive_audit_agent`), Cloud Run-ready with Gemini API or Vertex AI and optional database-backed sessions |
 | Production pipeline | `@premortem/orchestrator` specialist swarm + human review gate |
 | OpenInference tracing | `@arizeai/phoenix-otel` via `@premortem/observability` |
 | Runtime MCP introspection | `@arizeai/phoenix-mcp` wired into the ADK agent as `phoenix_*` tools |
@@ -31,6 +31,10 @@ PHOENIX_LLM_EVAL=1   # optional: Gemini judge after audits
 PHOENIX_SYNC_DATASETS=1   # optional: append completed audits to Phoenix dataset
 PHOENIX_SYNC_PROMPTS=1    # optional: used by phoenix:bootstrap for prompt registration
 GEMINI_API_KEY=...
+GEMINI_USE_VERTEXAI=1   # optional: use Gemini Enterprise Agent Platform / Vertex AI instead of API key
+GOOGLE_CLOUD_PROJECT=...
+GOOGLE_CLOUD_LOCATION=us-central1
+AGENT_BUILDER_SESSION_DATABASE_URL=...   # optional: persistent ADK sessions for the Cloud Run runtime
 ```
 
 Bootstrap datasets, prompts, and verify the TypeScript code evaluator locally:
@@ -56,7 +60,7 @@ With `PHOENIX_API_KEY` set, traces export to your Phoenix project and Cursor can
 ## Self-improvement loop
 
 1. **Trace** — Gemini calls and agent missions emit OpenInference spans (`packages/llm`, `@premortem/agent-builder`, orchestrator).
-2. **Inspect** — The ADK agent exposes Phoenix MCP tools at runtime; Cursor uses the same MCP via `scripts/mcp/run-phoenix-mcp.sh`.
+2. **Inspect** — The ADK agent exposes Phoenix MCP tools at runtime; Cursor uses the same MCP via `scripts/mcp/run-phoenix-mcp.sh`. The Cloud Run runtime also exposes `/healthz` and `/run` for managed deployment paths.
 3. **Evaluate** — Code checks run on every completed audit; optional LLM judge scores mission quality.
 4. **Iterate** — Use Phoenix UI or MCP to review traces, attach [LLM evals](https://arize.com/docs/phoenix/evaluation/llm-evals), and tune prompts.
 
@@ -70,6 +74,8 @@ With `PHOENIX_API_KEY` set, traces export to your Phoenix project and Cursor can
 - `scripts/phoenix/bootstrap-platform.mjs` — register dataset + prompt in Phoenix
 - `services/agent-builder/src/phoenix-mcp.ts` — runtime Phoenix MCP connection
 - `services/agent-builder/src/index.ts` — ADK agent with GitLab + Phoenix MCP toolsets
+- `services/agent-builder/src/server.ts` — Cloud Run-ready runtime entrypoint with health and run endpoints
+- `services/agent-builder/Dockerfile` — container recipe for managed deployment
 - `scripts/mcp/run-phoenix-mcp.sh` — Cursor MCP launcher
 - `scripts/smoke/verify-hackathon-readiness.mjs` — hackathon gate
 

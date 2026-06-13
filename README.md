@@ -59,7 +59,7 @@ For each GitLab project, Premortem asks **what could go wrong here?** as a struc
 
 The reviewer console at `/app` exposes traceability: which lens surfaced a finding, supporting evidence, agent runs, and workflow canvas views over the audit pipeline and repository graph. Continuous audit mode can rotate scans when idle; Stop all returns control to manual runs.
 
-**Stack (as implemented):** Next.js BFF and reviewer UI, Cloudflare Workers API and Queues, `@premortem/orchestrator` swarm execution with Gemini (and optional Azure OpenAI), GitLab OAuth plus REST ingest and issue publish, Supabase Postgres via Prisma, optional Neo4j graph snapshots. The optional `services/agent-builder` package bootstraps mission traces; production audits run through the orchestrator pipeline, not a hosted Agent Builder-only runtime.
+**Stack (as implemented):** Next.js BFF and reviewer UI, Cloudflare Workers API and Queues, `@premortem/orchestrator` swarm execution with Gemini (and optional Azure OpenAI), GitLab OAuth plus REST ingest and issue publish, Supabase Postgres via Prisma, optional Neo4j graph snapshots. The optional `services/agent-builder` package now includes a Cloud Run-ready ADK runtime path with Gemini API or Vertex AI, optional database-backed sessions, and built-in Gemini safety settings; production audits still run through the orchestrator pipeline, not a hosted Agent Builder-only runtime.
 
 **On the roadmap:** cross-repo boundary analysis, performance and SLO lenses, organization policy packs, CLI and GitLab pipeline gates for release blocking.
 

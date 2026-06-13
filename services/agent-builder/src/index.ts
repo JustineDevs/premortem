@@ -5,11 +5,23 @@ import {
   Gemini,
   LlmAgent,
   MCPToolset,
+  type LlmAgentConfig,
   type StreamableHTTPConnectionParams
 } from '@google/adk';
 import { tracePremortemAgentMission, trace as otelTrace } from '@premortem/observability';
 
 import { buildPhoenixMcpConnection, describePhoenixRuntime } from './phoenix-mcp';
+
+export interface AgentBuilderRuntimeConfig {
+  gitlabBaseUrl: string;
+  gitlabToken?: string;
+  model: string;
+  geminiApiKey?: string;
+  vertexai: boolean;
+  project?: string;
+  location?: string;
+  sessionDatabaseUrl?: string;
+}
 
 export interface AgentBuilderMissionTrace {
   engine: 'google-adk';
@@ -23,7 +35,33 @@ export interface PremortemRootAgentOptions {
   gitlabToken?: string;
   model?: string;
   geminiApiKey?: string;
+  vertexai?: boolean;
+  project?: string;
+  location?: string;
 }
+
+export const PREMORTEM_GEMINI_SAFETY_SETTINGS = [
+  {
+    category: 'HARM_CATEGORY_HARASSMENT',
+    threshold: 'BLOCK_MEDIUM_AND_ABOVE'
+  },
+  {
+    category: 'HARM_CATEGORY_HATE_SPEECH',
+    threshold: 'BLOCK_MEDIUM_AND_ABOVE'
+  },
+  {
+    category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+    threshold: 'BLOCK_MEDIUM_AND_ABOVE'
+  },
+  {
+    category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+    threshold: 'BLOCK_LOW_AND_ABOVE'
+  },
+  {
+    category: 'HARM_CATEGORY_JAILBREAK',
+    threshold: 'BLOCK_LOW_AND_ABOVE'
+  }
+] as unknown as NonNullable<LlmAgentConfig['generateContentConfig']>['safetySettings'];
 
 export function createMissionTrace(model = DEFAULT_GEMINI_MODEL): AgentBuilderMissionTrace {
   return {
@@ -73,12 +111,34 @@ export function buildPremortemRootAgent(options: PremortemRootAgentOptions) {
     process.env.GEMINI_API_KEY ??
     process.env.GOOGLE_GENAI_API_KEY ??
     '';
-  if (!apiKey.trim()) {
+  const vertexai = options.vertexai ?? resolveAgentBuilderCredentials({}).vertexai;
+  const project =
+    options.project ??
+    process.env.GOOGLE_CLOUD_PROJECT ??
+    process.env.GOOGLE_CLOUD_PROJECT_ID ??
+    process.env.GCP_PROJECT;
+  const location =
+    options.location ??
+    process.env.GOOGLE_CLOUD_LOCATION ??
+    process.env.GOOGLE_CLOUD_REGION ??
+    process.env.GCP_REGION ??
+    'us-central1';
+
+  if (!apiKey.trim() && !vertexai) {
     throw new Error(
-      'GEMINI_API_KEY (or GOOGLE_GENAI_API_KEY) is required for the Agent Builder root agent.'
+      'GEMINI_API_KEY (or GOOGLE_GENAI_API_KEY) is required for the Agent Builder root agent unless Vertex AI is enabled.'
     );
   }
-  const model = new Gemini({ model: modelName, apiKey });
+  if (vertexai && !project) {
+    throw new Error('GOOGLE_CLOUD_PROJECT is required when Vertex AI is enabled for the Agent Builder runtime.');
+  }
+  const model = new Gemini({
+    model: modelName,
+    apiKey: apiKey.trim() || undefined,
+    vertexai,
+    project: vertexai ? project : undefined,
+    location: vertexai ? location : undefined
+  });
 
   const tools: Array<FunctionTool | MCPToolset> = [
     new FunctionTool({
@@ -109,7 +169,7 @@ export function buildPremortemRootAgent(options: PremortemRootAgentOptions) {
     name: 'premortem_predictive_audit_agent',
     model,
     description:
-      'Google Cloud Agent Builder root agent for Premortem predictive audits with GitLab MCP tools.',
+      'Premortem agent runtime for predictive audits with GitLab and Phoenix MCP tools.',
     instruction: [
       'You orchestrate Premortem predictive code audits for GitLab projects.',
       'Use GitLab MCP tools (prefixed premortem_) to read pipelines, jobs, and open issues.',
@@ -119,6 +179,11 @@ export function buildPremortemRootAgent(options: PremortemRootAgentOptions) {
       'surface predicted failures, and prepare human-reviewed issue candidates.',
       'Never publish issues without explicit human approval in the review console.'
     ].join(' '),
+    generateContentConfig: {
+      safetySettings: PREMORTEM_GEMINI_SAFETY_SETTINGS as unknown as NonNullable<
+        LlmAgentConfig['generateContentConfig']
+      >['safetySettings']
+    },
     tools
   });
 }
@@ -126,12 +191,49 @@ export function buildPremortemRootAgent(options: PremortemRootAgentOptions) {
 export function resolveAgentBuilderCredentials(input: {
   gitlabBaseUrl?: string;
   gitlabToken?: string;
+  model?: string;
+  geminiApiKey?: string;
+  vertexai?: boolean;
+  project?: string;
+  location?: string;
+  sessionDatabaseUrl?: string;
 }) {
+  const geminiApiKey =
+    input.geminiApiKey ??
+    process.env.GEMINI_API_KEY ??
+    process.env.GOOGLE_GENAI_API_KEY ??
+    '';
+  const project =
+    input.project ??
+    process.env.GOOGLE_CLOUD_PROJECT ??
+    process.env.GOOGLE_CLOUD_PROJECT_ID ??
+    process.env.GCP_PROJECT;
+  const location =
+    input.location ??
+    process.env.GOOGLE_CLOUD_LOCATION ??
+    process.env.GOOGLE_CLOUD_REGION ??
+    process.env.GCP_REGION ??
+    'us-central1';
+  const explicitVertexAi =
+    input.vertexai ??
+    (process.env.GEMINI_USE_VERTEXAI === '1' ||
+      process.env.GOOGLE_GENAI_USE_VERTEXAI === '1' ||
+      process.env.GOOGLE_GENAI_VERTEXAI === '1');
+  const vertexai = explicitVertexAi || (!geminiApiKey.trim() && Boolean(project));
+
   return {
     gitlabBaseUrl: input.gitlabBaseUrl ?? process.env.GITLAB_BASE_URL ?? 'https://gitlab.com',
     gitlabToken: input.gitlabToken ?? process.env.GITLAB_TOKEN?.trim() ?? '',
-    model: process.env.LLM_MODEL ?? DEFAULT_GEMINI_MODEL,
-    geminiApiKey: process.env.GEMINI_API_KEY ?? ''
+    model: input.model ?? process.env.LLM_MODEL ?? DEFAULT_GEMINI_MODEL,
+    geminiApiKey,
+    vertexai,
+    project,
+    location,
+    sessionDatabaseUrl:
+      input.sessionDatabaseUrl ??
+      process.env.AGENT_BUILDER_SESSION_DATABASE_URL?.trim() ??
+      process.env.AGENT_BUILDER_DATABASE_URL?.trim() ??
+      ''
   };
 }
 
@@ -164,6 +266,12 @@ async function bootstrapPremortemAgentMissionCore(input: {
     projectId: input.projectId,
     branch: input.branch,
     ingestionSource: input.ingestionSource
+  });
+  recordMissionStep(trace, 'agent_builder.runtime.config', {
+    vertexai: credentials.vertexai,
+    sessionPersistence: Boolean(credentials.sessionDatabaseUrl),
+    projectConfigured: Boolean(credentials.project),
+    locationConfigured: Boolean(credentials.location)
   });
 
   if (credentials.gitlabToken && input.ingestionSource === 'gitlab') {

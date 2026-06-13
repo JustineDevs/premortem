@@ -30,6 +30,7 @@
     "smoke:product-truth": "npx tsx --tsconfig tsconfig.base.json ./scripts/smoke/verify-product-truth.mjs",
     "smoke:hackathon": "npx tsx --tsconfig tsconfig.base.json ./scripts/smoke/verify-hackathon-readiness.mjs",
     "smoke:arize": "pnpm run smoke:hackathon",
+    "smoke:agent-builder-runtime": "pnpm --filter @premortem/agent-builder build && npx tsx --tsconfig tsconfig.base.json ./scripts/smoke/verify-agent-builder-runtime.mjs",
     "phoenix:bootstrap": "pnpm --filter @premortem/observability build && npx tsx --tsconfig tsconfig.base.json ./scripts/phoenix/bootstrap-platform.mjs",
     "verify:env": "node ./scripts/smoke/verify-env-utilization.mjs",
     "docker:up": "node ./scripts/docker/ensure-services.mjs",

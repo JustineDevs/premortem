@@ -1,4 +1,4 @@
-/** Canonical Gemini model for Premortem audits (Google Cloud Rapid Agent Hackathon). */
+/** Canonical Gemini model for Premortem audits and Rapid Agent validation. */
 export const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
 
 export const SUPPORTED_GEMINI_MODELS = [
