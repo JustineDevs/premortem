@@ -5,6 +5,7 @@ node_modules
 mcp.local.json
 .wrangler
 .open-next
+.cloudflare-pages
 .cursor/hooks/state/
 .turbo
 .next
