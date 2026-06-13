@@ -8,7 +8,7 @@
     "dev:turbo": "turbo dev",
     "build": "turbo build",
     "build:pages": "turbo build --filter=@premortem/web... --concurrency=1",
-    "build:pages:cloudflare": "pnpm run build:pages && node ./scripts/cloudflare/prepare-pages-output.mjs",
+    "build:pages:cloudflare": "pnpm run build:pages && pnpm --filter @premortem/web exec opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion && node ./scripts/cloudflare/prepare-pages-output.mjs",
     "lint": "turbo lint",
     "test": "turbo test",
     "typecheck": "turbo typecheck",
