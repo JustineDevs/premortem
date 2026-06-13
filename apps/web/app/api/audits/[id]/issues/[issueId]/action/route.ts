@@ -8,8 +8,6 @@ import {
   consoleReviewActionPayload,
   consoleReviewActionToReviewAction
 } from '@premortem/domain';
-import { CanonicalEvents } from '@premortem/observability';
-import { trackServerEvent } from '@premortem/observability';
 
 import {
   approveRuntimeIssue,
@@ -20,8 +18,10 @@ import {
   rejectRuntimeIssue,
   splitRuntimeIssue
 } from '@/lib/premortem-api/client';
+import { CanonicalEvents } from '@/lib/canonical/events';
 import { bffRateLimitKey, bffRateLimitResponse, checkBffRateLimit } from '@/lib/server/bff-rate-limit';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
+import { trackServerEvent } from '@/lib/server/track-server-event';
 
 export async function POST(
   request: Request,

@@ -4,8 +4,6 @@
     "next-env.d.ts",
     "instrumentation.ts",
     "instrumentation-client.ts",
-    "sentry.server.config.ts",
-    "sentry.edge.config.ts",
     "app/**/*.ts",
     "app/**/*.tsx",
     "src/**/*.ts",

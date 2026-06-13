@@ -1,12 +1,10 @@
 import { NextResponse } from 'next/server';
 
-import { captureException } from '@sentry/nextjs';
-import { trackServerEvent } from '@premortem/observability';
-
 import { getApiBaseUrl } from '@/lib/runtime-config';
 import { bffRateLimitKey, bffRateLimitResponse, checkBffRateLimit } from '@/lib/server/bff-rate-limit';
 import { bffErrorResponse, readUpstreamJson } from '@/lib/server/bff-errors';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
+import { trackServerEvent } from '@/lib/server/track-server-event';
 
 export async function proxyPremortemApi(path: string, init?: RequestInit, request?: Request) {
   if (request && !checkBffRateLimit(bffRateLimitKey(request, path))) {
@@ -43,7 +41,7 @@ export async function proxyPremortemApi(path: string, init?: RequestInit, reques
       headers: requestId ? { 'x-request-id': requestId } : undefined
     });
   } catch (error) {
-    captureException(error);
+    console.error(error);
     trackServerEvent(context.profileId, 'bff_proxy_exception', {
       path,
       duration_ms: Date.now() - startedAt

@@ -1,6 +1,5 @@
 'use client';
 
-import * as Sentry from '@sentry/nextjs';
 import { AlertCircle, RotateCw } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect } from 'react';
@@ -15,7 +14,7 @@ export default function OsError({
   reset: () => void;
 }) {
   useEffect(() => {
-    Sentry.captureException(error);
+    console.error(error);
   }, [error]);
 
   return (

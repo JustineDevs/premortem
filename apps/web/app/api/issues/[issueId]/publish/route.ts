@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
 
-import { CanonicalEvents } from '@premortem/observability';
-import { trackServerEvent } from '@premortem/observability';
-
+import { CanonicalEvents } from '@/lib/canonical/events';
 import { proxyPremortemApi } from '@/lib/server/proxy-api';
 import { bffRateLimitKey, bffRateLimitResponse, checkBffRateLimit } from '@/lib/server/bff-rate-limit';
 import { resolveRequestActorContext } from '@/lib/server/request-context';
+import { trackServerEvent } from '@/lib/server/track-server-event';
 
 export async function POST(
   request: Request,

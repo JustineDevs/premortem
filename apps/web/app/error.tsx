@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useEffect } from 'react';
-import * as Sentry from '@sentry/nextjs';
 
 import { MarketingPageLayout } from '@/components/landing/marketing-page-layout';
 import { authLinks } from '@/lib/auth-links';
@@ -17,7 +16,7 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    Sentry.captureException(error);
+    console.error(error);
   }, [error]);
 
   return (
