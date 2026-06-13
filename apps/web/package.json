@@ -6,6 +6,8 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "tsc -p tsconfig.typecheck.json --noEmit",
+    "predeploy": "pnpm --dir ../.. exec turbo build --filter=@premortem/domain --filter=@premortem/db --filter=@premortem/llm --filter=@premortem/observability --filter=@premortem/orchestrator --filter=@premortem/storage --concurrency=1",
+    "prepreview": "pnpm --dir ../.. exec turbo build --filter=@premortem/domain --filter=@premortem/db --filter=@premortem/llm --filter=@premortem/observability --filter=@premortem/orchestrator --filter=@premortem/storage --concurrency=1",
     "preview": "opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion && opennextjs-cloudflare deploy",
     "start": "next start",
