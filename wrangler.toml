@@ -1,6 +1,7 @@
 name = "premortem"
 main = "apps/api/src/index.ts"
 compatibility_date = "2026-06-08"
+pages_build_output_dir = ".cloudflare-pages"
 workers_dev = false
 compatibility_flags = ["nodejs_compat"]
 
