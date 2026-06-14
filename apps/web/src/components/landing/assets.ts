@@ -1,13 +1,13 @@
-import announcementIcon from '../../../public/landing/announcement-icon.png';
-import consoleAuditsPreview from '../../../public/landing/console-audits-preview.png';
-import geminiIcon from '../../../public/landing/gemini-icon.png';
-import geminiWordmark from '../../../public/landing/gemini-wordmark.png';
-import githubWordmark from '../../../public/landing/github-wordmark.png';
-import gitlabWordmark from '../../../public/landing/gitlab-wordmark.png';
-import googleCloudWordmark from '../../../public/landing/google-cloud-wordmark.png';
-import heroScreenshot from '../../../public/landing/hero-screenshot.png';
-import premortemHeader from '../../../public/landing/premortem-header.png';
-import socialGithubIcon from '../../../public/landing/social-github-icon.png';
+import announcementIcon from './images/announcement-icon.png';
+import consoleAuditsPreview from './images/console-audits-preview.png';
+import geminiIcon from './images/gemini-icon.png';
+import geminiWordmark from './images/gemini-wordmark.png';
+import githubWordmark from './images/github-wordmark.png';
+import gitlabWordmark from './images/gitlab-wordmark.png';
+import googleCloudWordmark from './images/google-cloud-wordmark.png';
+import heroScreenshot from './images/hero-screenshot.png';
+import premortemHeader from './images/premortem-header.png';
+import socialGithubIcon from './images/social-github-icon.png';
 
 export const assets = {
   heroScreenshot: heroScreenshot.src,
