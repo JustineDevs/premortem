@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,19 @@ const pagesWorkerPath = path.join(targetDir, '_worker.js');
 if (existsSync(workerPath)) {
   rmSync(pagesWorkerPath, { force: true });
   execFileSync('mv', [workerPath, pagesWorkerPath], { stdio: 'inherit' });
+}
+
+const assetsDir = path.join(targetDir, 'assets');
+if (existsSync(assetsDir)) {
+  for (const entry of readdirSync(assetsDir, { withFileTypes: true })) {
+    const from = path.join(assetsDir, entry.name);
+    const to = path.join(targetDir, entry.name);
+    if (existsSync(to)) {
+      rmSync(to, { recursive: true, force: true });
+    }
+    renameSync(from, to);
+  }
+  rmSync(assetsDir, { recursive: true, force: true });
 }
 
 console.log(`Prepared Cloudflare Pages output at ${path.relative(repoRoot, targetDir)}`);
