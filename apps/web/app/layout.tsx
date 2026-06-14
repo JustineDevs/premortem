@@ -17,8 +17,8 @@ export const metadata: Metadata = {
   title: 'Premortem',
   description: 'Predictive repository audits, swarm analysis, and GitLab issue synthesis for software delivery risk.',
   icons: {
-    icon: '/logo/png/Premortem_abstract.png',
-    apple: '/logo/png/Premortem_abstract.png'
+    icon: '/logo/svg/premortem-mark.svg',
+    apple: '/logo/svg/premortem-mark.svg'
   },
   openGraph: {
     title: 'Premortem',

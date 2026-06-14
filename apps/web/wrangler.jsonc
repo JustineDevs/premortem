@@ -11,7 +11,21 @@
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS",
-    "run_worker_first": true
+    "run_worker_first": [
+      "/",
+      "/products*",
+      "/solutions*",
+      "/how-it-works*",
+      "/docs*",
+      "/login",
+      "/signup",
+      "/forgot-password",
+      "/reset-password",
+      "/privacy",
+      "/terms",
+      "/app*",
+      "/audits*"
+    ]
   },
   "services": [
     {
