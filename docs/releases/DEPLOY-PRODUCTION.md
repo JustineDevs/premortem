@@ -5,7 +5,7 @@ Premortem v0.1.0 splits runtime across:
 | Surface | Target | Route |
 | --- | --- | --- |
 | Web (Next.js BFF + marketing + `/app`) | Cloudflare Pages | `premortem.jstn.site` |
-| API (audit orchestration) | Cloudflare Worker | `api.premortem.jstn.site` |
+| API (audit orchestration) | Cloudflare Worker | `api.jstn.site` |
 | Database + Auth | Supabase | Postgres pooler + Auth |
 | Graph | Neo4j Aura or self-hosted | Bolt URI |
 | Billing | Stripe | Checkout + webhooks |
@@ -75,7 +75,7 @@ Pages environment variables (production):
 
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `NEXT_PUBLIC_APP_URL` = `https://premortem.jstn.site`
-- `PREMORTEM_API_BASE_URL` = `https://api.premortem.jstn.site`
+- `PREMORTEM_API_BASE_URL` = `https://api.jstn.site`
 - `DATABASE_URL`, `DIRECT_URL` (server routes / Prisma)
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
 - `STRIPE_PRICE_PRO`, `STRIPE_PRICE_TEAM`, `STRIPE_PRICE_PRO_ANNUAL`, `STRIPE_PRICE_TEAM_ANNUAL`
@@ -103,7 +103,7 @@ Live mode (`sk_live_…`): Checkout + webhooks drive entitlements.
 ```bash
 PREMORTEM_WEB_PORT=443 PREMORTEM_API_PORT=443 \
 PREMORTEM_WEB_BASE=https://premortem.jstn.site \
-PREMORTEM_API_BASE=https://api.premortem.jstn.site \
+PREMORTEM_API_BASE=https://api.jstn.site \
 pnpm run smoke:production-readiness
 ```
 

@@ -1,7 +1,7 @@
 export const PREMORTEM_PRODUCT_NAME = 'Premortem';
 /** Production host for Premortem public links. */
 export const PREMORTEM_SITE_HOST = 'premortem.jstn.site';
-export const PREMORTEM_API_HOST = 'api.premortem.jstn.site';
+export const PREMORTEM_API_HOST = 'api.jstn.site';
 export const DEFAULT_PREMORTEM_SITE_URL = `https://${PREMORTEM_SITE_HOST}`;
 export const DEFAULT_PREMORTEM_API_URL = `https://${PREMORTEM_API_HOST}`;
 export const PREMORTEM_LOGO_MARK_PATH = '/logo/svg/premortem-mark.svg';

@@ -6,7 +6,7 @@
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "vars": {
     "NEXT_PUBLIC_APP_URL": "https://premortem.jstn.site",
-    "PREMORTEM_API_BASE_URL": "https://api.premortem.jstn.site"
+    "PREMORTEM_API_BASE_URL": "https://api.jstn.site"
   },
   "assets": {
     "directory": ".open-next/assets",

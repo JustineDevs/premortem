@@ -13,7 +13,7 @@ export const deployProductionGuideDoc: StructuredDoc = {
     'Supabase project with migrations applied.',
     'Stripe products and webhook endpoint configured.'
   ],
-  expectedResult: 'Marketing and /app on premortem.jstn.site, API on api.premortem.jstn.site, smoke tests passing.',
+  expectedResult: 'Marketing and /app on premortem.jstn.site, API on api.jstn.site, smoke tests passing.',
   githubSource: `${GITHUB}/docs/releases/DEPLOY-PRODUCTION.md`,
   toc: [
     { id: 'topology', label: 'Runtime topology' },
@@ -35,7 +35,7 @@ export const deployProductionGuideDoc: StructuredDoc = {
       heading: 'Runtime topology',
       bullets: [
         'Web (Next.js BFF, marketing, /app): Cloudflare Pages at premortem.jstn.site.',
-        'API (audit orchestration): Cloudflare Worker at api.premortem.jstn.site.',
+        'API (audit orchestration): Cloudflare Worker at api.jstn.site.',
         'Database + Auth: Supabase Postgres pooler and Auth.',
         'Graph: Neo4j Aura or self-hosted Bolt URI.',
         'Billing: Stripe Checkout + webhooks.'
@@ -74,7 +74,7 @@ export const deployProductionGuideDoc: StructuredDoc = {
       bullets: [
         'Connect GitHub repo; production branch main.',
         'Build: pnpm install --frozen-lockfile && pnpm run build:pages.',
-        'Set NEXT_PUBLIC_APP_URL=https://premortem.jstn.site and PREMORTEM_API_BASE_URL=https://api.premortem.jstn.site.',
+        'Set NEXT_PUBLIC_APP_URL=https://premortem.jstn.site and PREMORTEM_API_BASE_URL=https://api.jstn.site.',
         'Include Supabase public keys, Stripe secrets, Sentry/PostHog public keys on Pages.'
       ],
       callouts: [
@@ -99,7 +99,7 @@ export const deployProductionGuideDoc: StructuredDoc = {
       codeBlocks: [
         {
           title: 'Production smoke (against live URLs)',
-          code: 'PREMORTEM_WEB_BASE=https://premortem.jstn.site \\\nPREMORTEM_API_BASE=https://api.premortem.jstn.site \\\npnpm run smoke:production-readiness'
+          code: 'PREMORTEM_WEB_BASE=https://premortem.jstn.site \\\nPREMORTEM_API_BASE=https://api.jstn.site \\\npnpm run smoke:production-readiness'
         },
         {
           title: 'Local before push',

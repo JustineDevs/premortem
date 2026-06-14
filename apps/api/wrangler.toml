@@ -26,7 +26,7 @@ max_retries = 3
 dead_letter_queue = "premortem-audit-jobs-dlq-dev"
 
 [[routes]]
-pattern = "api.premortem.jstn.site/*"
+pattern = "api.jstn.site/*"
 zone_name = "jstn.site"
 
 [env.production]
@@ -52,7 +52,7 @@ max_retries = 3
 dead_letter_queue = "premortem-audit-jobs-dlq"
 
 [[env.production.routes]]
-pattern = "api.premortem.jstn.site/*"
+pattern = "api.jstn.site/*"
 zone_name = "jstn.site"
 
 [[migrations]]
