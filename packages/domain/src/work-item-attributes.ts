@@ -99,12 +99,26 @@ const SEVERITY_COLORS: Record<string, string> = {
 };
 
 function slugify(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48);
+  let result = '';
+  let wasSeparator = false;
+
+  for (const char of value.trim().toLowerCase()) {
+    const isAlphaNumeric =
+      (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9');
+    if (isAlphaNumeric) {
+      result += char;
+      wasSeparator = false;
+    } else if (!wasSeparator && result.length > 0) {
+      result += '-';
+      wasSeparator = true;
+    }
+  }
+
+  while (result.endsWith('-')) {
+    result = result.slice(0, -1);
+  }
+
+  return result.slice(0, 48);
 }
 
 function confidenceBand(confidence: number) {

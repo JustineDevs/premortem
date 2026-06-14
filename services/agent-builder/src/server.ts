@@ -221,7 +221,7 @@ export async function startAgentBuilderServer(port = Number(process.env.PORT ?? 
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   startAgentBuilderServer().catch((error) => {
-    console.error(error);
+    console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   });
 }

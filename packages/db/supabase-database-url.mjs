@@ -1,7 +1,11 @@
 // Keep in sync with packages/db/src/supabase-database-url.ts (used by load-local-env before tsc build).
 
 function toUrl(raw) {
-  return new URL(raw.replace(/^postgresql:/i, 'postgres:'));
+  const normalized = raw.trim();
+  if (!/^postgres(?:ql)?:\/\//i.test(normalized)) {
+    throw new Error('Expected a postgres connection string');
+  }
+  return new URL(normalized.replace(/^postgresql:/i, 'postgres:'));
 }
 
 function fromUrl(url) {

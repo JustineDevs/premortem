@@ -8,11 +8,15 @@ export function isLocalAuthBypassEnabled(): boolean {
   return process.env.PREMORTEM_AUTH_DISABLED === '1' && !isProductionMode();
 }
 
-export function isSupabaseAuthConfiguredInEnv(): boolean {
+function hasSupabaseAuthEnv(): boolean {
   return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() &&
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim()
+    (process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL)?.trim() &&
+      (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY)?.trim()
   );
+}
+
+export function isSupabaseAuthConfiguredInEnv(): boolean {
+  return hasSupabaseAuthEnv();
 }
 
 /** Seed LOCAL_DEV_FIXTURE rows only when auth bypass is explicitly enabled. */
@@ -53,17 +57,16 @@ function envFlag(name: string): boolean | undefined {
 export function validateProductionBootEnv(): string[] {
   if (!isProductionMode()) return [];
 
-  const required = [
-    'DATABASE_URL',
-    'NEXT_PUBLIC_SUPABASE_URL',
-    'NEXT_PUBLIC_SUPABASE_ANON_KEY',
-    'SUPABASE_SERVICE_ROLE_KEY',
-    'ENCRYPTION_KEY',
-    'NEO4J_URI',
-    'NEO4J_PASSWORD'
-  ] as const;
-
-  const missing: string[] = required.filter((key) => !process.env[key]?.trim());
+  const missing: string[] = [];
+  if (!process.env.DATABASE_URL?.trim()) missing.push('DATABASE_URL');
+  if (!hasSupabaseAuthEnv()) {
+    missing.push('NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL');
+    missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY or SUPABASE_ANON_KEY');
+  }
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+  if (!process.env.ENCRYPTION_KEY?.trim()) missing.push('ENCRYPTION_KEY');
+  if (!process.env.NEO4J_URI?.trim()) missing.push('NEO4J_URI');
+  if (!process.env.NEO4J_PASSWORD?.trim()) missing.push('NEO4J_PASSWORD');
 
   const hasLlm =
     Boolean(process.env.GEMINI_API_KEY?.trim()) ||

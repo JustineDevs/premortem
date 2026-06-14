@@ -21,7 +21,10 @@ export function parseGitHubRepoFromUrl(repoUrl: string | null | undefined): GitH
   if (!repoUrl) return null;
   try {
     const url = new URL(repoUrl);
-    if (!url.hostname.includes('github.com')) return null;
+    const hostname = url.hostname.toLowerCase();
+    if (hostname !== 'github.com' && hostname !== 'www.github.com' && !hostname.endsWith('.github.com')) {
+      return null;
+    }
     const parts = url.pathname.replace(/^\/+/, '').split('/').filter(Boolean);
     if (parts.length < 2) return null;
     return { owner: parts[0]!, repo: parts[1]!.replace(/\.git$/, '') };

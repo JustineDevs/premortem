@@ -3,11 +3,22 @@ import { findingEnvelopeSchema, issueEnvelopeSchema } from './schemas';
 import type { CanonicalFinding, IssueCandidate } from './types';
 
 function stripMarkdownFences(text: string) {
-  return text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .trim();
+  let trimmed = text.trim();
+  if (trimmed.startsWith('```')) {
+    const firstNewline = trimmed.indexOf('\n');
+    if (firstNewline >= 0) {
+      const fenceHeader = trimmed.slice(0, firstNewline).trim().toLowerCase();
+      if (fenceHeader === '```' || fenceHeader === '```json') {
+        trimmed = trimmed.slice(firstNewline + 1).trimStart();
+      }
+    }
+  }
+
+  if (trimmed.endsWith('```')) {
+    trimmed = trimmed.slice(0, -3).trimEnd();
+  }
+
+  return trimmed.trim();
 }
 
 function padArray<T>(values: T[], minimumLength: number): T[] {

@@ -1,5 +1,7 @@
 import { createBrowserClient } from '@supabase/ssr';
 
+import { resolveSupabaseRuntimeConfig } from './config';
+
 let browserClient: ReturnType<typeof createBrowserClient> | null = null;
 
 export function createSupabaseBrowserClient() {
@@ -7,13 +9,11 @@ export function createSupabaseBrowserClient() {
     return browserClient;
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !anonKey) {
+  const config = resolveSupabaseRuntimeConfig();
+  if (!config) {
     return null;
   }
 
-  browserClient = createBrowserClient(url, anonKey);
+  browserClient = createBrowserClient(config.url, config.anonKey);
   return browserClient;
 }

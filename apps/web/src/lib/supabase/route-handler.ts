@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { isSupabaseAuthConfigured } from '@/lib/supabase/config';
+import { resolveSupabaseRuntimeConfig } from '@/lib/supabase/config';
 
 type PendingCookie = {
   name: string;
@@ -17,15 +17,16 @@ export type RouteHandlerSupabase = {
 export function createRouteHandlerSupabaseClient(
   request: NextRequest
 ): RouteHandlerSupabase | null {
-  if (!isSupabaseAuthConfigured()) {
+  const config = resolveSupabaseRuntimeConfig();
+  if (!config) {
     return null;
   }
 
   const pendingCookies: PendingCookie[] = [];
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    config.url,
+    config.anonKey,
     {
       cookieOptions: {
         secure: process.env.NODE_ENV === 'production'

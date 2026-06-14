@@ -74,6 +74,7 @@ Recommended monorepo settings:
 Pages environment variables (production):
 
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_URL`, `SUPABASE_ANON_KEY` as server-side fallbacks accepted by the web runtime
 - `NEXT_PUBLIC_APP_URL` = `https://premortem.jstn.site`
 - `PREMORTEM_API_BASE_URL` = `https://api.jstn.site`
 - `DATABASE_URL`, `DIRECT_URL` (server routes / Prisma)

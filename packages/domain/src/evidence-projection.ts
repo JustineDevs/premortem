@@ -53,17 +53,29 @@ export function parseFileEvidenceRef(ref: string): ParsedFileEvidenceRef | null 
     return null;
   }
 
-  const match = pathPart.match(/^(.+?):(\d+)(?:-(\d+))?$/);
-  if (match) {
-    const filePath = match[1]!;
-    const startLine = Number.parseInt(match[2]!, 10);
-    const endLine = match[3] ? Number.parseInt(match[3], 10) : startLine;
-    if (!Number.isFinite(startLine) || startLine < 1) return null;
-    return {
-      filePath,
-      startLine,
-      endLine: Number.isFinite(endLine) && endLine >= startLine ? endLine : startLine
-    };
+  const lastColon = pathPart.lastIndexOf(':');
+  if (lastColon > 0 && lastColon < pathPart.length - 1) {
+    const filePath = pathPart.slice(0, lastColon);
+    const lineRange = pathPart.slice(lastColon + 1);
+    let dashIndex = -1;
+    for (let index = 0; index < lineRange.length; index += 1) {
+      if (lineRange[index] === '-') {
+        dashIndex = index;
+        break;
+      }
+    }
+
+    const startLineText = dashIndex >= 0 ? lineRange.slice(0, dashIndex) : lineRange;
+    const endLineText = dashIndex >= 0 ? lineRange.slice(dashIndex + 1) : '';
+    const startLine = Number.parseInt(startLineText, 10);
+    const endLine = endLineText ? Number.parseInt(endLineText, 10) : startLine;
+    if (Number.isFinite(startLine) && startLine >= 1) {
+      return {
+        filePath,
+        startLine,
+        endLine: Number.isFinite(endLine) && endLine >= startLine ? endLine : startLine
+      };
+    }
   }
 
   if (!pathPart.includes('.') || pathPart.includes(' ')) {

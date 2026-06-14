@@ -75,7 +75,7 @@ class PlaywrightDASTScanner:
         This method documents the authentication flow.
         """
         print(f"[*] Navigating to: {self.auth_config.get('auth_url', self.target_url)}")
-        print(f"[*] Username: {self.auth_config.get('username')}")
+        print("[*] Username: [redacted]")
 
         # Claude Code will:
         # 1. Launch Playwright browser

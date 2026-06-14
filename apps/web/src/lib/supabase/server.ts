@@ -1,19 +1,17 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
-import { isSupabaseAuthConfigured } from '@/lib/supabase/config';
+import { resolveSupabaseRuntimeConfig } from '@/lib/supabase/config';
 
 export function createSupabaseServerClient() {
-  if (!isSupabaseAuthConfigured()) {
+  const config = resolveSupabaseRuntimeConfig();
+  if (!config) {
     return null;
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
   const cookieStore = cookies();
 
-  return createServerClient(url, anonKey, {
+  return createServerClient(config.url, config.anonKey, {
     cookies: {
       getAll() {
         return cookieStore.getAll();

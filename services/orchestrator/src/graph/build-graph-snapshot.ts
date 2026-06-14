@@ -3,8 +3,6 @@ import type { GraphSnapshotPayload } from '@premortem/graph-model';
 import type { IngestionBundle } from '../ingestion/ingest-project';
 
 const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts'];
-const IMPORT_PATTERN =
-  /(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\sfrom\s+)?['"]([^'"]+)['"]|require\(\s*['"]([^'"]+)['"]\s*\)/g;
 
 function normalizePath(value: string) {
   return path.posix.normalize(value.replace(/\\/g, '/')).replace(/^\.\//, '');
@@ -38,10 +36,48 @@ function resolveRelativeImport(fromPath: string, specifier: string, availablePat
 
 function extractImports(content: string) {
   const imports = new Set<string>();
-  for (const match of content.matchAll(IMPORT_PATTERN)) {
-    const specifier = match[1] ?? match[2];
-    if (specifier) imports.add(specifier);
+  const lines = content.split('\n');
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const requireIndex = line.indexOf('require(');
+    if (requireIndex >= 0) {
+      const quoteIndex = line.indexOf('"', requireIndex);
+      const singleQuoteIndex = line.indexOf("'", requireIndex);
+      const startIndex =
+        quoteIndex >= 0 && singleQuoteIndex >= 0
+          ? Math.min(quoteIndex, singleQuoteIndex)
+          : Math.max(quoteIndex, singleQuoteIndex);
+      if (startIndex >= 0) {
+        const quote = line[startIndex];
+        const endIndex = line.indexOf(quote, startIndex + 1);
+        if (endIndex > startIndex + 1) {
+          imports.add(line.slice(startIndex + 1, endIndex));
+        }
+      }
+      continue;
+    }
+
+    const fromIndex = line.lastIndexOf(' from ');
+    const candidate = fromIndex >= 0 ? line.slice(fromIndex + 6) : line;
+    const quoteIndex = candidate.indexOf('"');
+    const singleQuoteIndex = candidate.indexOf("'");
+    const startIndex =
+      quoteIndex >= 0 && singleQuoteIndex >= 0
+        ? Math.min(quoteIndex, singleQuoteIndex)
+        : Math.max(quoteIndex, singleQuoteIndex);
+
+    if (startIndex >= 0) {
+      const quote = candidate[startIndex];
+      const endIndex = candidate.indexOf(quote, startIndex + 1);
+      if (endIndex > startIndex + 1) {
+        imports.add(candidate.slice(startIndex + 1, endIndex));
+      }
+    }
   }
+
   return [...imports];
 }
 

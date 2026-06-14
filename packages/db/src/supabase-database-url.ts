@@ -4,7 +4,11 @@
  */
 
 function toUrl(raw: string): URL {
-  return new URL(raw.replace(/^postgresql:/i, 'postgres:'));
+  const normalized = raw.trim();
+  if (!/^postgres(?:ql)?:\/\//i.test(normalized)) {
+    throw new Error('Expected a postgres connection string');
+  }
+  return new URL(normalized.replace(/^postgresql:/i, 'postgres:'));
 }
 
 function fromUrl(url: URL): string {

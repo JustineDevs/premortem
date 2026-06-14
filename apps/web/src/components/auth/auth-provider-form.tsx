@@ -27,7 +27,7 @@ const notices: Record<string, { message: string; tone: 'warn' | 'error' }> = {
   },
   config: {
     message:
-      'Supabase sign-in is not available in this dev server. Restart after setting NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in the repository root .env.local.',
+      'Supabase sign-in is not available in this environment. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY, or the SUPABASE_URL and SUPABASE_ANON_KEY fallback pair, then restart.',
     tone: 'error'
   },
   oauth: {

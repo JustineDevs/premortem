@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes, scryptSync } from 'node:crypto';
 
 import type { OrganizationApiKey } from '@prisma/client';
 
@@ -21,7 +21,7 @@ export interface OrganizationApiKeyVerification {
 }
 
 function hashOrganizationApiKey(token: string) {
-  return createHash('sha256').update(token).digest('hex');
+  return scryptSync(token, 'premortem-organization-api-key', 32).toString('hex');
 }
 
 function buildOrganizationApiKeyToken() {
