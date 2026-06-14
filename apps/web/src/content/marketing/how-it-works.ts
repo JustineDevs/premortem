@@ -1,3 +1,4 @@
+import { assets } from '@/components/landing/assets';
 import { marketingLinks } from '@/lib/marketing-links';
 
 export const howItWorksPage = {
@@ -38,7 +39,7 @@ export const howItWorksPage = {
     href: marketingLinks.docsGettingStarted
   },
   screenshot: {
-    src: '/landing/console-audits-preview.png',
+    src: assets.consoleAuditsPreview,
     alt: 'Premortem reviewer console: Audits and Tracing with structured issue review'
   },
   audioBrief: {
