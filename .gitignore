@@ -3,7 +3,12 @@ node_modules
 .env.*
 !.env.example
 mcp.local.json
-.wrangler
+**/.wrangler/
+!/.wrangler/
+!/.wrangler/deploy/
+!/.wrangler/deploy/config.json
+/.wrangler/state/
+/.wrangler/tmp/
 .open-next
 .cloudflare-pages
 .cursor/hooks/state/
