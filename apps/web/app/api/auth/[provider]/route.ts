@@ -22,9 +22,10 @@ function safeNextPath(value: string | null): string {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { provider: string } }
+  { params }: { params: Promise<{ provider: string }> }
 ) {
-  const provider = params.provider as AuthProvider;
+  const { provider: providerParam } = await params;
+  const provider = providerParam as AuthProvider;
 
   if (!(provider in providers)) {
     return NextResponse.json({ error: 'Unsupported provider' }, { status: 400 });
@@ -36,7 +37,7 @@ export async function GET(
   const origin = getPublicAppOrigin(request.nextUrl.origin);
   const fallbackPath = mode === 'signup' ? authLinks.signup : authLinks.login;
 
-  const authClient = createRouteHandlerSupabaseClient(request);
+  const authClient = await createRouteHandlerSupabaseClient(request);
   if (!authClient) {
     const redirectUrl = new URL(fallbackPath, origin);
     redirectUrl.searchParams.set('error', 'config');

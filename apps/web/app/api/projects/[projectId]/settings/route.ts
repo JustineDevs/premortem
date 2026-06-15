@@ -3,11 +3,11 @@ import { NextResponse } from 'next/server';
 import { getApiBaseUrl } from '@/lib/runtime-config';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
 
-export async function PATCH(request: Request, { params }: { params: { projectId: string } }) {
+export async function PATCH(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
   try {
     const context = await resolveRequestActorContext();
     const body = await request.json();
-    const { projectId } = params;
+    const { projectId } = await params;
     const response = await fetch(`${getApiBaseUrl()}/api/projects/${projectId}/settings`, {
       method: 'PATCH',
       headers: {

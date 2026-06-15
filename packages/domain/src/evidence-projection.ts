@@ -39,7 +39,10 @@ export function parseFileEvidenceRef(ref: string): ParsedFileEvidenceRef | null 
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
     try {
       const url = new URL(trimmed);
-      pathPart = url.pathname.replace(/^\//, '').replace(/\/-$/, '');
+      pathPart = url.pathname.startsWith('/') ? url.pathname.slice(1) : url.pathname;
+      if (pathPart.endsWith('/-')) {
+        pathPart = pathPart.slice(0, -2);
+      }
       if (pathPart.includes('/-/blob/')) {
         const segments = pathPart.split('/-/blob/');
         pathPart = segments[1]?.includes('/') ? segments[1].split('/').slice(1).join('/') : pathPart;
@@ -87,8 +90,16 @@ export function parseFileEvidenceRef(ref: string): ParsedFileEvidenceRef | null 
 
 /** Rejects hidden directory paths like `.husky` that are not repository files. */
 export function isLikelyRepositoryFilePath(filePath: string): boolean {
-  const normalized = filePath.trim().replace(/\/+$/, '');
-  if (!normalized || normalized.endsWith('/')) return false;
+  let normalized = filePath.trim();
+  while (normalized.endsWith('/')) {
+    normalized = normalized.slice(0, -1);
+  }
+  if (!normalized) return false;
+
+  const segments = normalized.split('/');
+  if (segments.some((segment) => segment.startsWith('.'))) {
+    return false;
+  }
 
   const basename = normalized.split('/').pop() ?? '';
   if (basename.startsWith('.') && !basename.slice(1).includes('.')) {

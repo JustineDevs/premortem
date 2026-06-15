@@ -16,18 +16,17 @@ const workspacePackages = [
 
 const nextConfig = {
   allowedDevOrigins: ['127.0.0.1'],
+  serverExternalPackages: [
+    '@premortem/db',
+    '@premortem/integrations',
+    '@premortem/llm',
+    '@premortem/orchestrator',
+    '@premortem/storage',
+    'stripe'
+  ],
   transpilePackages: workspacePackages,
   experimental: {
-    externalDir: true,
-    instrumentationHook: true,
-    serverComponentsExternalPackages: [
-      '@premortem/db',
-      '@premortem/integrations',
-      '@premortem/llm',
-      '@premortem/orchestrator',
-      '@premortem/storage',
-      'stripe'
-    ]
+    externalDir: true
   },
   webpack: (config) => {
     config.resolve.modules = [

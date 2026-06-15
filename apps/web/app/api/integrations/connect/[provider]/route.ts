@@ -10,10 +10,11 @@ function safeNextPath(value: string | null) {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { provider: string } }
+  { params }: { params: Promise<{ provider: string }> }
 ) {
-  const provider = params.provider as IntegrationProviderId;
-  const option = integrationConnectOptions.find((item) => item.id === provider);
+  const { provider } = await params;
+  const providerId = provider as IntegrationProviderId;
+  const option = integrationConnectOptions.find((item) => item.id === providerId);
 
   if (!option) {
     return NextResponse.json({ error: 'Unsupported provider' }, { status: 400 });
@@ -24,11 +25,11 @@ export async function GET(
   if (option.status === 'coming_soon') {
     const redirectUrl = new URL(next, request.url);
     redirectUrl.searchParams.set('integration_notice', 'coming_soon');
-    redirectUrl.searchParams.set('integration_provider', provider);
+    redirectUrl.searchParams.set('integration_provider', providerId);
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (provider === 'gitlab') {
+  if (providerId === 'gitlab') {
     const params = new URLSearchParams({ next });
     if (request.nextUrl.searchParams.get('discover') === '1') {
       params.set('discover', '1');
@@ -36,5 +37,5 @@ export async function GET(
     return NextResponse.redirect(new URL(`/api/integrations/connect/gitlab?${params.toString()}`, request.url));
   }
 
-  return NextResponse.redirect(integrationConnectHref(provider, next));
+  return NextResponse.redirect(integrationConnectHref(providerId, next));
 }

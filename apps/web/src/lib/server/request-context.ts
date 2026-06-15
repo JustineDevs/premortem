@@ -3,7 +3,7 @@ import { headers } from 'next/headers';
 import { LOCAL_DEV_FIXTURE, isLocalAuthBypassEnabled } from '@premortem/domain';
 import { resolveActorOrganization, extractBearerToken, verifySupabaseAccessToken } from '@premortem/db';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { isSupabaseAuthConfigured } from '@/lib/supabase/config';
+import { isSupabaseAuthConfigured } from '@/lib/supabase/server-config';
 
 export interface RequestActorContext {
   profileId: string;
@@ -40,7 +40,7 @@ export async function resolveRequestActorContext(
     };
   }
 
-  if (!isSupabaseAuthConfigured()) {
+  if (!(await isSupabaseAuthConfigured())) {
     throw new Error('Supabase auth is not configured');
   }
 
@@ -59,7 +59,7 @@ export async function resolveRequestActorContext(
     }
   }
 
-  const supabase = createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient();
   if (!supabase) {
     throw new Error('Supabase auth is not configured');
   }

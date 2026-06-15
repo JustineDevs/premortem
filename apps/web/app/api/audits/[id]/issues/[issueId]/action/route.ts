@@ -25,9 +25,10 @@ import { trackServerEvent } from '@/lib/server/track-server-event';
 
 export async function POST(
   request: Request,
-  { params }: { params: { id: string; issueId: string } }
+  { params }: { params: Promise<{ id: string; issueId: string }> }
 ) {
-  const rateKey = `/api/audits/${params.id}/issues/${params.issueId}/action`;
+  const { id, issueId } = await params;
+  const rateKey = `/api/audits/${id}/issues/${issueId}/action`;
   if (!checkBffRateLimit(bffRateLimitKey(request, rateKey))) {
     return bffRateLimitResponse();
   }
@@ -54,9 +55,9 @@ export async function POST(
     const payload = consoleReviewActionPayload(body.action, body.fields);
 
     if (reviewAction === ReviewAction.APPROVE) {
-      await approveRuntimeIssue(params.issueId, notes, headers);
+      await approveRuntimeIssue(issueId, notes, headers);
     } else if (reviewAction === ReviewAction.REJECT) {
-      await rejectRuntimeIssue(params.issueId, notes, headers);
+      await rejectRuntimeIssue(issueId, notes, headers);
     } else if (reviewAction === ReviewAction.MERGE) {
       if (!body.mergedIntoIssueCandidateId) {
         return NextResponse.json(
@@ -65,7 +66,7 @@ export async function POST(
         );
       }
       await mergeRuntimeIssue(
-        params.issueId,
+        issueId,
         {
           mergedIntoIssueCandidateId: body.mergedIntoIssueCandidateId,
           notes
@@ -73,14 +74,14 @@ export async function POST(
         headers
       );
     } else if (reviewAction === ReviewAction.SPLIT) {
-      await splitRuntimeIssue(params.issueId, body.fields ?? {}, headers);
+      await splitRuntimeIssue(issueId, body.fields ?? {}, headers);
     } else if (reviewAction === ReviewAction.EDIT && body.action === ConsoleReviewAction.DEFER) {
-      await deferRuntimeIssue(params.issueId, notes, headers);
+      await deferRuntimeIssue(issueId, notes, headers);
     } else if (reviewAction === ReviewAction.PUBLISH) {
-      const publishPayload = await publishRuntimeIssue(params.issueId, headers);
+      const publishPayload = await publishRuntimeIssue(issueId, headers);
       trackServerEvent(context.profileId, CanonicalEvents.issuePublished, {
-        issueCandidateId: params.issueId,
-        auditRunId: params.id,
+        issueCandidateId: issueId,
+        auditRunId: id,
         dryRun: publishPayload.dryRun === true
       });
     } else {
@@ -88,19 +89,19 @@ export async function POST(
     }
 
     if (body.fields && Object.keys(body.fields).length > 0 && reviewAction !== ReviewAction.SPLIT) {
-      await editRuntimeIssue(params.issueId, body.fields, headers);
+      await editRuntimeIssue(issueId, body.fields, headers);
     }
 
     trackServerEvent(context.profileId, CanonicalEvents.issueReviewed, {
-      auditRunId: params.id,
-      issueId: params.issueId,
+      auditRunId: id,
+      issueId,
       action: body.action
     });
 
     return NextResponse.json({
       success: true,
-      auditId: params.id,
-      issueId: params.issueId,
+      auditId: id,
+      issueId,
       action: body.action,
       reviewAction
     });

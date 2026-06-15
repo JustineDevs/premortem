@@ -1,0 +1,40 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "apps/*/app/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    "apps/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    "packages/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    "scripts/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    "services/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}"
+  ],
+  "project": [
+    "apps/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    "packages/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    "scripts/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    "services/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}"
+  ],
+  "ignore": [
+    ".agents/**",
+    ".changeset/**",
+    ".codex/**",
+    ".cursor/**",
+    ".git/**",
+    ".github/**",
+    ".internal/**",
+    ".omx/**",
+    ".turbo/**",
+    ".vscode/**",
+    ".wrangler/**",
+    ".cloudflare-pages/**",
+    "apps/web/.open-next/**",
+    "apps/web/src/vendor/**",
+    "fixtures/**",
+    "public/**"
+  ],
+  "ignoreDependencies": [
+    "@opennextjs/cloudflare"
+  ],
+  "ignoreBinaries": [
+    "ngrok"
+  ]
+}

@@ -74,7 +74,7 @@ class PlaywrightDASTScanner:
         NOTE: Actual Playwright automation is performed by Claude Code via MCP.
         This method documents the authentication flow.
         """
-        print(f"[*] Navigating to: {self.auth_config.get('auth_url', self.target_url)}")
+        print("[*] Navigating to authentication page")
         print("[*] Username: [redacted]")
 
         # Claude Code will:
@@ -329,7 +329,7 @@ Examples:
   %(prog)s --target https://app.example.com --mode greybox \\
     --auth-url https://app.example.com/login \\
     --username user@test.com \\
-    --password 'password123' \\
+    --password '[redacted]' \\
     --output results.json
 
 Note: This script works WITH Claude Code's Playwright MCP integration.
@@ -358,8 +358,7 @@ Note: This script works WITH Claude Code's Playwright MCP integration.
 
         auth_config = {
             'auth_url': args.auth_url or args.target,
-            'username': args.username,
-            'password': args.password
+            'username': args.username
         }
 
     # Initialize scanner

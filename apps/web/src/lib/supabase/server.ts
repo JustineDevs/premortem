@@ -1,15 +1,15 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
-import { resolveSupabaseRuntimeConfig } from '@/lib/supabase/config';
+import { resolveSupabaseRuntimeConfig } from '@/lib/supabase/server-config';
 
-export function createSupabaseServerClient() {
-  const config = resolveSupabaseRuntimeConfig();
+export async function createSupabaseServerClient() {
+  const config = await resolveSupabaseRuntimeConfig();
   if (!config) {
     return null;
   }
 
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
 
   return createServerClient(config.url, config.anonKey, {
     cookies: {

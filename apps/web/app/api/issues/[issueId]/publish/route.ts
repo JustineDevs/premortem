@@ -8,16 +8,17 @@ import { trackServerEvent } from '@/lib/server/track-server-event';
 
 export async function POST(
   request: Request,
-  { params }: { params: { issueId: string } }
+  { params }: { params: Promise<{ issueId: string }> }
 ) {
-  if (!checkBffRateLimit(bffRateLimitKey(request, `/api/issues/${params.issueId}/publish`))) {
+  const { issueId } = await params;
+  if (!checkBffRateLimit(bffRateLimitKey(request, `/api/issues/${issueId}/publish`))) {
     return bffRateLimitResponse();
   }
 
   try {
     const context = await resolveRequestActorContext(request);
     const response = await proxyPremortemApi(
-      `/api/issues/${params.issueId}/publish`,
+      `/api/issues/${issueId}/publish`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -32,7 +33,7 @@ export async function POST(
 
     if (response.ok) {
       trackServerEvent(context.profileId, CanonicalEvents.issuePublished, {
-        issueCandidateId: params.issueId,
+        issueCandidateId: issueId,
         dryRun: payload.dryRun === true
       });
     }

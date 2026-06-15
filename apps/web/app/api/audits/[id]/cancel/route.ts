@@ -6,10 +6,11 @@ import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-c
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function POST(_request: Request, { params }: { params: { id: string } }) {
+export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const { id } = await params;
     const context = await resolveRequestActorContext();
-    const response = await fetch(`${getApiBaseUrl()}/api/audits/${params.id}/cancel`, {
+    const response = await fetch(`${getApiBaseUrl()}/api/audits/${id}/cancel`, {
       method: 'POST',
       headers: {
         accept: 'application/json',

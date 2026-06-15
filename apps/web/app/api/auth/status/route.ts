@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { isLocalAuthBypassEnabled } from '@premortem/domain';
 
-import { isSupabaseAuthConfigured } from '@/lib/supabase/config';
+import { isSupabaseAuthConfigured } from '@/lib/supabase/server-config';
 import { bffErrorResponse } from '@/lib/server/bff-errors';
 import { resolveRequestActorContext } from '@/lib/server/request-context';
 
@@ -11,14 +11,14 @@ export async function GET(request: Request) {
     if (isLocalAuthBypassEnabled()) {
       const context = await resolveRequestActorContext(request);
       return NextResponse.json({
-        configured: isSupabaseAuthConfigured(),
+        configured: await isSupabaseAuthConfigured(),
         authenticated: true,
         mode: 'local_fixture',
         organizationId: context.organizationId
       });
     }
 
-    if (!isSupabaseAuthConfigured()) {
+    if (!(await isSupabaseAuthConfigured())) {
       return NextResponse.json({
         configured: false,
         authenticated: false,

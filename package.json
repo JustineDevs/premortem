@@ -29,25 +29,38 @@
     "smoke:fixture": "PREMORTEM_SMOKE_USE_FIXTURE=1 npx tsx --tsconfig tsconfig.base.json ./scripts/smoke/verify-production-readiness.mjs",
     "smoke:local": "bash ./scripts/smoke/run-local-stack.sh",
     "smoke:product-truth": "npx tsx --tsconfig tsconfig.base.json ./scripts/smoke/verify-product-truth.mjs",
+    "smoke:security-fixes": "npx tsx --tsconfig tsconfig.base.json ./scripts/smoke/verify-security-fixes.ts",
     "smoke:hackathon": "npx tsx --tsconfig tsconfig.base.json ./scripts/smoke/verify-hackathon-readiness.mjs",
     "smoke:arize": "pnpm run smoke:hackathon",
     "smoke:agent-builder-runtime": "pnpm --filter @premortem/agent-builder build && npx tsx --tsconfig tsconfig.base.json ./scripts/smoke/verify-agent-builder-runtime.mjs",
     "phoenix:bootstrap": "pnpm --filter @premortem/observability build && npx tsx --tsconfig tsconfig.base.json ./scripts/phoenix/bootstrap-platform.mjs",
     "verify:env": "node ./scripts/smoke/verify-env-utilization.mjs",
+    "lint:deadcode": "knip",
     "docker:up": "node ./scripts/docker/ensure-services.mjs",
     "docker:up:sudo": "PREMORTEM_DOCKER_SUDO=1 node ./scripts/docker/ensure-services.mjs",
     "docker:down": "docker compose down",
     "docker:status": "node ./scripts/docker/verify-services.mjs",
     "docker:test-neo4j": "npx tsx --tsconfig tsconfig.base.json ./scripts/docker/test-neo4j.mjs",
-    "premortem": "node ./packages/cli/dist/index.js"
+    "premortem": "node ./packages/cli/dist/index.js",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
-    "promptfoo": "^0.121.15",
+    "husky": "^9.1.7",
+    "knip": "^6.16.1",
     "prisma": "^5.20.0",
-    "wrangler": "^4.100.0",
+    "promptfoo": "^0.121.15",
     "tsx": "^4.20.0",
     "turbo": "^2.0.12",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "wrangler": "^4.100.0"
+  },
+    "pnpm": {
+    "overrides": {
+      "esbuild": "0.28.1",
+      "uuid": "13.0.2",
+      "@tootallnate/once": "2.0.1",
+      "tar": "7.5.11"
+    }
   }
 }

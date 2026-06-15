@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { resolveSupabaseRuntimeConfig } from '@/lib/supabase/config';
+import { resolveSupabaseRuntimeConfig } from '@/lib/supabase/server-config';
 
 type PendingCookie = {
   name: string;
@@ -14,10 +14,10 @@ export type RouteHandlerSupabase = {
   attachCookies: (response: NextResponse) => NextResponse;
 };
 
-export function createRouteHandlerSupabaseClient(
+export async function createRouteHandlerSupabaseClient(
   request: NextRequest
-): RouteHandlerSupabase | null {
-  const config = resolveSupabaseRuntimeConfig();
+): Promise<RouteHandlerSupabase | null> {
+  const config = await resolveSupabaseRuntimeConfig();
   if (!config) {
     return null;
   }

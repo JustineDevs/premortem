@@ -5,10 +5,15 @@ import { actorHeaders, resolveRequestActorContext } from '../../../src/lib/serve
 
 export const dynamic = 'force-dynamic';
 
-export default async function AuditRunDetailPage({ params }: { params: { auditRunId: string } }) {
-  await requireUserSession(`/audits/${params.auditRunId}`);
+export default async function AuditRunDetailPage({
+  params
+}: {
+  params: Promise<{ auditRunId: string }>;
+}) {
+  const { auditRunId } = await params;
+  await requireUserSession(`/audits/${auditRunId}`);
   const context = await resolveRequestActorContext();
-  const auditRun = await loadAuditRunSnapshot(params.auditRunId, {
+  const auditRun = await loadAuditRunSnapshot(auditRunId, {
     apiBaseUrl: getApiBaseUrl(),
     headers: actorHeaders(context)
   });

@@ -207,8 +207,9 @@ export async function startAgentBuilderServer(port = Number(process.env.PORT ?? 
       res.end(JSON.stringify({ error: 'Not found' }, null, 2));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      console.error('[agent-builder] request failed', message);
       res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ error: message }, null, 2));
+      res.end(JSON.stringify({ error: 'Internal server error' }, null, 2));
     }
   });
 

@@ -5,8 +5,9 @@ import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-c
 
 export async function POST(
   request: Request,
-  { params }: { params: { id: string; issueId: string } }
+  { params }: { params: Promise<{ id: string; issueId: string }> }
 ) {
+  const { id, issueId } = await params;
   const body = (await request.json()) as {
     title?: string;
     whyItMatters?: string;
@@ -29,11 +30,11 @@ export async function POST(
 
   try {
     const context = await resolveRequestActorContext(request);
-    await editRuntimeIssue(params.issueId, fields, actorHeaders(context));
+    await editRuntimeIssue(issueId, fields, actorHeaders(context));
     return NextResponse.json({
       success: true,
-      auditId: params.id,
-      issueId: params.issueId
+      auditId: id,
+      issueId
     });
   } catch (error) {
     return NextResponse.json(

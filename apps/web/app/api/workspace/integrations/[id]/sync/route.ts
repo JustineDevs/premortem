@@ -5,11 +5,12 @@ import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-c
 
 export async function POST(
   _request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const context = await resolveRequestActorContext();
-    const response = await fetch(`${getApiBaseUrl()}/api/workspace/integrations/${params.id}/sync`, {
+    const response = await fetch(`${getApiBaseUrl()}/api/workspace/integrations/${id}/sync`, {
       method: 'POST',
       headers: {
         accept: 'application/json',

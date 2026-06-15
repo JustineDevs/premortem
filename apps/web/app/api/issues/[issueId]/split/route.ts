@@ -6,9 +6,10 @@ import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-c
 
 export async function POST(
   request: Request,
-  { params }: { params: { issueId: string } }
+  { params }: { params: Promise<{ issueId: string }> }
 ) {
-  const path = `/api/issues/${params.issueId}/split`;
+  const { issueId } = await params;
+  const path = `/api/issues/${issueId}/split`;
   if (!checkBffRateLimit(bffRateLimitKey(request, path))) {
     return bffRateLimitResponse();
   }
@@ -20,7 +21,7 @@ export async function POST(
       notes?: string;
     };
     const payload = await splitRuntimeIssue(
-      params.issueId,
+      issueId,
       {
         title: body.title,
         notes: body.notes

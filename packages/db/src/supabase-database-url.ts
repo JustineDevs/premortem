@@ -16,11 +16,13 @@ function fromUrl(url: URL): string {
 }
 
 function isDirectSupabaseHost(hostname: string): boolean {
-  return hostname.endsWith('.supabase.co') && hostname.startsWith('db.');
+  const labels = hostname.split('.');
+  return labels.length === 4 && labels[0] === 'db' && labels[2] === 'supabase' && labels[3] === 'co';
 }
 
 function isPoolerHost(hostname: string): boolean {
-  return hostname.includes('.pooler.supabase.com');
+  const labels = hostname.split('.');
+  return labels.length === 4 && labels[1] === 'pooler' && labels[2] === 'supabase' && labels[3] === 'com';
 }
 
 function isLocalPostgresHost(hostname: string): boolean {

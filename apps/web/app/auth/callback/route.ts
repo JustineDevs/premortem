@@ -5,7 +5,7 @@ import { hasActiveProviderConnection, resolveActorOrganization } from '@premorte
 
 import { authLinks, type AuthMode } from '@/lib/auth-links';
 import { getPublicAppOrigin } from '@/lib/runtime-config';
-import { isSupabaseAuthConfigured } from '@/lib/supabase/config';
+import { isSupabaseAuthConfigured } from '@/lib/supabase/server-config';
 import { createRouteHandlerSupabaseClient, type RouteHandlerSupabase } from '@/lib/supabase/route-handler';
 import { persistGitLabConnection } from '@/lib/server/persist-gitlab-connection';
 import type { RequestActorContext } from '@/lib/server/request-context';
@@ -71,13 +71,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (!isSupabaseAuthConfigured()) {
+  if (!(await isSupabaseAuthConfigured())) {
     const redirectUrl = new URL(fallbackPath, origin);
     redirectUrl.searchParams.set('error', 'config');
     return NextResponse.redirect(redirectUrl);
   }
 
-  const authClient = createRouteHandlerSupabaseClient(request);
+  const authClient = await createRouteHandlerSupabaseClient(request);
   if (!authClient) {
     const redirectUrl = new URL(fallbackPath, origin);
     redirectUrl.searchParams.set('error', 'config');

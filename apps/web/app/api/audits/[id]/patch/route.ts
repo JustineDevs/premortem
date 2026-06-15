@@ -4,7 +4,7 @@ import { ConsoleReviewAction, consoleReviewActionNotes } from '@premortem/domain
 import { approveRuntimeIssue } from '@/lib/premortem-api/client';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
 
-export async function POST(request: Request, context: { params: { id: string } }) {
+export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const body = (await request.json()) as { issueId?: string };
   const issueId = body.issueId;
 
@@ -15,10 +15,11 @@ export async function POST(request: Request, context: { params: { id: string } }
   try {
     const actor = await resolveRequestActorContext();
     await approveRuntimeIssue(issueId, consoleReviewActionNotes(ConsoleReviewAction.RESOLVE), actorHeaders(actor));
+    const { id } = await context.params;
 
     return NextResponse.json({
       success: true,
-      auditId: context.params.id,
+      auditId: id,
       issueId,
       action: ConsoleReviewAction.RESOLVE,
       patchApplied: true,
