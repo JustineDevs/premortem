@@ -2,3 +2,4 @@ name = "premortem-web"
 pages_build_output_dir = ".cloudflare-pages"
 compatibility_date = "2026-06-13"
 compatibility_flags = ["nodejs_compat"]
+compatibility_flags = ["nodejs_compat"]
