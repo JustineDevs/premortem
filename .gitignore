@@ -7,6 +7,11 @@ mcp.local.json
 !/.wrangler/
 !/.wrangler/deploy/
 !/.wrangler/deploy/config.json
+!apps/web/.wrangler/
+!apps/web/.wrangler/deploy/
+!apps/web/.wrangler/deploy/config.json
+apps/web/.wrangler/state/
+apps/web/.wrangler/tmp/
 /.wrangler/state/
 /.wrangler/tmp/
 .open-next
