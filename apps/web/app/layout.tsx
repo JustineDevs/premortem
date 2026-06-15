@@ -1,14 +1,12 @@
 import type { Metadata } from 'next';
-import { GeistSans } from 'geist/font/sans';
-import { Inter } from 'next/font/google';
+import type { CSSProperties } from 'react';
 
 import './globals.css';
 
-const inter = Inter({
-  subsets: ['latin'],
-  weight: ['400', '500', '700'],
-  variable: '--font-inter'
-});
+const fontVariables = {
+  '--font-inter': '"Inter"',
+  '--font-geist-sans': '"Geist"'
+} as CSSProperties;
 
 const siteUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'https://premortem.jstn.site');
 
@@ -45,8 +43,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${GeistSans.variable} ${inter.variable}`}>
-      <body className={GeistSans.className}>{children}</body>
+    <html lang="en" style={fontVariables}>
+      <body>{children}</body>
     </html>
   );
 }
