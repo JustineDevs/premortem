@@ -15,7 +15,7 @@ export type MarketingDemoFrame = {
   };
 };
 
-/** Ordered product walkthrough mapped to public/static/0.png … 11.png */
+/** Ordered product walkthrough mapped to public/static/0.png through 11.png. */
 export const marketingDemoFrames: readonly MarketingDemoFrame[] = [
   {
     id: 'overview',
@@ -32,7 +32,7 @@ export const marketingDemoFrames: readonly MarketingDemoFrame[] = [
       { label: 'Console', value: '/app' }
     ],
     progress: 8,
-    log: 'landing · connect GitLab · register project',
+    log: 'landing · connect GitLab · register repository',
     screenshot: {
       src: '/landing/demo/0.png',
       alt: 'Premortem landing overview with connect, scan, and review workflow'
@@ -90,7 +90,7 @@ export const marketingDemoFrames: readonly MarketingDemoFrame[] = [
       'Severity ledger summarizes critical, high, medium, and low findings.'
     ],
     metrics: [
-      { label: 'Agents', value: '13' },
+      { label: 'Agents', value: '24' },
       { label: 'Pipeline', value: '100%' },
       { label: 'Findings', value: '132' }
     ],
@@ -133,7 +133,7 @@ export const marketingDemoFrames: readonly MarketingDemoFrame[] = [
     ],
     metrics: [
       { label: 'Lanes', value: '2' },
-      { label: 'Agents', value: '13' },
+      { label: 'Agents', value: '24' },
       { label: 'Findings', value: '11' }
     ],
     progress: 50,
@@ -144,12 +144,12 @@ export const marketingDemoFrames: readonly MarketingDemoFrame[] = [
     }
   },
   {
-    id: 'playground-run',
+    id: 'analysis-run',
     stepId: 'run',
     phase: '02 · Audit',
-    headline: 'AI Code Playground for ad-hoc snippet analysis',
+    headline: 'Code analysis for ad hoc snippets',
     lines: [
-      'Paste server-side TypeScript for a focused Gemini security trace.',
+      'Paste server-side TypeScript for focused analysis.',
       'Complements full-repo audits from Projects and Workflow Canvas.'
     ],
     metrics: [
@@ -158,10 +158,10 @@ export const marketingDemoFrames: readonly MarketingDemoFrame[] = [
       { label: 'Step', value: 'Analyze' }
     ],
     progress: 58,
-    log: 'playground · gemini trace · analyzing code structure',
+    log: 'analysis · gemini trace · analyzing code structure',
     screenshot: {
       src: '/landing/demo/7.png',
-      alt: 'Premortem AI Code Playground analyzing a TypeScript snippet'
+    alt: 'Premortem code analysis examining a TypeScript snippet'
     }
   },
   {
@@ -228,7 +228,7 @@ export const marketingDemoFrames: readonly MarketingDemoFrame[] = [
     }
   },
   {
-    id: 'playground-review',
+    id: 'analysis-review',
     stepId: 'review',
     phase: '03 · Review',
     headline: 'Sandbox findings with hotfix guidance',
@@ -242,10 +242,10 @@ export const marketingDemoFrames: readonly MarketingDemoFrame[] = [
       { label: 'Category', value: 'SQL' }
     ],
     progress: 91,
-    log: 'playground · sql injection · resolution guideline ready',
+    log: 'analysis · sql injection · resolution guideline ready',
     screenshot: {
       src: '/landing/demo/8.png',
-      alt: 'Premortem AI Code Playground vulnerability findings and hotfix patch'
+    alt: 'Premortem code analysis vulnerability findings and suggested patch'
     }
   },
   {

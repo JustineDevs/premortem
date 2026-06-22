@@ -1,12 +1,18 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import type { User, UserIdentity } from '@supabase/supabase-js';
 
-import { hasActiveProviderConnection, resolveActorOrganization } from '@premortem/db';
+import { isLocalAuthBypassEnabled } from '@premortem/domain';
+import { hasActiveProviderConnection, markProfileOnboardingCompleted, resolveActorOrganization } from '@premortem/db';
 
 import { authLinks, type AuthMode } from '@/lib/auth-links';
-import { getPublicAppOrigin } from '@/lib/runtime-config';
 import { isSupabaseAuthConfigured } from '@/lib/supabase/server-config';
+import {
+  getCanonicalLoopbackOrigin,
+  getPublicAppOrigin,
+  getRequestOrigin
+} from '@/lib/runtime-config';
 import { createRouteHandlerSupabaseClient, type RouteHandlerSupabase } from '@/lib/supabase/route-handler';
+import { supabaseProfileHintsFromUser } from '@/lib/supabase/profile-hints';
 import { persistGitLabConnection } from '@/lib/server/persist-gitlab-connection';
 import type { RequestActorContext } from '@/lib/server/request-context';
 
@@ -32,48 +38,61 @@ async function actorContextFromUser(
   user: User,
   accessToken: string | null
 ): Promise<RequestActorContext> {
-  const metadata = (user.user_metadata ?? {}) as Record<string, unknown>;
   const resolved = await resolveActorOrganization(user.id, undefined, {
-    email: user.email ?? null,
-    fullName: typeof metadata.full_name === 'string' ? metadata.full_name : null,
-    username: typeof metadata.user_name === 'string' ? metadata.user_name : null
+    ...supabaseProfileHintsFromUser(user),
+    email: user.email ?? null
   });
   return {
     profileId: resolved.profileId,
     organizationId: resolved.organizationId,
     email: user.email,
-    accessToken
+    accessToken,
+    role: resolved.role
   };
 }
 
 function authFailureRedirect(
   authClient: RouteHandlerSupabase,
   origin: string,
-  fallbackPath: string
+  fallbackPath: string,
+  options?: { description?: string; code?: string }
 ) {
   const failureUrl = new URL(fallbackPath, origin);
   failureUrl.searchParams.set('error', 'callback');
+  if (options?.description) {
+    failureUrl.searchParams.set('error_description', options.description);
+  }
+  if (options?.code) {
+    failureUrl.searchParams.set('error_code', options.code);
+  }
   return authClient.attachCookies(NextResponse.redirect(failureUrl));
 }
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  const origin = getPublicAppOrigin(request.nextUrl.origin);
+  const origin = getPublicAppOrigin(getRequestOrigin(request));
+  const canonicalOrigin = getCanonicalLoopbackOrigin(getRequestOrigin(request));
   const code = searchParams.get('code');
+  const callbackError = searchParams.get('error');
   const next = safeNextPath(searchParams.get('next'));
   const mode = searchParams.get('mode');
   const fallbackPath =
     isAuthMode(mode) && mode === 'signup' ? authLinks.signup : authLinks.login;
 
-  if (!code) {
-    const redirectUrl = new URL(fallbackPath, origin);
-    redirectUrl.searchParams.set('error', 'callback');
-    return NextResponse.redirect(redirectUrl);
+  if (canonicalOrigin && canonicalOrigin !== origin) {
+    const canonicalUrl = new URL(request.nextUrl.pathname + request.nextUrl.search, canonicalOrigin);
+    return NextResponse.redirect(canonicalUrl, 303);
   }
 
   if (!(await isSupabaseAuthConfigured())) {
     const redirectUrl = new URL(fallbackPath, origin);
     redirectUrl.searchParams.set('error', 'config');
+    return NextResponse.redirect(redirectUrl);
+  }
+
+  if (isLocalAuthBypassEnabled()) {
+    const redirectUrl = new URL(next, origin);
+    redirectUrl.searchParams.set('mode', 'local_fixture');
     return NextResponse.redirect(redirectUrl);
   }
 
@@ -84,12 +103,31 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  const { error } = await authClient.supabase.auth.exchangeCodeForSession(code);
-  if (error) {
-    if (process.env.NODE_ENV !== 'production') {
+  if (callbackError) {
+    const redirectUrl = new URL(fallbackPath, origin);
+    redirectUrl.searchParams.set('error', 'callback');
+    const errorDescription = searchParams.get('error_description');
+    const errorCode = searchParams.get('error_code');
+    if (errorDescription) {
+      redirectUrl.searchParams.set('error_description', errorDescription);
+    }
+    if (errorCode) {
+      redirectUrl.searchParams.set('error_code', errorCode);
+    }
+    return authClient.attachCookies(NextResponse.redirect(redirectUrl));
+  }
+
+  if (code) {
+    const { error } = await authClient.supabase.auth.exchangeCodeForSession(code);
+    if (error && process.env.NODE_ENV !== 'production') {
       console.error('[auth/callback] exchangeCodeForSession failed:', error.message);
     }
-    return authFailureRedirect(authClient, origin, fallbackPath);
+    if (error) {
+      const redirectUrl = new URL(fallbackPath, origin);
+      redirectUrl.searchParams.set('error', 'callback');
+      redirectUrl.searchParams.set('error_description', error.message);
+      return authClient.attachCookies(NextResponse.redirect(redirectUrl));
+    }
   }
 
   const {
@@ -99,11 +137,28 @@ export async function GET(request: NextRequest) {
     data: { session }
   } = await authClient.supabase.auth.getSession();
 
+  if (!user || !session) {
+    if (!code) {
+      return authFailureRedirect(authClient, origin, fallbackPath);
+    }
+
+    const redirectUrl = new URL(fallbackPath, origin);
+    redirectUrl.searchParams.set('error', 'callback');
+    redirectUrl.searchParams.set('error_description', 'Session exchange did not produce a user session.');
+    return authClient.attachCookies(NextResponse.redirect(redirectUrl));
+  }
+
   let redirectTarget = new URL(next, origin);
 
   const signedInWithGitLab =
     user?.app_metadata?.provider === 'gitlab' ||
     user?.identities?.some((identity: UserIdentity) => identity.provider === 'gitlab');
+
+  await markProfileOnboardingCompleted(user.id).catch((error) => {
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('[auth/callback] onboarding completion failed:', error instanceof Error ? error.message : error);
+    }
+  });
 
   if (
     user &&

@@ -14,11 +14,18 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "pnpm --filter @premortem/security build && tsc -p tsconfig.json",
+    "postbuild": "node ../../scripts/fix-esm-imports.mjs dist",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.85",
+    "@ai-sdk/google": "^3.0.83",
+    "@ai-sdk/openai": "^3.0.73",
+    "@premortem/domain": "workspace:^",
     "@premortem/observability": "workspace:^",
+    "@premortem/security": "workspace:^",
+    "ai": "^6.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

@@ -62,6 +62,10 @@ Mapped prompt files under `.agents/prompts/` act as live presets until YAML pres
 | onboarding-operability.md | Operator onboarding gaps |
 | issue-memory.md | Issue tracker context |
 
+All specialist prompts are automatically prepended with the shared production floor in `.agents/prompts/specialist-floor.md`, so the runtime enforces the same refusal behavior and confidence floor even when individual prompt files drift.
+
+Remediation, integration, and issue-body prompts must also conform to `TA.md`, which defines the product truth, evidence discipline, review controls, and graph-grounding requirements.
+
 ## Swarm execution
 
 Specialists run in swarm lanes (`apps/web/src/lib/premortem-os/swarm-lanes.ts`, workflow canvas). Each lane must map to a named specialist with a prompt contract.

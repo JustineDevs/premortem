@@ -9,7 +9,7 @@ import { releasesDoc } from '@/content/marketing/docs-index';
 
 import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
 export const metadata = buildSeoMetadata({
-  title: 'Release notes | Premortem Docs',
+  title: 'Release notes',
   description: releasesDoc.lead,
   canonical: '/docs/releases',
   keywords: canonicalDocsKeywords
@@ -34,8 +34,8 @@ export default function ReleasesDocPage() {
         <MarketingDocSection id="verify" title="Verification (2026-06-11)">
           <MarketingBulletList
             items={[
-              'pnpm run smoke:production-readiness: stranger self-serve, publish, Neo4j graph.',
-              'pnpm run smoke:full-app-stress: marketing, docs, auth, billing guards, audits.',
+              'pnpm run smoke:production-readiness: public onboarding, publish flow, and Neo4j graph checks.',
+              'pnpm run smoke:full-app-stress: marketing, docs, auth, billing guards, and audits.',
               'Stripe test catalog wired (Premortem Starter / Premortem Growth price IDs).'
             ]}
           />

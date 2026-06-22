@@ -29,16 +29,19 @@ export async function getManagedPrompt(name: string, options: ManagedPromptOptio
   const langfuse = getLangfuseClient();
   if (!langfuse) return options.fallback ?? null;
 
+  const label = options.label ?? process.env.LANGFUSE_PROMPT_LABEL?.trim();
+  if (!label) return options.fallback ?? null;
+
   try {
     if (options.type === 'chat') {
       return await langfuse.prompt.get(name, {
-        label: options.label,
+        label,
         type: 'chat'
       });
     }
 
     return await langfuse.prompt.get(name, {
-      label: options.label,
+      label,
       type: 'text',
       fallback: options.fallback
     });

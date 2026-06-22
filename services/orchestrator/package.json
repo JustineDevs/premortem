@@ -8,15 +8,23 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./dist/services/orchestrator/src/index.js"
+    },
+    "./read-model": {
+      "types": "./src/read-model/index.ts",
+      "default": "./dist/services/orchestrator/src/read-model/index.js"
+    },
+    "./render-gitlab-issue": {
+      "types": "./src/publishing/render-gitlab-issue.ts",
+      "default": "./dist/services/orchestrator/src/publishing/render-gitlab-issue.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "postbuild": "node ../../scripts/fix-esm-imports.mjs dist",
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@premortem/agent-builder": "workspace:*",
     "@premortem/domain": "workspace:*",
     "@premortem/agent-kit": "workspace:*",
     "@premortem/db": "workspace:*",
@@ -24,7 +32,6 @@
     "@premortem/graph-model": "workspace:*",
     "@premortem/llm": "workspace:*",
     "@premortem/workflow": "workspace:*",
-    "@premortem/storage": "workspace:*",
     "@premortem/observability": "workspace:*"
   },
   "devDependencies": {

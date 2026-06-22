@@ -3,7 +3,7 @@ import { observabilityReferenceDoc } from '@/content/marketing/docs-additional-c
 
 import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
 export const metadata = buildSeoMetadata({
-  title: 'Observability | Premortem Docs',
+  title: 'Observability',
   description: observabilityReferenceDoc.lead,
   canonical: '/docs/reference/observability',
   keywords: canonicalDocsKeywords

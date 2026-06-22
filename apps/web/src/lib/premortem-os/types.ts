@@ -1,3 +1,5 @@
+import type { EvidenceRefLike } from '@premortem/domain';
+
 export type ProviderType = 'github' | 'gitlab' | 'bitbucket' | 'aws' | 'azure' | 'gitea' | 'gcp' | 'custom_git';
 
 export interface Project {
@@ -50,11 +52,13 @@ export interface Finding {
   line: number;
   description: string;
   evidence: string;
+  evidenceRefs?: EvidenceRefLike[];
   trace: TraceStep[];
   recommendation: string;
   aiReasoning: string;
   patchApplied?: boolean;
   suggestedPatchCode?: string;
+  publishedIssueBodyMarkdown?: string;
   expectedBehavior?: string;
   successCriteria?: string;
   whyItMatters?: string;
@@ -101,7 +105,7 @@ export interface AuditRun {
   lineage?: RuntimeLineageEntry[];
   graphSnapshot?: RuntimeGraphSnapshot | null;
   runtimeEventTypes?: string[];
-  /** Local playground scan only; never persisted to workspace audit history. */
+  /** Local snippet analysis only; never persisted to workspace audit history. */
   isSandbox?: boolean;
 }
 

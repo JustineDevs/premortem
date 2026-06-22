@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 import { integrationConnectOptions, type IntegrationProviderId } from '@/lib/integration-connect';
 import { integrationConnectHref } from '@/lib/integration-connect';
+import { getPublicAppOrigin, getRequestOrigin } from '@/lib/runtime-config';
 
 function safeNextPath(value: string | null) {
   if (!value || !value.startsWith('/') || value.startsWith('//')) return '/app?tab=settings';
@@ -21,9 +22,10 @@ export async function GET(
   }
 
   const next = safeNextPath(request.nextUrl.searchParams.get('next'));
+  const origin = getPublicAppOrigin(getRequestOrigin(request));
 
   if (option.status === 'coming_soon') {
-    const redirectUrl = new URL(next, request.url);
+    const redirectUrl = new URL(next, origin);
     redirectUrl.searchParams.set('integration_notice', 'coming_soon');
     redirectUrl.searchParams.set('integration_provider', providerId);
     return NextResponse.redirect(redirectUrl);
@@ -34,8 +36,8 @@ export async function GET(
     if (request.nextUrl.searchParams.get('discover') === '1') {
       params.set('discover', '1');
     }
-    return NextResponse.redirect(new URL(`/api/integrations/connect/gitlab?${params.toString()}`, request.url));
+    return NextResponse.redirect(new URL(`/api/integrations/connect/gitlab?${params.toString()}`, origin));
   }
 
-  return NextResponse.redirect(integrationConnectHref(providerId, next));
+  return NextResponse.redirect(integrationConnectHref(providerId, next, origin));
 }

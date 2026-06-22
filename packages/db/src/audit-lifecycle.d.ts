@@ -1,0 +1,114 @@
+import { type AuditCheckpoint } from '@premortem/domain';
+import type { Prisma } from '@prisma/client';
+export declare function inferCheckpointFromAuditRun(auditRunId: string): Promise<AuditCheckpoint>;
+export declare function saveAuditCheckpoint(auditRunId: string, checkpoint: AuditCheckpoint, reason?: string): Promise<AuditCheckpoint>;
+export declare function getAuditRunControlState(auditRunId: string): Promise<{
+    runStatus: import("@prisma/client").$Enums.RunStatus;
+    summary: Prisma.JsonValue;
+    checkpoint: AuditCheckpoint | null;
+    cancelReason: string | null;
+}>;
+export declare function extendAuditLease(auditRunId: string, leaseMs?: number): Promise<Date>;
+export declare function pauseAuditRun(auditRunId: string, reason?: string): Promise<{
+    projectId: string;
+    branch: string;
+    summary: Prisma.JsonValue;
+    updatedAt: Date;
+    id: string;
+    createdAt: Date;
+    organizationId: string;
+    commitSha: string | null;
+    triggerSource: import("@prisma/client").$Enums.AuditTriggerSource;
+    triggeredById: string | null;
+    runStatus: import("@prisma/client").$Enums.RunStatus;
+    startedAt: Date | null;
+    completedAt: Date | null;
+    leaseExpiresAt: Date | null;
+    cancelledAt: Date | null;
+    cancelReason: string | null;
+    durationMs: bigint | null;
+    graphSnapshotId: string | null;
+    errorMessage: string | null;
+}>;
+export declare function resumeAuditRun(auditRunId: string): Promise<{
+    projectId: string;
+    branch: string;
+    summary: Prisma.JsonValue;
+    updatedAt: Date;
+    id: string;
+    createdAt: Date;
+    organizationId: string;
+    commitSha: string | null;
+    triggerSource: import("@prisma/client").$Enums.AuditTriggerSource;
+    triggeredById: string | null;
+    runStatus: import("@prisma/client").$Enums.RunStatus;
+    startedAt: Date | null;
+    completedAt: Date | null;
+    leaseExpiresAt: Date | null;
+    cancelledAt: Date | null;
+    cancelReason: string | null;
+    durationMs: bigint | null;
+    graphSnapshotId: string | null;
+    errorMessage: string | null;
+}>;
+export declare function cancelAuditRun(auditRunId: string, reason?: string): Promise<{
+    projectId: string;
+    branch: string;
+    summary: Prisma.JsonValue;
+    updatedAt: Date;
+    id: string;
+    createdAt: Date;
+    organizationId: string;
+    commitSha: string | null;
+    triggerSource: import("@prisma/client").$Enums.AuditTriggerSource;
+    triggeredById: string | null;
+    runStatus: import("@prisma/client").$Enums.RunStatus;
+    startedAt: Date | null;
+    completedAt: Date | null;
+    leaseExpiresAt: Date | null;
+    cancelledAt: Date | null;
+    cancelReason: string | null;
+    durationMs: bigint | null;
+    graphSnapshotId: string | null;
+    errorMessage: string | null;
+}>;
+export declare function isAuditLeaseExpired(auditRunId: string): Promise<boolean>;
+export declare function createReconciliationEvent(input: {
+    organizationId: string;
+    publishedIssueId: string;
+    status: 'matched' | 'drifted' | 'failed';
+    driftFields?: string[];
+    localSnapshot?: Record<string, unknown>;
+    remoteSnapshot?: Record<string, unknown>;
+    errorMessage?: string;
+}): Promise<{
+    status: import("@prisma/client").$Enums.ReconciliationStatus;
+    id: string;
+    createdAt: Date;
+    organizationId: string;
+    errorMessage: string | null;
+    driftFields: Prisma.JsonValue;
+    localSnapshot: Prisma.JsonValue;
+    remoteSnapshot: Prisma.JsonValue;
+    publishedIssueId: string;
+}>;
+export declare function listReconciliationEvents(organizationId: string, limit?: number): Promise<({
+    publishedIssue: {
+        id: string;
+        url: string | null;
+        externalIssueIid: string | null;
+        syncStatus: import("@prisma/client").$Enums.PublishSyncStatus;
+        publishedTitle: string;
+    };
+} & {
+    status: import("@prisma/client").$Enums.ReconciliationStatus;
+    id: string;
+    createdAt: Date;
+    organizationId: string;
+    errorMessage: string | null;
+    driftFields: Prisma.JsonValue;
+    localSnapshot: Prisma.JsonValue;
+    remoteSnapshot: Prisma.JsonValue;
+    publishedIssueId: string;
+})[]>;
+//# sourceMappingURL=audit-lifecycle.d.ts.map

@@ -2,6 +2,8 @@
 export const RunStatus = {
     QUEUED: 'queued',
     RUNNING: 'running',
+    PARTIAL: 'partial',
+    PAUSED: 'paused',
     COMPLETED: 'completed',
     FAILED: 'failed',
     CANCELLED: 'cancelled',
@@ -10,6 +12,7 @@ export const RunStatus = {
 /** Console audit run badge states (subset of run lifecycle). */
 export const ConsoleRunStatus = {
     RUNNING: 'RUNNING',
+    PAUSED: 'PAUSED',
     COMPLETED: 'COMPLETED',
     FAILED: 'FAILED'
 };
@@ -18,6 +21,9 @@ export function runStatusToConsoleRunStatus(runStatus) {
         return ConsoleRunStatus.COMPLETED;
     if (runStatus === RunStatus.FAILED)
         return ConsoleRunStatus.FAILED;
+    if (runStatus === RunStatus.PAUSED || runStatus === RunStatus.PARTIAL) {
+        return ConsoleRunStatus.PAUSED;
+    }
     return ConsoleRunStatus.RUNNING;
 }
 /** Persisted project connection states: mirrors Prisma `ProjectStatus`. */

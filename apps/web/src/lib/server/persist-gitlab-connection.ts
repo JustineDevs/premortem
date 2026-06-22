@@ -39,10 +39,7 @@ export async function persistGitLabConnection(input: {
     });
 
     if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      const message =
-        typeof payload.error === 'string' ? payload.error : `persist_failed:${response.status}`;
-      return { ok: false, error: message };
+      return { ok: false, error: 'persist_failed' };
     }
 
     trackServerEvent(input.context.profileId, CanonicalEvents.gitlabConnected, {
@@ -54,7 +51,7 @@ export async function persistGitLabConnection(input: {
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'oauth_failed'
+      error: 'oauth_failed'
     };
   }
 }

@@ -73,8 +73,8 @@ export function MarketingDocSidebar() {
             {section.title}
           </summary>
           <ul className="landing-doc-nav__list">
-            {section.items.map((item) => (
-              <li key={item.href}>
+            {section.items.map((item, index) => (
+              <li key={`${item.href}:${item.label}:${index}`}>
                 <DocsNavLink href={item.href} matchPrefix={item.href !== marketingLinks.docs} scroll={false}>
                   <span className="landing-doc-nav__label">{item.label}</span>
                   {item.description ? (

@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { ChevronRight, Info, Workflow, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, Info, Workflow, X } from 'lucide-react';
 
 import type { Finding } from '@/lib/premortem-os/types';
 import type { CanvasEdge, CanvasNode } from './workflow-canvas.types';
@@ -24,6 +24,9 @@ interface WorkflowStepWorkbenchProps {
   onClearSelection: () => void;
   onSelectStep: (stepId: string) => void;
   onNavigateTab: (tab: string) => void;
+  onToggleCollapse?: () => void;
+  canCollapse?: boolean;
+  isCollapsed?: boolean;
 }
 
 export function WorkflowStepWorkbench({
@@ -39,7 +42,10 @@ export function WorkflowStepWorkbench({
   onSelectFinding,
   onClearSelection,
   onSelectStep,
-  onNavigateTab
+  onNavigateTab,
+  onToggleCollapse,
+  canCollapse = false,
+  isCollapsed = false
 }: WorkflowStepWorkbenchProps) {
   const activeNodeIndex = activeNode ? nodes.findIndex((node) => node.id === activeNode.id) : -1;
 
@@ -48,47 +54,75 @@ export function WorkflowStepWorkbench({
       className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-white"
       id="canvas-inspect-panel"
     >
-      <div className="flex shrink-0 items-center justify-between border-b border-[#EAE6DF] bg-[#FAF8F5]/50 p-4 px-6">
+      <div className="flex shrink-0 items-center justify-between border-b border-[#EAE6DF] bg-[#FAF8F5]/50 px-5 py-4">
         <div className="space-y-0.5">
           <span className="block font-mono text-[9px] font-bold uppercase tracking-widest text-[#8A958F]">
             Workbench
           </span>
-          <h3 className="font-display text-md font-bold tracking-tight text-[#1E2522]">
+          <h3 className="font-display text-[15px] font-bold tracking-tight text-[#1E2522]">
             {activeNode ? activeNode.metadata.title : activeEdge ? activeEdge.label : 'Segment inspection'}
           </h3>
         </div>
 
-        {(activeNode || activeEdge) && (
-          <button
-            type="button"
-            onClick={onClearSelection}
-            aria-label="Clear selection"
-            className="cursor-pointer rounded p-1.5 text-[#8A958F] transition-all hover:bg-[#FAF8F5] hover:text-[#1E2522]"
-          >
-            <X size={15} />
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {(activeNode || activeEdge) && (
+            <button
+              type="button"
+              onClick={onClearSelection}
+              aria-label="Clear selection"
+              className="cursor-pointer rounded p-1.5 text-[#8A958F] transition-all hover:bg-[#FAF8F5] hover:text-[#1E2522]"
+            >
+              <X size={15} />
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-6 text-xs [scrollbar-gutter:stable]">
+      <div className="border-b border-[#EAE6DF] bg-white px-5 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <span className="block font-mono text-[8.5px] font-bold uppercase tracking-[0.24em] text-[#8A958F]">
+              Segment inspection
+            </span>
+            <p className="text-[10px] leading-snug text-[#717A75]">
+              Review evidence, metadata, and downstream actions for the selected node or edge.
+            </p>
+          </div>
+
+          {canCollapse && onToggleCollapse ? (
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              aria-label={isCollapsed ? 'Show segment inspection' : 'Hide segment inspection'}
+              title={isCollapsed ? 'Show segment inspection' : 'Hide segment inspection'}
+              className="inline-flex items-center gap-1 rounded border border-[#CDC7BD] bg-white px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-[#5C6560] transition-colors hover:bg-[#FAF8F5] hover:text-[#1E2522]"
+            >
+              {isCollapsed ? <ChevronDown size={12} aria-hidden /> : <ChevronUp size={12} aria-hidden />}
+              {isCollapsed ? 'Show' : 'Hide'}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className={`min-h-0 flex-1 overflow-y-auto overscroll-contain text-xs [scrollbar-gutter:stable] ${isCollapsed ? 'hidden' : 'p-5'}`}>
         {activeNode ? (
           <div className="space-y-6 pb-4">
             {activeNode.id === 'node-run-audit' && (
               <WorkflowDualLanePanel auditSnapshot={auditSnapshot} compact />
             )}
 
-            <div className="grid grid-cols-2 gap-3 pb-2">
-              <div className="flex flex-col justify-between rounded border border-[#EAE6DF] bg-[#FAF8F5] p-3">
+            <div className="grid grid-cols-1 gap-3 pb-2 md:grid-cols-2">
+              <div className="flex min-h-[5.25rem] flex-col justify-between rounded border border-[#EAE6DF] bg-[#FAF8F5] p-3.5">
                 <span className="mb-1 block font-mono text-[8px] font-bold uppercase tracking-wider text-[#8A958F]">
                   Run duration
                 </span>
                 <span className="font-mono text-[11.5px] font-bold text-emerald-950">
                   {isSimulating && simulationIndex === activeNodeIndex
-                    ? 'calculating...'
-                    : activeNode.metadata.duration || '310ms'}
+                    ? 'replaying...'
+                    : activeNode.metadata.duration || 'pending'}
                 </span>
               </div>
-              <div className="flex flex-col justify-between rounded border border-[#EAE6DF] bg-[#FAF8F5] p-3">
+              <div className="flex min-h-[5.25rem] flex-col justify-between rounded border border-[#EAE6DF] bg-[#FAF8F5] p-3.5">
                 <span className="mb-1 block font-mono text-[8px] font-bold uppercase tracking-wider text-[#8A958F]">
                   Audit step status
                 </span>
@@ -109,23 +143,23 @@ export function WorkflowStepWorkbench({
             </div>
 
             {(activeNode.metadata.promptVersion || activeNode.metadata.agentConfig) && (
-              <div className="space-y-2 rounded border border-zinc-200 bg-neutral-50 p-3">
+              <div className="space-y-2 rounded border border-zinc-200 bg-neutral-50 p-3.5">
                 <span className="block font-mono text-[8px] font-bold uppercase tracking-wider text-[#8A958F]">
                   Trace orchestration context
                 </span>
-                <div className="grid grid-cols-1 gap-1.5 font-mono text-[10px] leading-tight text-zinc-700">
+                <div className="grid grid-cols-1 gap-2 font-mono text-[10px] leading-tight text-zinc-700">
                   {activeNode.metadata.promptVersion && (
-                    <div className="flex items-center justify-between rounded border border-zinc-200 bg-white p-1.5 px-2.5">
+                    <div className="flex items-start justify-between gap-3 rounded border border-zinc-200 bg-white p-2.5">
                       <span className="text-[#8A958F]">PROMPT:</span>
-                      <span className="max-w-[190px] truncate font-bold text-neutral-800">
+                      <span className="min-w-0 flex-1 break-words text-right font-bold text-neutral-800">
                         {activeNode.metadata.promptVersion}
                       </span>
                     </div>
                   )}
                   {activeNode.metadata.agentConfig && (
-                    <div className="flex items-center justify-between rounded border border-zinc-200 bg-white p-1.5 px-2.5">
+                    <div className="flex items-start justify-between gap-3 rounded border border-zinc-200 bg-white p-2.5">
                       <span className="text-[#8A958F]">AI CLIENT:</span>
-                      <span className="max-w-[190px] truncate font-bold text-neutral-800">
+                      <span className="min-w-0 flex-1 break-words text-right font-bold text-neutral-800">
                         {activeNode.metadata.agentConfig}
                       </span>
                     </div>
@@ -320,7 +354,7 @@ export function WorkflowStepWorkbench({
             )}
           </div>
         ) : activeEdge ? (
-          <div className="space-y-4">
+          <div className="space-y-4 pb-4">
             <div className="space-y-1 rounded border border-emerald-200 bg-emerald-50 p-4 text-emerald-800">
               <span className="font-mono text-[9px] font-bold uppercase tracking-wider">
                 Gateway transformer

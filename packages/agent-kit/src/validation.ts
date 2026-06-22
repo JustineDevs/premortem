@@ -33,15 +33,15 @@ function padArray<T>(values: T[], minimumLength: number): T[] {
   return padded;
 }
 
-function asStringArray(value: unknown, minimumLength = 0): string[] {
+function asStringArray(value: unknown, minimumLength = 0, minimumStringLength = 1): string[] {
   if (Array.isArray(value)) {
     return padArray(
-      value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0),
+      value.filter((entry): entry is string => typeof entry === 'string' && entry.length >= minimumStringLength),
       minimumLength
     );
   }
 
-  if (typeof value === 'string' && value.length > 0) {
+  if (typeof value === 'string' && value.length >= minimumStringLength) {
     return padArray([value], minimumLength);
   }
 
@@ -61,6 +61,15 @@ function toConfidenceNumber(value: unknown): number {
   }
 
   return 0;
+}
+
+function normalizeSeverity(value: unknown): 'low' | 'medium' | 'high' | 'critical' | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'low' || normalized === 'medium' || normalized === 'high' || normalized === 'critical') {
+    return normalized;
+  }
+  return 'low';
 }
 
 function firstStringAt(value: unknown, index: number): string | undefined {
@@ -109,7 +118,7 @@ function normalizeEvidenceRefs(value: unknown, minimumLength = 0) {
       if (!ref) return null;
 
       const reason =
-        typeof record.reason === 'string' && record.reason.length > 0
+        typeof record.reason === 'string' && record.reason.length >= 4
           ? record.reason
           : 'Referenced by model output';
 
@@ -139,7 +148,7 @@ function normalizeFindingRecord(record: Record<string, unknown>) {
   if (typeof predictedFailure === 'string') {
     finding.predicted_failure = {
       summary: predictedFailure,
-      trigger_conditions: asStringArray(finding.trigger_conditions).slice(0, 2)
+      trigger_conditions: asStringArray(finding.trigger_conditions, 2, 4).slice(0, 2)
     };
   } else if (predictedFailure && typeof predictedFailure === 'object') {
     const nested: Record<string, unknown> = { ...(predictedFailure as Record<string, unknown>) };
@@ -151,31 +160,55 @@ function normalizeFindingRecord(record: Record<string, unknown>) {
           : typeof finding.summary === 'string' && finding.summary.length > 0
             ? finding.summary
             : 'Model output did not include a predicted failure summary.';
-    nested.trigger_conditions = asStringArray(nested.trigger_conditions, 2);
+    nested.trigger_conditions = asStringArray(nested.trigger_conditions, 2, 4);
     finding.predicted_failure = nested;
   } else if (typeof finding.predicted_failure_summary === 'string') {
     finding.predicted_failure = {
       summary: finding.predicted_failure_summary,
-      trigger_conditions: asStringArray(finding.trigger_conditions, 2)
+      trigger_conditions: asStringArray(finding.trigger_conditions, 2, 4)
     };
   }
 
+  const normalizedPredictedFailure = finding.predicted_failure as Record<string, unknown> | undefined;
+  const fallbackSummary =
+    typeof finding.predicted_failure_summary === 'string' && finding.predicted_failure_summary.length >= 10
+      ? finding.predicted_failure_summary
+      : typeof finding.summary === 'string' && finding.summary.length >= 10
+        ? finding.summary
+        : `Predicted failure for ${String(finding.category ?? 'repository surface')} needs review.`;
+  if (normalizedPredictedFailure) {
+    const summary =
+      typeof normalizedPredictedFailure.summary === 'string' && normalizedPredictedFailure.summary.length >= 10
+        ? normalizedPredictedFailure.summary
+        : fallbackSummary;
+    normalizedPredictedFailure.summary = summary;
+    finding.predicted_failure = normalizedPredictedFailure;
+  }
+
   finding.confidence = toConfidenceNumber(finding.confidence);
-  finding.affected_assets = asStringArray(finding.affected_assets, 1);
+  finding.severity = normalizeSeverity(finding.severity) ?? finding.severity;
+  const normalizedAffectedAssets = asStringArray(finding.affected_assets, 1);
+  finding.affected_assets = normalizedAffectedAssets;
+  if (normalizedAffectedAssets.length === 0) {
+    finding.affected_assets = [primaryAsset];
+  }
   const normalizedEvidence = normalizeEvidenceRefs(finding.evidence, 2);
   finding.evidence = normalizedEvidence;
-  const normalizedRecommendedControls = asStringArray(finding.recommended_controls, 2);
+  const normalizedRecommendedControls = asStringArray(finding.recommended_controls, 2, 4);
   finding.recommended_controls = normalizedRecommendedControls;
-  finding.dedupe_keys = asStringArray(finding.dedupe_keys, 1);
+  const normalizedDedupeKeys = asStringArray(finding.dedupe_keys, 1);
+  finding.dedupe_keys = normalizedDedupeKeys;
+  if (normalizedDedupeKeys.length === 0) {
+    finding.dedupe_keys = [String(finding.finding_id ?? primaryAsset)];
+  }
   finding.tags = asStringArray(finding.tags);
 
   if (typeof finding.why_it_matters !== 'string' && typeof finding.whyItMatters === 'string') {
     finding.why_it_matters = finding.whyItMatters;
   }
 
-  const normalizedPredictedFailure = finding.predicted_failure as Record<string, unknown> | undefined;
   if (!Array.isArray(normalizedPredictedFailure?.trigger_conditions)) {
-    const triggerConditions = asStringArray(finding.trigger_conditions, 2);
+    const triggerConditions = asStringArray(finding.trigger_conditions, 2, 4);
     finding.predicted_failure = {
       ...(normalizedPredictedFailure ?? {}),
       trigger_conditions: triggerConditions.length >= 2 ? triggerConditions : [...triggerConditions, ...triggerConditions].slice(0, 2)
@@ -230,13 +263,14 @@ function normalizeIssueRecord(record: Record<string, unknown>) {
   const secondaryAsset = firstStringAt(issue.affected_assets, 1) || primaryAsset;
 
   issue.confidence = toConfidenceNumber(issue.confidence);
-  const normalizedTriggerConditions = asStringArray(issue.trigger_conditions, 2);
+  issue.severity = normalizeSeverity(issue.severity) ?? issue.severity;
+  const normalizedTriggerConditions = asStringArray(issue.trigger_conditions, 2, 4);
   issue.trigger_conditions = normalizedTriggerConditions;
   const normalizedEvidence = normalizeEvidenceRefs(issue.evidence, 2);
   issue.evidence = normalizedEvidence;
-  const normalizedImplementationSteps = asStringArray(issue.implementation_steps, 2);
+  const normalizedImplementationSteps = asStringArray(issue.implementation_steps, 2, 4);
   issue.implementation_steps = normalizedImplementationSteps;
-  const normalizedDoneCriteria = asStringArray(issue.done_criteria, 2);
+  const normalizedDoneCriteria = asStringArray(issue.done_criteria, 2, 4);
   issue.done_criteria = normalizedDoneCriteria;
   const normalizedAffectedAssets = asStringArray(issue.affected_assets, 1);
   issue.affected_assets = normalizedAffectedAssets;
@@ -257,11 +291,26 @@ function normalizeIssueRecord(record: Record<string, unknown>) {
     issue.predicted_failure_summary = issue.predictedFailureSummary;
   }
 
+  if (typeof issue.predicted_failure_summary !== 'string' || issue.predicted_failure_summary.length < 10) {
+    issue.predicted_failure_summary =
+      typeof issue.title === 'string' && issue.title.length >= 10
+        ? issue.title
+        : `Predicted failure for ${String(issue.category ?? 'repository surface')} needs review.`;
+  }
+
+  if (typeof issue.why_it_matters !== 'string' || issue.why_it_matters.length < 10) {
+    issue.why_it_matters = `This issue remains important because ${String(issue.category ?? 'the surface')} still lacks a durable control.`;
+  }
+
   if (normalizedTriggerConditions.length === 0) {
     issue.trigger_conditions = [
       `Changes to ${primaryAsset} can still reach review without a gate.`,
       `The ${String(issue.category ?? 'delivery')} path still lacks a safe rollback check.`
     ];
+  }
+
+  if (normalizedAffectedAssets.length === 0) {
+    issue.affected_assets = [primaryAsset];
   }
 
   if (normalizedEvidence.length === 0) {

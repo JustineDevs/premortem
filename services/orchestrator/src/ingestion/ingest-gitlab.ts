@@ -43,6 +43,23 @@ function uniqueTopLevelDirs(paths: string[], prefix: string) {
   return [...names];
 }
 
+function isGitLabMcpUnavailableError(error: unknown) {
+  const message =
+    error instanceof Error ? `${error.name}: ${error.message}` : String(error ?? '');
+  return [
+    '404 Not Found',
+    '404',
+    '502 Bad Gateway',
+    '503 Service Unavailable',
+    'ECONNREFUSED',
+    'ENOTFOUND',
+    'EAI_AGAIN',
+    'Failed to fetch',
+    'fetch failed',
+    'Streamable HTTP error'
+  ].some((needle) => message.includes(needle));
+}
+
 export async function ingestGitLabProject(input: {
   baseUrl: string;
   token: string;
@@ -200,9 +217,17 @@ export async function ingestGitLabProject(input: {
         mcpOpenIssueCount: mcpContext.existing_issues.length
       };
     } catch (error) {
-      throw new Error(
-        `GitLab MCP ingest failed: ${error instanceof Error ? error.message : String(error)}`
-      );
+      if (isGitLabMcpUnavailableError(error)) {
+        mcpMetadata = {
+          ingestionTransport: 'gitlab-rest-fallback',
+          mcpUnavailable: true,
+          mcpUnavailableReason: error instanceof Error ? error.message : String(error)
+        };
+      } else {
+        throw new Error(
+          `GitLab MCP ingest failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
     }
   } else {
     mcpMetadata = { ingestionTransport: 'gitlab-mcp-disabled' };

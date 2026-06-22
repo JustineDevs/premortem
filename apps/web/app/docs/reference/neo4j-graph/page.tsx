@@ -3,7 +3,7 @@ import { neo4jGraphReferenceDoc } from '@/content/marketing/docs-additional-cont
 
 import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
 export const metadata = buildSeoMetadata({
-  title: 'Neo4j & graph store | Premortem Docs',
+  title: 'Neo4j & graph store',
   description: neo4jGraphReferenceDoc.lead,
   canonical: '/docs/reference/neo4j-graph',
   keywords: canonicalDocsKeywords

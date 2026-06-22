@@ -59,7 +59,7 @@ For each GitLab project, Premortem asks **what could go wrong here?** as a struc
 
 The reviewer console at `/app` exposes traceability: which lens surfaced a finding, supporting evidence, agent runs, and workflow canvas views over the audit pipeline and repository graph. Continuous audit mode can rotate scans when idle; Stop all returns control to manual runs.
 
-**Stack (as implemented):** Next.js BFF and reviewer UI, Cloudflare Workers API and Queues, `@premortem/orchestrator` swarm execution with Gemini (and optional Azure OpenAI), GitLab OAuth plus REST ingest and issue publish, Supabase Postgres via Prisma, optional Neo4j graph snapshots. The optional `services/agent-builder` package now includes a Cloud Run-ready ADK runtime path with Gemini API or Vertex AI, optional database-backed sessions, and built-in Gemini safety settings; production audits still run through the orchestrator pipeline, not a hosted Agent Builder-only runtime.
+**Stack (as implemented):** Next.js BFF and reviewer UI, Cloudflare Workers API and Queues, `@premortem/orchestrator` swarm execution with Gemini, GitLab OAuth plus REST ingest and issue publish, Supabase Postgres via Prisma, optional Neo4j graph snapshots. The optional `services/agent-builder` package now includes a Cloud Run-ready ADK runtime path with Gemini API or Vertex AI, optional database-backed sessions, and built-in Gemini safety settings; production audits still run through the orchestrator pipeline, not a hosted Agent Builder-only runtime.
 
 **On the roadmap:** cross-repo boundary analysis, performance and SLO lenses, organization policy packs, CLI and GitLab pipeline gates for release blocking.
 
@@ -108,6 +108,20 @@ At the system level, those responsibilities map to cooperating layers:
 * **Commercial gating**: Stripe plan state with server-side entitlements (`PLAN_LIMITS`) for repos, audits, and publish capability.
 * **Observability hooks**: Sentry and PostHog wiring for runtime errors and product analytics.
 * **Agent eval gate**: promptfoo-backed prompt evaluation for canonical Premortem prompt surfaces, with Langfuse-ready prompt management hooks.
+
+## FAQ / Security Defensibility
+
+- **Does Premortem store repository code?** The system is designed to process repository context through background workers and persist structured artifacts such as findings, clusters, audit snapshots, and review history. The reviewer console is the durable operational surface, not a second code mirror.
+- **How does Premortem reduce alert fatigue?** Parallel worker lanes do not publish directly. Findings flow through consensus validation, clustering, and a reviewer gate so single-lane noise does not become a public issue candidate.
+- **Which integrations are live today?** GitLab repository connect, publish, and reconciliation are shipped. GitHub sign-in and auth primitives exist, but GitHub repository integration, Bitbucket, Azure DevOps, and Gitea remain roadmap surfaces and are labeled as coming soon in the UI.
+- **How are tenant boundaries enforced?** Organization-scoped queries, Supabase RLS, and server-side session context keep workspace data separated. Webhooks are validated before they can trigger audit work.
+- **What about data retention and AI privacy?** Premortem can be configured to use provider contracts that explicitly offer zero data retention or no-training guarantees. Those guarantees come from the chosen provider contract, not from the UI alone.
+- **Can this be reviewed by enterprise security teams?** Yes. The project now has a public enterprise readiness doc, a scoped provider matrix, consensus validation for worker output, and an audit trail story aligned to review and compliance workflows.
+
+Public docs:
+
+- [Security & trust boundaries](https://premortem.jstn.site/docs/concepts/security)
+- [Enterprise readiness](https://premortem.jstn.site/docs/architecture/enterprise-readiness)
 
 ---
 
@@ -249,9 +263,9 @@ Legacy `/reviews` redirects to `/app`.
 Out of scope for `v0.1.0`: GitHub parity, enterprise SSO rollout, multi-provider expansion, and full live-mode Stripe Checkout without dashboard account setup.
 
 <details>
-<summary><strong>Before You Push or Demo</strong></summary>
+<summary><strong>Before You Push or Release</strong></summary>
 
-Run this gate locally before a demo or remote push. All commands assume repo-root `.env.local` is filled in.
+Run this gate locally before a release review or remote push. All commands assume repo-root `.env.local` is filled in.
 
 ```bash
 pnpm run verify:env                    # credentials + integrations wired
@@ -260,10 +274,10 @@ pnpm run smoke:hackathon               # GitLab, Gemini, Phoenix, agent builder
 pnpm --filter @premortem/web build     # production Next.js build
 pnpm --filter @premortem/web typecheck
 pnpm --filter @premortem/api typecheck
-pnpm run db:reset-billing              # optional: reset tiers to Free for upgrade demo
+pnpm run db:reset-billing              # optional: reset tiers to Free for upgrade verification
 ```
 
-Demo path with real users:
+Verification path with real users:
 
 1. `pnpm run dev` (configured mode: no `PREMORTEM_AUTH_DISABLED`)
 2. Sign in at `/login` (Supabase + GitLab OAuth)
@@ -302,6 +316,7 @@ Browser clients must never receive raw provider secrets, Supabase service-role k
 Public tracked docs:
 
 - [ADR 0001: Canonical product and system design](./docs/architecture/adr-0001-canonical-product-and-system-design.md)
+- [Enterprise readiness](./docs/architecture/enterprise-readiness.md)
 - [Canonical behavior rules](./.agents/rules/README.md) (mission, prediction policy, workflows, retention, failure handling)
 - [Product flows](./docs/product/flows.md)
 - [Session design](./docs/security/session-design.md)
@@ -377,7 +392,6 @@ Premortem is built on open source, managed services, and community projects. We 
 | <a href="https://ai.google.dev/"><img src="./public/logo/brand/gemini-color.png" alt="Google Gemini" width="28" height="28" align="middle" /></a> [Google Gemini API](https://ai.google.dev/) | Primary LLM executor for specialist swarm |
 | <a href="./services/orchestrator/"><img src="./public/logo/svg/premortem-mark.svg" alt="Premortem orchestrator" width="28" height="28" align="middle" /></a> [@premortem/orchestrator](./services/orchestrator/) | Queue-backed audit pipeline, specialist swarm, clustering, and publish path (primary runtime) |
 | [Optional `services/agent-builder`](./services/agent-builder/) | Mission trace bootstrap hooks used by the orchestrator; not the sole production runtime |
-| <a href="https://azure.microsoft.com/products/ai-services/openai-service"><img src="./public/logo/brand/azure-openai.svg" alt="Microsoft Azure OpenAI" width="28" height="28" align="middle" /></a> [Azure OpenAI](https://azure.microsoft.com/products/ai-services/openai-service) | Optional alternate LLM backend |
 | <a href="https://zod.dev/"><img src="https://cdn.simpleicons.org/zod/3E67B1" alt="Zod" width="28" height="28" align="middle" /></a> [Zod](https://zod.dev/) | Structured LLM and API output validation |
 | <a href="https://www.promptfoo.dev/"><img src="https://www.promptfoo.dev/favicon.ico" alt="promptfoo" width="28" height="28" align="middle" /></a> [promptfoo](https://www.promptfoo.dev/) | Canonical prompt evaluation gate (`pnpm run eval:prompts`) |
 
@@ -408,6 +422,13 @@ Premortem is built on open source, managed services, and community projects. We 
 <summary><strong>Development tooling</strong></summary>
 
 Cursor MCP plugins and documented servers used during development and ops (Sentry, PostHog, Stripe, Prisma, Cloudflare Docs, GitLab MCP, Postgres toolbox) are described in repo-root `mcp.local.json` and verified via `node scripts/mcp/verify-all.mjs`.
+
+#### Repository hygiene
+
+| Project | Role in Premortem |
+| --- | --- |
+| [Knip](https://knip.dev/) | Dead-code, unused dependency, and export hygiene checks (`pnpm run lint:deadcode`) |
+| [TruffleHog](https://trufflesecurity.com/trufflehog) | Secret scanning for the working tree and git history (`pnpm run scan:secrets`) |
 
 If we missed a dependency you rely on, please open an issue or PR to extend this list.
 

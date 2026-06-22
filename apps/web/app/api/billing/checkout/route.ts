@@ -4,6 +4,9 @@ import { NextResponse } from 'next/server';
 import { getStripeClient, resolveStripePriceId, type BillingInterval, type PaidPlan } from '@/lib/stripe';
 import { mapStripeCheckoutError } from '@/lib/stripe-checkout-error';
 import { resolveRequestActorContext } from '@/lib/server/request-context';
+import { readJsonRecord, readOptionalStringLiteral } from '@/lib/server/request-body';
+
+const BILLING_ROLES = ['owner', 'admin'] as const;
 
 export async function POST(request: Request) {
   const stripe = getStripeClient();
@@ -13,9 +16,12 @@ export async function POST(request: Request) {
 
   try {
     const context = await resolveRequestActorContext(request);
-    const body = (await request.json()) as { plan?: PaidPlan; interval?: BillingInterval };
-    const plan = body.plan ?? 'pro';
-    const interval = body.interval ?? 'monthly';
+    if (!BILLING_ROLES.includes(context.role as (typeof BILLING_ROLES)[number])) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+    const body = (await readJsonRecord(request)) ?? {};
+    const plan = readOptionalStringLiteral(body, 'plan', ['pro', 'team'] as const) ?? 'pro';
+    const interval = readOptionalStringLiteral(body, 'interval', ['monthly', 'yearly'] as const) ?? 'monthly';
     const priceId = resolveStripePriceId(plan, interval);
 
     if (!priceId) {
@@ -79,6 +85,14 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ url: session.url, sessionId: session.id });
   } catch (error) {
+    const message =
+      error instanceof Error ? String((error as { message?: unknown }).message ?? '') : '';
+    if (message === 'Unauthorized') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (/not configured/i.test(message)) {
+      return NextResponse.json({ error: 'Stripe is not configured' }, { status: 503 });
+    }
     const mapped = mapStripeCheckoutError(error);
     return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }

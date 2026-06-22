@@ -1,4 +1,5 @@
 import path from 'node:path';
+import ts from 'typescript';
 import type { GraphSnapshotPayload } from '@premortem/graph-model';
 import type { IngestionBundle } from '../ingestion/ingest-project';
 
@@ -36,49 +37,180 @@ function resolveRelativeImport(fromPath: string, specifier: string, availablePat
 
 function extractImports(content: string) {
   const imports = new Set<string>();
-  const lines = content.split('\n');
+  const sourceFile = ts.createSourceFile(
+    'preview.ts',
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  );
 
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
+  const visit = (node: ts.Node) => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      const moduleSpecifier = node.moduleSpecifier;
+      if (moduleSpecifier && ts.isStringLiteralLike(moduleSpecifier)) {
+        imports.add(moduleSpecifier.text);
+      }
+    }
 
-    const requireIndex = line.indexOf('require(');
-    if (requireIndex >= 0) {
-      const quoteIndex = line.indexOf('"', requireIndex);
-      const singleQuoteIndex = line.indexOf("'", requireIndex);
-      const startIndex =
-        quoteIndex >= 0 && singleQuoteIndex >= 0
-          ? Math.min(quoteIndex, singleQuoteIndex)
-          : Math.max(quoteIndex, singleQuoteIndex);
-      if (startIndex >= 0) {
-        const quote = line[startIndex];
-        const endIndex = line.indexOf(quote, startIndex + 1);
-        if (endIndex > startIndex + 1) {
-          imports.add(line.slice(startIndex + 1, endIndex));
-        }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === 'require' &&
+      node.arguments.length > 0
+    ) {
+      const first = node.arguments[0];
+      if (ts.isStringLiteralLike(first)) {
+        imports.add(first.text);
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return [...imports];
+}
+
+function scriptKindForPath(filePath: string): ts.ScriptKind {
+  if (filePath.endsWith('.tsx')) return ts.ScriptKind.TSX;
+  if (filePath.endsWith('.jsx')) return ts.ScriptKind.JSX;
+  return ts.ScriptKind.TS;
+}
+
+function isParseableSourcePreview(filePath: string) {
+  return SOURCE_EXTENSIONS.some((extension) => filePath.endsWith(extension));
+}
+
+type SourceSymbol = {
+  name: string;
+  kind: 'function' | 'class' | 'interface' | 'type' | 'enum' | 'variable' | 'default-export';
+  exported: boolean;
+  startLine: number;
+  endLine: number;
+};
+
+function lineNumberAt(sourceFile: ts.SourceFile, position: number) {
+  return sourceFile.getLineAndCharacterOfPosition(position).line + 1;
+}
+
+function extractSourceSymbols(filePath: string, content: string): {
+  imports: string[];
+  symbols: SourceSymbol[];
+} {
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    content,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKindForPath(filePath)
+  );
+
+  const imports = extractImports(content);
+  const symbols: SourceSymbol[] = [];
+
+  const exported = (node: ts.Node) =>
+    Boolean(
+      ts.canHaveModifiers(node) &&
+        ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+    );
+
+  for (const statement of sourceFile.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name) {
+      symbols.push({
+        name: statement.name.text,
+        kind: 'function',
+        exported: exported(statement),
+        startLine: lineNumberAt(sourceFile, statement.getStart(sourceFile)),
+        endLine: lineNumberAt(sourceFile, statement.getEnd())
+      });
+      continue;
+    }
+
+    if (ts.isClassDeclaration(statement) && statement.name) {
+      symbols.push({
+        name: statement.name.text,
+        kind: 'class',
+        exported: exported(statement),
+        startLine: lineNumberAt(sourceFile, statement.getStart(sourceFile)),
+        endLine: lineNumberAt(sourceFile, statement.getEnd())
+      });
+      continue;
+    }
+
+    if (ts.isInterfaceDeclaration(statement)) {
+      symbols.push({
+        name: statement.name.text,
+        kind: 'interface',
+        exported: exported(statement),
+        startLine: lineNumberAt(sourceFile, statement.getStart(sourceFile)),
+        endLine: lineNumberAt(sourceFile, statement.getEnd())
+      });
+      continue;
+    }
+
+    if (ts.isTypeAliasDeclaration(statement)) {
+      symbols.push({
+        name: statement.name.text,
+        kind: 'type',
+        exported: exported(statement),
+        startLine: lineNumberAt(sourceFile, statement.getStart(sourceFile)),
+        endLine: lineNumberAt(sourceFile, statement.getEnd())
+      });
+      continue;
+    }
+
+    if (ts.isEnumDeclaration(statement)) {
+      symbols.push({
+        name: statement.name.text,
+        kind: 'enum',
+        exported: exported(statement),
+        startLine: lineNumberAt(sourceFile, statement.getStart(sourceFile)),
+        endLine: lineNumberAt(sourceFile, statement.getEnd())
+      });
+      continue;
+    }
+
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name)) continue;
+
+        const initializer = declaration.initializer;
+        const initializerKind =
+          initializer && ts.isArrowFunction(initializer)
+            ? 'function'
+            : initializer && ts.isFunctionExpression(initializer)
+              ? 'function'
+              : initializer && ts.isClassExpression(initializer)
+                ? 'class'
+                : 'variable';
+
+        symbols.push({
+          name: declaration.name.text,
+          kind: initializerKind,
+          exported: exported(statement),
+          startLine: lineNumberAt(sourceFile, declaration.getStart(sourceFile)),
+          endLine: lineNumberAt(sourceFile, declaration.getEnd())
+        });
       }
       continue;
     }
 
-    const fromIndex = line.lastIndexOf(' from ');
-    const candidate = fromIndex >= 0 ? line.slice(fromIndex + 6) : line;
-    const quoteIndex = candidate.indexOf('"');
-    const singleQuoteIndex = candidate.indexOf("'");
-    const startIndex =
-      quoteIndex >= 0 && singleQuoteIndex >= 0
-        ? Math.min(quoteIndex, singleQuoteIndex)
-        : Math.max(quoteIndex, singleQuoteIndex);
-
-    if (startIndex >= 0) {
-      const quote = candidate[startIndex];
-      const endIndex = candidate.indexOf(quote, startIndex + 1);
-      if (endIndex > startIndex + 1) {
-        imports.add(candidate.slice(startIndex + 1, endIndex));
-      }
+    if (ts.isExportAssignment(statement)) {
+      symbols.push({
+        name: 'default',
+        kind: 'default-export',
+        exported: true,
+        startLine: lineNumberAt(sourceFile, statement.getStart(sourceFile)),
+        endLine: lineNumberAt(sourceFile, statement.getEnd())
+      });
     }
   }
 
-  return [...imports];
+  return {
+    imports,
+    symbols
+  };
 }
 
 export function buildGraphFromIngestion(input: {
@@ -182,6 +314,9 @@ export function buildGraphFromIngestion(input: {
   for (const source of input.bundle.source_files) {
     const history = input.bundle.git_history.find((entry) => entry.path === source.path);
     const nodeId = `source:${source.path}`;
+    const sourceGraph = isParseableSourcePreview(source.path)
+      ? extractSourceSymbols(source.path, source.preview)
+      : { imports: [] as string[], symbols: [] as SourceSymbol[] };
     nodes.push({
       id: nodeId,
       label: source.path,
@@ -190,6 +325,9 @@ export function buildGraphFromIngestion(input: {
         role: source.kind,
         lineCount: source.lineCount,
         preview: source.preview,
+        symbolCount: sourceGraph.symbols.length,
+        importCount: sourceGraph.imports.length,
+        exportedSymbolCount: sourceGraph.symbols.filter((symbol) => symbol.exported).length,
         recentCommitCount: history?.commits.length ?? 0,
         recentAuthors: history ? [...new Set(history.commits.map((commit) => commit.authorName))] : [],
         latestCommitId: history?.commits[0]?.shortId ?? null
@@ -218,7 +356,27 @@ export function buildGraphFromIngestion(input: {
       }
     }
 
-    for (const specifier of extractImports(source.preview)) {
+    for (const symbol of sourceGraph.symbols) {
+      const symbolNodeId = `symbol:${source.path}:${symbol.name}`;
+      nodes.push({
+        id: symbolNodeId,
+        label: symbol.name,
+        kind: 'symbol',
+        props: {
+          sourcePath: source.path,
+          symbolKind: symbol.kind,
+          exported: symbol.exported,
+          startLine: symbol.startLine,
+          endLine: symbol.endLine
+        }
+      });
+      addEdge(nodeId, symbolNodeId, symbol.exported ? 'exports' : 'declares', {
+        symbolKind: symbol.kind,
+        exported: symbol.exported
+      });
+    }
+
+    for (const specifier of sourceGraph.imports) {
       const resolved = resolveRelativeImport(source.path, specifier, availablePaths);
       if (!resolved) continue;
       addEdge(nodeId, `source:${resolved}`, 'imports', { specifier });

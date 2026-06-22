@@ -73,6 +73,60 @@ agents:
       - integration_boundary
     merge_owner_priority: 90
 
+  - name: ci_regression_agent
+    description: Detects flaky CI behavior, masked failures, and regression-prone delivery sequences.
+    prompt: .agents/prompts/ci-regression.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_ci == true
+    input:
+      requires:
+        - ci_config
+        - pipeline_logs
+      optional:
+        - test_scripts
+        - build_artifacts
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - ci_regression
+    merge_owner_priority: 96
+
+  - name: cross_repo_boundary_agent
+    description: Detects risks that span shared packages, consumers, providers, and repo boundaries.
+    prompt: .agents/prompts/cross-repo-boundary.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_source_code == true
+    input:
+      requires:
+        - package_graph
+        - version_pins
+      optional:
+        - release_notes
+        - integration_tests
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - cross_repo_boundary
+    merge_owner_priority: 89
+
+  - name: supply_chain_vulnerability_agent
+    description: Detects dependency vulnerabilities, risky upgrades, and supply-chain exposure.
+    prompt: .agents/prompts/dependency-supply-chain.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_manifest == true
+    input:
+      requires:
+        - manifests
+        - lockfiles
+      optional:
+        - sbom
+        - ci_security_reports
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - supply_chain_vulnerability
+    merge_owner_priority: 87
+
   - name: artifact_integrity_agent
     description: Detects stale generated artifacts and codegen/source-of-truth drift.
     prompt: .agents/prompts/artifact-integrity.md
@@ -90,6 +144,24 @@ agents:
     owns_categories:
       - artifact_integrity
     merge_owner_priority: 85
+
+  - name: api_deprecation_risk_agent
+    description: Detects breaking endpoint, field, and compatibility risks for internal and external clients.
+    prompt: .agents/prompts/api-deprecation-risk.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_source_code == true
+    input:
+      requires:
+        - api_routes
+        - client_usage
+      optional:
+        - versioning_docs
+        - release_notes
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - api_deprecation_risk
+    merge_owner_priority: 86
 
   - name: trust_boundary_agent
     description: Detects unsafe secret handling, token scope problems, and trust-boundary failures.
@@ -110,6 +182,24 @@ agents:
       - secrets
     merge_owner_priority: 95
 
+  - name: security_threat_model_agent
+    description: Detects STRIDE and privacy threats across auth, data flow, and trust boundaries.
+    prompt: .agents/prompts/security-threat-model.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_auth_or_ci == true
+    input:
+      requires:
+        - architecture_docs
+        - auth_config
+      optional:
+        - env_examples
+        - deployment_config
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - security_threat_model
+    merge_owner_priority: 94
+
   - name: onboarding_operability_agent
     description: Detects broken local setup, undocumented prerequisites, and fragile contributor workflows.
     prompt: .agents/prompts/onboarding-operability.md
@@ -127,6 +217,60 @@ agents:
     owns_categories:
       - onboarding_operability
     merge_owner_priority: 75
+
+  - name: db_migration_safety_agent
+    description: Detects schema evolution hazards, backward-compatibility breaks, and rollback gaps.
+    prompt: .agents/prompts/db-migration-safety.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_source_code == true
+    input:
+      requires:
+        - migration_files
+        - schema_definitions
+      optional:
+        - rollback_docs
+        - query_code
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - db_migration_safety
+    merge_owner_priority: 98
+
+  - name: config_drift_agent
+    description: Detects environment, deployment, and runtime config drift across surfaces.
+    prompt: .agents/prompts/config-drift.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_docs == true
+    input:
+      requires:
+        - env_examples
+        - runtime_config
+      optional:
+        - deployment_scripts
+        - boot_validation
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - config_drift
+    merge_owner_priority: 83
+
+  - name: secret_rotation_risk_agent
+    description: Detects long-lived credentials, missing rotation coverage, and revocation gaps.
+    prompt: .agents/prompts/secret-rotation-risk.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_auth_or_ci == true
+    input:
+      requires:
+        - secret_inventory
+        - auth_config
+      optional:
+        - rotation_docs
+        - logging_paths
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - secret_rotation_risk
+    merge_owner_priority: 97
 
   - name: test_adequacy_agent
     description: Evaluates whether critical failure paths are actually covered by tests.
@@ -146,6 +290,24 @@ agents:
       - test_adequacy
     merge_owner_priority: 80
 
+  - name: performance_slo_agent
+    description: Detects latency bottlenecks, missing SLOs, throughput risks, and weak alerting.
+    prompt: .agents/prompts/performance-slo.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_source_code == true
+    input:
+      requires:
+        - traces
+        - metrics
+      optional:
+        - load_tests
+        - dashboards
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - performance_slo
+    merge_owner_priority: 84
+
   - name: observability_recovery_agent
     description: Detects missing health signals, silent failure modes, and weak recovery paths.
     prompt: .agents/prompts/observability-recovery.md
@@ -163,6 +325,24 @@ agents:
     owns_categories:
       - observability_recovery
     merge_owner_priority: 78
+
+  - name: orchestrator_analysis_agent
+    description: Detects sequencing, queue, checkpoint, and retry risks in the orchestrator itself.
+    prompt: .agents/prompts/orchestrator-analysis.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_source_code == true
+    input:
+      requires:
+        - scheduler_code
+        - queue_handlers
+      optional:
+        - checkpoints
+        - run_state
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - orchestrator_analysis
+    merge_owner_priority: 97
 
   - name: dependency_supply_chain_agent
     description: Detects dependency chokepoints, unsafe upgrades, and supply-chain fragility.
@@ -216,6 +396,24 @@ agents:
     owns_categories:
       - issue_memory
     merge_owner_priority: 50
+
+  - name: product_gap_agent
+    description: Detects missing user-visible capabilities and spec-versus-implementation mismatches.
+    prompt: .agents/prompts/product-gap.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_docs == true
+    input:
+      requires:
+        - product_docs
+        - ui_routes
+      optional:
+        - tests
+        - issue_templates
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - product_gap
+    merge_owner_priority: 55
 
   - name: finding_synthesizer_agent
     description: Clusters specialist findings into high-signal issue candidates.

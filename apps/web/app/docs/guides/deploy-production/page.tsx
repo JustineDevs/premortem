@@ -3,7 +3,7 @@ import { deployProductionGuideDoc } from '@/content/marketing/docs-additional-co
 
 import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
 export const metadata = buildSeoMetadata({
-  title: 'Deploy to production | Premortem Docs',
+  title: 'Deploy to production',
   description: deployProductionGuideDoc.lead,
   canonical: '/docs/guides/deploy-production',
   keywords: canonicalDocsKeywords

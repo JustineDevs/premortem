@@ -2,6 +2,7 @@ import { prisma, resolveGitLabCredentialsForProject, getOrganizationLlmSettings 
 import { allowsForceLocalIngest, allowsLocalIngestBypass, isProductionMode } from '@premortem/domain';
 import type { RegisteredAgent } from '@premortem/agent-kit';
 import type { AuditJob } from '@premortem/workflow';
+import { fetchOrbitContext, type OrbitContext } from '@premortem/integrations';
 
 import { ingestGitLabProject } from '../ingestion/ingest-gitlab';
 import { ingestProject, type IngestionBundle } from '../ingestion/ingest-project';
@@ -14,6 +15,7 @@ export interface PreparedAuditContext {
   agents: RegisteredAgent[];
   llmConfig: LlmExecutorConfig;
   ingestionSource: 'local' | 'gitlab';
+  orbitContext: OrbitContext | null;
   projectSettings: {
     enabledAgents: string[];
   };
@@ -28,7 +30,9 @@ export async function prepareAuditExecution(
   const llmConfig: LlmExecutorConfig = {
     model: llmSettings.selectedGeminiModel,
     temperature: llmSettings.temperature,
-    maxTokens: llmSettings.maxTokens
+    maxTokens: llmSettings.maxTokens,
+    vendorRouting: llmSettings.vendorRouting,
+    customProviders: llmSettings.customProviders
   };
 
   const project = await prisma.project.findUnique({ where: { id: job.projectId } });
@@ -40,6 +44,13 @@ export async function prepareAuditExecution(
     ? projectSetting.enabledAgents.filter((agent): agent is string => typeof agent === 'string' && agent.length > 0)
     : [];
   const forceLocal = allowsForceLocalIngest();
+  const orbitContextPromise =
+    project?.provider === 'gitlab' && project.externalProjectId
+      ? fetchOrbitContext({
+          externalProjectId: project.externalProjectId,
+          branch: job.branch
+        })
+      : Promise.resolve(null);
 
   if (!forceLocal && project?.provider === 'gitlab' && project.externalProjectId) {
     const credentials = await resolveGitLabCredentialsForProject(job.projectId);
@@ -58,6 +69,7 @@ export async function prepareAuditExecution(
         agents: buildRegisteredAgents(fallbackRoot, llmConfig),
         llmConfig,
         ingestionSource: 'gitlab',
+        orbitContext: await orbitContextPromise,
         projectSettings: {
           enabledAgents
         }
@@ -89,6 +101,7 @@ export async function prepareAuditExecution(
     agents: buildRegisteredAgents(fallbackRoot, llmConfig),
     llmConfig,
     ingestionSource: 'local',
+    orbitContext: await orbitContextPromise,
     projectSettings: {
       enabledAgents
     }

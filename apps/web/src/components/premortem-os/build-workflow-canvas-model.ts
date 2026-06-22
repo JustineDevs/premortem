@@ -2,6 +2,7 @@ import { AuditEvent, hasAuditEvent } from '@premortem/domain';
 
 import type { AuditRun, Project } from '@/lib/premortem-os/types';
 
+import { AuditCheckpointPhase, parseAuditCheckpoint, phaseRank } from '@premortem/domain';
 import { canvasNodeIcon, getNodeStyles } from './workflow-canvas-node-styles';
 import type {
   CanvasEdge,
@@ -13,6 +14,7 @@ interface BuildCanvasModelInput {
   selectedProj: Project;
   matchingAudit: AuditRun | undefined;
   auditSnapshot: WorkflowAuditSnapshot | null;
+  auditSummary?: unknown;
   runtimeEventTypes: string[];
   isSimulating: boolean;
   simulationIndex: number;
@@ -24,11 +26,13 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
     selectedProj,
     matchingAudit,
     auditSnapshot,
+    auditSummary,
     runtimeEventTypes,
     isSimulating,
     simulationIndex,
     providerConnected
   } = input;
+  const checkpoint = parseAuditCheckpoint(auditSummary);
 
   const totalFindingsCount = matchingAudit?.findings?.length || 0;
   const resolvedFindings = matchingAudit?.findings?.filter((f) => f.status === 'RESOLVED') || [];
@@ -85,6 +89,19 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
       return 'queued';
     }
 
+    if (checkpoint) {
+      const checkpointPhase = checkpoint.phase;
+      const checkpointStepIndex = Math.min(5, Math.max(0, phaseRank(checkpointPhase) - 1));
+
+      if (stepIdx < checkpointStepIndex) {
+        return 'completed';
+      }
+      if (stepIdx === checkpointStepIndex) {
+        return checkpointPhase === AuditCheckpointPhase.FINISHED ? 'published' : 'running';
+      }
+      return 'queued';
+    }
+
     if (runtimeEventTypes.length > 0) {
       const stepComplete = [
         hasAuditEvent(runtimeEventTypes, AuditEvent.INGESTION_COMPLETED),
@@ -110,11 +127,11 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
       id: 'node-connect-vcs',
       label: 'Connect Provider',
       type: 'input',
-      description: 'Ingest GitLab repository metadata & branches context',
+      description: 'Load repository metadata, branch context, and provider connectivity.',
       status: getSimulatedStatus(0, connectState),
       targetLinkTab: 'settings',
       metadata: {
-        title: 'GitLab Provider Auth Gateway',
+        title: 'Provider Connectivity Gateway',
         timestamp: auditTimestamp,
         duration: auditSnapshot?.runStatus ?? matchingAudit?.status ?? 'unknown',
         inputs: [
@@ -123,7 +140,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
           `Provider: ${selectedProj.provider}`
         ],
         outputs: ['Project registered', `Latest audit: ${matchingAudit?.id ?? 'none'}`],
-        logs: fallbackLogs('Connect provider via Settings → Providers or register a project.'),
+        logs: fallbackLogs('Connect the provider in Settings before starting a traceable audit.'),
         systemNote:
           'Provider connection state comes from workspace integrations and project registry.',
         promptVersion: 'N/A',
@@ -135,11 +152,11 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
       id: 'node-scan-repo',
       label: 'Analyze CI & Config',
       type: 'execution',
-      description: 'Parse pipeline YAML profiles and Docker configurations',
+      description: 'Parse pipeline YAML profiles, package manifests, and Docker configuration.',
       status: getSimulatedStatus(1, scannerState === 'failed' ? 'partial' : scannerState),
       targetLinkTab: 'projects',
       metadata: {
-        title: 'CI Scan Pipeline',
+        title: 'Repository Ingestion and Graph Scan',
         duration: `${graphNodeCount} nodes / ${graphEdgeCount} edges`,
         timestamp: auditTimestamp,
         inputs: ['Repository ingestion', 'Graph builder snapshot'],
@@ -149,7 +166,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
         ],
         logs: eventLogs(['GRAPH_BUILT', 'INGESTION_COMPLETED']).length
           ? eventLogs(['GRAPH_BUILT', 'INGESTION_COMPLETED'])
-          : fallbackLogs('Graph snapshot pending: run an audit to populate.'),
+          : fallbackLogs('Graph snapshot pending: run an audit to populate the runtime graph.'),
         systemNote: 'Graph metrics loaded from orchestrator graphSnapshot.',
         promptVersion: auditSnapshot?.counts ? `events:${auditSnapshot.counts.events}` : 'N/A',
         agentConfig: 'graph-builder',
@@ -158,13 +175,13 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
     },
     {
       id: 'node-run-audit',
-      label: 'Run Premortem AI',
+      label: 'Run Specialist Swarm',
       type: 'execution',
-      description: 'Trace data pathways and flag potential key leakages',
+      description: 'Run auditor and critic specialists over grounded repository context.',
       status: getSimulatedStatus(2, scannerState),
       targetLinkTab: 'audits',
       metadata: {
-        title: 'Premortem AI Reasoning Engine',
+        title: 'Specialist Swarm Orchestration',
         duration: `${agentRunCount} agent runs`,
         timestamp: auditTimestamp,
         inputs: [
@@ -189,13 +206,13 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
     },
     {
       id: 'node-cluster-risks',
-      label: 'Cluster Risks',
+      label: 'Cluster Findings',
       type: 'synthesis',
-      description: 'Consolidate individual trace violations into deduplicated risk clusters',
+      description: 'Deduplicate findings into clusters grounded by shared evidence and lineage.',
       status: getSimulatedStatus(3, totalFindingsCount > 0 ? 'completed' : 'queued'),
       targetLinkTab: 'dashboard',
       metadata: {
-        title: 'Synthesized Risk Cluster Deduplicator',
+        title: 'Clustered Finding Rollup',
         duration: `${clusterCount} clusters`,
         inputs: [`${totalFindingsCount} raw findings`],
         outputs:
@@ -219,11 +236,11 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
       id: 'node-review-approval',
       label: 'Reviewer Approval',
       type: 'review',
-      description: 'Human approval gateway controls (Merge, Dismiss, Split, Edit)',
+      description: 'Human approval gateway for confirm, dismiss, split, or edit decisions.',
       status: getSimulatedStatus(4, reviewState),
       targetLinkTab: 'audits',
       metadata: {
-        title: 'Reviewer Approval Control Board',
+        title: 'Reviewer Decision Board',
         duration: matchingAudit?.status ?? 'pending',
         inputs: [totalFindingsCount > 0 ? `${totalFindingsCount} issue candidates` : 'No findings'],
         outputs: [
@@ -245,13 +262,13 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
     },
     {
       id: 'node-publish-gitlab',
-      label: 'Sync GitLab Issues',
+      label: 'Publish Approved Issues',
       type: 'publish',
-      description: 'Serialize approved issue drafts directly back to repo work items',
+      description: 'Publish approved issue drafts back to the connected issue tracker.',
       status: getSimulatedStatus(5, publishState),
       targetLinkTab: 'audits',
       metadata: {
-        title: 'Operational GitLab Sync Connector',
+        title: 'Issue Publication Connector',
         timestamp: auditTimestamp,
         duration: `${publishedFindings.length} published`,
         inputs: ['Approved issue candidate drafts'],
@@ -278,41 +295,41 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
       id: 'edge-vcs-scan',
       from: 'node-connect-vcs',
       to: 'node-scan-repo',
-      label: 'Repo Files Ingest',
+      label: 'Repo metadata',
       transformationDetail:
-        'VCS checking logs stream is matched against package list dependencies to establish audit scope guidelines.'
+        'Repository and provider metadata flow into the static ingestion stage for graph assembly.'
     },
     {
       id: 'edge-scan-audit',
       from: 'node-scan-repo',
       to: 'node-run-audit',
-      label: 'Configs Context Influx',
+      label: 'Grounded context',
       transformationDetail:
-        'CI/CD pipeline maps and configuration metadata are passed to the orchestrator alongside source file snippets.'
+        'Graph nodes, file context, and configuration metadata are passed to the specialist swarm.'
     },
     {
       id: 'edge-audit-cluster',
       from: 'node-run-audit',
       to: 'node-cluster-risks',
-      label: 'Extract Findings',
+      label: 'Findings',
       transformationDetail:
-        'Raw trace alerts from AI engines are processed via semantic vector models to grouping identical errors.'
+        'Validated findings are grouped into reusable clusters keyed by shared evidence and lineage.'
     },
     {
       id: 'edge-cluster-review',
       from: 'node-cluster-risks',
       to: 'node-review-approval',
-      label: 'Actionable Items Mapping',
+      label: 'Review drafts',
       transformationDetail:
-        'Deduplicated clusters are populated as structured draft templates with customizable fields to allow editing, merging, or splits.'
+        'Clusters become review-ready issue candidates with editable remediation fields.'
     },
     {
       id: 'edge-review-publish',
       from: 'node-review-approval',
       to: 'node-publish-gitlab',
-      label: 'GitLab Sync Stream',
+      label: 'Publish',
       transformationDetail:
-        'Upon manual confirmed review actions, secure payloads containing issue descriptions are published back to GitLab as real, traceable work tickets.'
+        'Approved issues are published back to the connected tracker with traceability metadata.'
     }
   ];
 

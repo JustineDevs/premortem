@@ -139,7 +139,7 @@ Premortem is:
 Premortem is not:
 
 - a generic chatbot over code
-- a static scanner dashboard
+- an analysis dashboard
 - an autonomous issue bot
 - a markdown summary generator
 - a loose collection of prompts with no lifecycle governance
@@ -767,4 +767,3 @@ The architecture is explicitly designed to preserve:
 - one full auditability chain
 
 That is the canonical system design direction unless a later ADR supersedes it.
-

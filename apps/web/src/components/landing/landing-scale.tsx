@@ -25,8 +25,8 @@ function getScale(mode: LayoutMode) {
 }
 
 export function LandingScale({ children }: { children: ReactNode }) {
-  const [layout, setLayout] = useState<LayoutMode>(getLayoutMode);
-  const [scale, setScale] = useState(() => getScale(getLayoutMode()));
+  const [layout, setLayout] = useState<LayoutMode>('scaled');
+  const [scale, setScale] = useState(1);
 
   useLayoutEffect(() => {
     const update = () => {

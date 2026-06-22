@@ -16,12 +16,15 @@ export const productsPage = {
     { feature: 'Agent registry, prompts, and Zod validation', status: 'included' as ScopeStatus },
     { feature: 'Prisma + Supabase schema and RLS starters', status: 'included' as ScopeStatus },
     { feature: 'Repo/CI ingestion and graph snapshot runtime', status: 'included' as ScopeStatus },
-    { feature: 'Parallel specialist swarm orchestration (mock/LLM executors)', status: 'included' as ScopeStatus },
+    { feature: 'Parallel specialist swarm orchestration with real LLM executors', status: 'included' as ScopeStatus },
     { feature: 'Reviewer console at /app backed by runtime API', status: 'included' as ScopeStatus },
     { feature: 'Review approve/reject/publish APIs + CLI', status: 'included' as ScopeStatus },
     { feature: 'Audit detail, lineage, and workflow canvas trace', status: 'included' as ScopeStatus },
     { feature: 'Session middleware on /app (Supabase OAuth)', status: 'included' as ScopeStatus },
-    { feature: 'GitHub provider parity', status: 'soon' as ScopeStatus },
-    { feature: 'Enterprise SSO (Entra ID)', status: 'soon' as ScopeStatus }
+    { feature: 'GitHub provider parity', status: 'roadmap' as ScopeStatus },
+    { feature: 'Bitbucket provider parity', status: 'roadmap' as ScopeStatus },
+    { feature: 'Azure DevOps provider parity', status: 'roadmap' as ScopeStatus },
+    { feature: 'Gitea provider parity', status: 'roadmap' as ScopeStatus },
+    { feature: 'Enterprise SSO (Entra ID)', status: 'roadmap' as ScopeStatus }
   ] satisfies ReadonlyArray<{ feature: string; status: ScopeStatus }>
 } as const;

@@ -11,12 +11,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const { id } = await params;
     const context = await resolveRequestActorContext(request);
-    const response = await fetch(`${getApiBaseUrl()}/api/audits/${id}`, {
+    const url = new URL(request.url);
+    const response = await fetch(`${getApiBaseUrl()}/api/audits/${id}${url.search}`, {
       headers: {
         accept: 'application/json',
         ...actorHeaders(context)
       },
-      cache: 'no-store'
+      cache: 'no-store',
+      signal: AbortSignal.timeout(15_000)
     });
 
     const requestId = response.headers.get('x-request-id');
@@ -24,7 +26,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       auditRun?: { organizationId?: string } & Record<string, unknown>;
       snapshot?: { organizationId?: string } & Record<string, unknown>;
     };
-    const auditRun = payload.auditRun ?? payload.snapshot;
+    const auditRun = payload.snapshot ?? payload.auditRun;
 
     if (!response.ok) {
       return NextResponse.json(payload, {
@@ -42,10 +44,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         }
       );
     }
-    return NextResponse.json(
-      { auditRun, snapshot: auditRun },
-      { headers: requestId ? { 'x-request-id': requestId } : undefined }
-    );
+    return NextResponse.json(payload, {
+      headers: requestId ? { 'x-request-id': requestId } : undefined
+    });
   } catch (error) {
     return bffErrorResponse(error, 'Failed to load audit');
   }

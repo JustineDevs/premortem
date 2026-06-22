@@ -1,4 +1,5 @@
 import { AuditEvent } from '@premortem/domain';
+import { captureServerException } from '@premortem/observability/server';
 import {
   completeAgentRun,
   createAgentRun,
@@ -18,7 +19,7 @@ import {
   persistIssueCandidates,
   persistRejectedIssueCandidateArtifacts
 } from '@premortem/db';
-import { createOrganizationNotifications } from '@premortem/db';
+import { createOrganizationNotifications } from '@premortem/db/notifications';
 import type { CanonicalFinding, IssueCandidate } from '@premortem/agent-kit';
 import type { RuntimeCluster } from '../merge/cluster-findings';
 
@@ -49,13 +50,26 @@ export async function runAgentWithPersistence<T>(input: {
   serialize?: (result: T) => Record<string, unknown>;
 }) {
   const agentRun = await createAgentRun({ auditRunId: input.auditRunId, agentName: input.agentName, runMode: input.runMode });
+  const traceAgent = process.env.PREMORTEM_SMOKE_TRACE_LLM === '1';
 
   try {
+    if (traceAgent) {
+      console.error(`[audit-agent:start] ${input.agentName}`);
+    }
     const result = await input.execute();
     await completeAgentRun(agentRun.id, input.serialize?.(result) as never);
+    if (traceAgent) {
+      console.error(`[audit-agent:done] ${input.agentName}`);
+    }
     return { agentRun, result };
   } catch (error) {
     await failAgentRun(agentRun.id, error instanceof Error ? error.message : 'Unknown agent error');
+    if (traceAgent) {
+      console.error(
+        `[audit-agent:fail] ${input.agentName}`,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
     throw error;
   }
 }
@@ -248,6 +262,7 @@ export async function finishAuditWithNotifications(input: {
 }) {
   await finishAudit(input.auditRunId, input.summary);
   const findingCount = Number(input.summary.findingCount ?? 0);
+  const criticalCount = Number(input.summary.criticalCount ?? 0);
   const issueCandidateCount = Number(input.summary.issueCandidateCount ?? 0);
 
   try {
@@ -263,6 +278,23 @@ export async function finishAuditWithNotifications(input: {
         summary: input.summary
       }
     });
+
+    if (criticalCount > 0) {
+      await createOrganizationNotifications({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        kind: 'critical_finding',
+        title: `${criticalCount} critical findings detected in ${input.projectName ?? input.projectId}`,
+        body: `Branch ${input.branch} surfaced ${criticalCount} critical findings across ${findingCount} total findings.`,
+        metadata: {
+          auditRunId: input.auditRunId,
+          branch: input.branch,
+          criticalCount,
+          findingCount,
+          summary: input.summary
+        }
+      });
+    }
 
     if (issueCandidateCount > 0) {
       await createOrganizationNotifications({
@@ -280,10 +312,12 @@ export async function finishAuditWithNotifications(input: {
       });
     }
   } catch (error) {
-    console.warn(
-      '[audit-persistence] notification fanout failed:',
-      error instanceof Error ? error.message : error
-    );
+    captureServerException(error, {
+      surface: 'audit-persistence.notification-fanout',
+      auditRunId: input.auditRunId,
+      organizationId: input.organizationId,
+      projectId: input.projectId
+    });
   }
 }
 
@@ -319,10 +353,12 @@ export async function failAuditWithNotifications(input: {
       }
     });
   } catch (error) {
-    console.warn(
-      '[audit-persistence] failure notification fanout failed:',
-      error instanceof Error ? error.message : error
-    );
+    captureServerException(error, {
+      surface: 'audit-persistence.failure-notification-fanout',
+      auditRunId: input.auditRunId,
+      organizationId: input.organizationId,
+      projectId: input.projectId
+    });
   }
 }
 

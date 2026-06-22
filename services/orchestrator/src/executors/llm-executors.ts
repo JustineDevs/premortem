@@ -1,32 +1,51 @@
+/**
+ * LLM-backed specialist execution adapters for the orchestrator swarm.
+ *
+ * This layer owns prompt loading, structured-output validation, and token usage persistence.
+ */
 import type { AgentExecutor } from '@premortem/agent-kit';
 import { DEFAULT_GEMINI_MODEL } from '@premortem/domain';
-import { parseFindingEnvelope, parseIssueEnvelope, synthesizeMockIssues } from '@premortem/agent-kit';
+import { findingEnvelopeSchema, issueEnvelopeSchema } from '@premortem/agent-kit';
 import { recordUsageEvent } from '@premortem/db';
+import { sanitizePromptPayload } from '@premortem/security';
+import { captureServerException, getManagedPrompt } from '@premortem/observability';
 import { createLlmAdapter } from '@premortem/llm';
+import type {
+  LlmCustomProviderConfig,
+  LlmVendorRoutingTierConfig,
+  UnifiedLlmAdapterOptions
+} from '@premortem/llm';
+import { formatAuditWorkflowContract } from '../scheduler/audit-workflow-contract';
 
 export interface LlmExecutorConfig {
+  /** Optional model override used for all agent calls in this execution lane. */
   model?: string;
+  /** Sampling temperature passed through to the LLM adapter. */
   temperature?: number;
+  /** Optional max output token cap for structured generation calls. */
   maxTokens?: number;
+  /** Shared workflow contract appended to every agent prompt. */
+  workflowContract?: string;
+  /** Ordered provider tiers used by the runtime LLM adapter. */
+  vendorRouting?: LlmVendorRoutingTierConfig[];
+  /** Configured local or hybrid providers available to custom/auto-discovered tiers. */
+  customProviders?: LlmCustomProviderConfig[];
 }
 
 function readTokenUsage(raw: unknown): { inputTokens: number; outputTokens: number } | null {
   if (!raw || typeof raw !== 'object') return null;
   const value = raw as Record<string, unknown>;
 
-  const geminiUsage = value.usageMetadata as Record<string, unknown> | undefined;
-  if (geminiUsage) {
-    const inputTokens = Number(geminiUsage.promptTokenCount ?? 0);
-    const outputTokens = Number(geminiUsage.candidatesTokenCount ?? 0);
-    if (inputTokens > 0 || outputTokens > 0) {
-      return { inputTokens, outputTokens };
-    }
-  }
-
-  const azureUsage = value.usage as Record<string, unknown> | undefined;
-  if (azureUsage) {
-    const inputTokens = Number(azureUsage.prompt_tokens ?? 0);
-    const outputTokens = Number(azureUsage.completion_tokens ?? 0);
+  const usage =
+    (value.usage as Record<string, unknown> | undefined) ??
+    (value.usageMetadata as Record<string, unknown> | undefined);
+  if (usage) {
+    const inputTokens = Number(
+      usage.inputTokens ?? usage.prompt_tokens ?? usage.promptTokenCount ?? usage.input_token_count ?? 0
+    );
+    const outputTokens = Number(
+      usage.outputTokens ?? usage.completion_tokens ?? usage.candidatesTokenCount ?? usage.output_token_count ?? 0
+    );
     if (inputTokens > 0 || outputTokens > 0) {
       return { inputTokens, outputTokens };
     }
@@ -86,39 +105,84 @@ const ISSUE_JSON_CONTRACT = [
   'Include source_agents and source_findings for full audit lineage.'
 ].join('\n');
 
+const SYNTHESIZER_AGENT_NAMES = new Set(['finding_synthesizer_agent', 'issue_validator_agent']);
+const DEFAULT_WORKFLOW_CONTRACT = formatAuditWorkflowContract();
+
+function resolveManagedPromptName(agentName: string) {
+  return agentName.replace(/_agent$/, '').replace(/_/g, '-');
+}
+
+function isNoOutputGeneratedError(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.name === 'AI_NoOutputGeneratedError' || /no output generated/i.test(error.message))
+  );
+}
+
+async function resolveAgentPrompt(agentName: string, fallback: string) {
+  const managed = await getManagedPrompt(resolveManagedPromptName(agentName), {
+    fallback
+  });
+  return typeof managed === 'string' && managed.trim().length > 0 ? managed.trim() : fallback;
+}
+
+function appendWorkflowContract(prompt: string, workflowContract?: string) {
+  const contract = workflowContract?.trim() || DEFAULT_WORKFLOW_CONTRACT;
+  return contract.length > 0 ? `${prompt.trim()}\n\n${contract}`.trim() : prompt.trim();
+}
+
+/**
+ * Build a set of executor implementations that preserve the agent contract:
+ * specialist agents emit canonical findings, synthesizers emit issue candidates.
+ *
+ * @param promptByAgent - Per-agent system prompt text loaded from the prompt registry.
+ * @param config - Optional model, temperature, and token limits for the lane.
+ * @returns A name-keyed executor map used by the worker registry.
+ */
 export function createLlmExecutors(
   promptByAgent: Record<string, string>,
   config?: LlmExecutorConfig
 ): Record<string, AgentExecutor> {
-  const llm = createLlmAdapter();
+  const llm = createLlmAdapter({
+    vendorRouting: config?.vendorRouting,
+    customProviders: config?.customProviders
+  } satisfies UnifiedLlmAdapterOptions);
   const model = config?.model ?? process.env.LLM_MODEL ?? DEFAULT_GEMINI_MODEL;
   const temperature = config?.temperature ?? 0.2;
+  const maxOutputTokens = config?.maxTokens;
+  const workflowContract = config?.workflowContract;
 
   const specialist = (agentName: string): AgentExecutor => ({
     kind: 'specialist',
     run: async (context) => {
-      const result = await llm.generate({
-        model,
-        temperature,
-        messages: [
-          { role: 'system', content: `${promptByAgent[agentName] ?? ''}\n\n${FINDING_JSON_CONTRACT}` },
-          { role: 'user', content: JSON.stringify(context.payload) }
-        ]
-      });
-      void persistUsage(context, result.raw).catch((error) => {
-        console.warn(
-          `[${agentName}] usage persistence failed:`,
-          error instanceof Error ? error.message : error
-        );
-      });
       try {
-        return parseFindingEnvelope(result.text);
+        const systemPrompt = await resolveAgentPrompt(agentName, promptByAgent[agentName] ?? '');
+        const result = await llm.generateObject({
+          model,
+          temperature,
+          maxOutputTokens,
+          schema: findingEnvelopeSchema,
+          messages: [
+            { role: 'system', content: `${appendWorkflowContract(systemPrompt, workflowContract)}\n\n${FINDING_JSON_CONTRACT}` },
+            { role: 'user', content: JSON.stringify(sanitizePromptPayload(context.payload)) }
+          ]
+        });
+        void persistUsage(context, result.raw).catch((error) => {
+          captureServerException(error, {
+            surface: 'llm-usage-persistence',
+            agentName
+          });
+        });
+        return findingEnvelopeSchema.parse(result.output).findings;
       } catch (error) {
-        console.warn(
-          `[${agentName}] finding parse failed; continuing with empty findings:`,
-          error instanceof Error ? error.message : error
-        );
-        return [];
+        if (isNoOutputGeneratedError(error)) {
+          captureServerException(error, {
+            surface: 'llm-no-output',
+            agentName
+          });
+          return [];
+        }
+        throw error;
       }
     }
   });
@@ -126,51 +190,56 @@ export function createLlmExecutors(
   const synth = (agentName: string): AgentExecutor => ({
     kind: 'synthesizer',
     run: async (context, findings) => {
-      const result = await llm.generate({
-        model,
-        temperature,
-        messages: [
-          {
-            role: 'system',
-            content: `${promptByAgent[agentName] ?? ''}\n\n${ISSUE_JSON_CONTRACT}`
-          },
-          { role: 'user', content: JSON.stringify({ payload: context.payload, findings }) }
-        ]
-      });
-      void persistUsage(context, result.raw).catch((error) => {
-        console.warn(
-          `[${agentName}] usage persistence failed:`,
-          error instanceof Error ? error.message : error
-        );
-      });
       try {
-        return parseIssueEnvelope(result.text);
+        const systemPrompt = await resolveAgentPrompt(agentName, promptByAgent[agentName] ?? '');
+        const result = await llm.generateObject({
+          model,
+          temperature,
+          maxOutputTokens,
+          schema: issueEnvelopeSchema,
+          messages: [
+            {
+              role: 'system',
+              content: `${appendWorkflowContract(systemPrompt, workflowContract)}\n\n${ISSUE_JSON_CONTRACT}`
+            },
+            {
+              role: 'user',
+              content: JSON.stringify(
+                sanitizePromptPayload({
+                  payload: context.payload,
+                  findings
+                })
+              )
+            }
+          ]
+        });
+        void persistUsage(context, result.raw).catch((error) => {
+          captureServerException(error, {
+            surface: 'llm-usage-persistence',
+            agentName
+          });
+        });
+        return issueEnvelopeSchema.parse(result.output).issues;
       } catch (error) {
-        if (agentName === 'finding_synthesizer_agent') {
-          console.warn(
-            `[${agentName}] issue parse failed; falling back to deterministic synthesis:`,
-            error instanceof Error ? error.message : error
-          );
-          return synthesizeMockIssues(findings);
+        if (isNoOutputGeneratedError(error)) {
+          captureServerException(error, {
+            surface: 'llm-no-output',
+            agentName
+          });
+          return [];
         }
         throw error;
       }
     }
   });
 
-  return {
-    repo_topology_agent: specialist('repo_topology_agent'),
-    release_safety_agent: specialist('release_safety_agent'),
-    integration_boundary_agent: specialist('integration_boundary_agent'),
-    artifact_integrity_agent: specialist('artifact_integrity_agent'),
-    trust_boundary_agent: specialist('trust_boundary_agent'),
-    onboarding_operability_agent: specialist('onboarding_operability_agent'),
-    test_adequacy_agent: specialist('test_adequacy_agent'),
-    observability_recovery_agent: specialist('observability_recovery_agent'),
-    dependency_supply_chain_agent: specialist('dependency_supply_chain_agent'),
-    ownership_change_risk_agent: specialist('ownership_change_risk_agent'),
-    issue_memory_agent: specialist('issue_memory_agent'),
-    finding_synthesizer_agent: synth('finding_synthesizer_agent'),
-    issue_validator_agent: synth('issue_validator_agent')
-  };
+  const executors: Record<string, AgentExecutor> = {};
+
+  for (const agentName of Object.keys(promptByAgent)) {
+    executors[agentName] = SYNTHESIZER_AGENT_NAMES.has(agentName)
+      ? synth(agentName)
+      : specialist(agentName);
+  }
+
+  return executors;
 }

@@ -31,7 +31,7 @@ The matching template also lives in:
 
 ## Required environment variables
 
-The current project template uses placeholders for the official PostgreSQL prebuilt configuration contract:
+The current project template expects the standard PostgreSQL prebuilt configuration contract to be supplied by the active environment:
 
 - `POSTGRES_HOST`
 - `POSTGRES_PORT`
@@ -39,7 +39,7 @@ The current project template uses placeholders for the official PostgreSQL prebu
 - `POSTGRES_USER`
 - `POSTGRES_PASSWORD`
 
-The committed template stays placeholder-based. The local project file `mcp.local.json` holds the actual database wiring for this workspace.
+The committed template documents the required variable names. The local project file `mcp.local.json` holds the workspace-specific database wiring.
 
 ## What it is not
 

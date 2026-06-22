@@ -13,9 +13,11 @@ import { scrubOutput, validateInput } from '@premortem/security';
 
 import {
   buildPremortemRootAgent,
+  loadOrbitBackedAuditPlan,
   resolveAgentBuilderCredentials,
   type AgentBuilderRuntimeConfig
 } from './index';
+import { runGitLabDuoAudit } from './gitlab-duo-audit';
 
 export interface AgentBuilderRuntimeState {
   ready: boolean;
@@ -187,6 +189,78 @@ export async function startAgentBuilderServer(port = Number(process.env.PORT ?? 
         return;
       }
 
+      if (req.method === 'POST' && url.pathname === '/audit-plan') {
+        const body = (await readJsonBody(req)) as Record<string, unknown>;
+        const externalProjectId = String(body.externalProjectId ?? '').trim();
+        const branch = String(body.branch ?? '').trim();
+        if (!externalProjectId || !branch) {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+          res.end(
+            JSON.stringify(
+              { error: 'externalProjectId and branch are required' },
+              null,
+              2
+            )
+          );
+          return;
+        }
+
+        const result = await loadOrbitBackedAuditPlan({
+          externalProjectId,
+          branch,
+          prefixes: Array.isArray(body.prefixes)
+            ? body.prefixes.filter((entry): entry is string => typeof entry === 'string')
+            : undefined,
+          maxDefinitionsPerPrefix:
+            typeof body.maxDefinitionsPerPrefix === 'number'
+              ? body.maxDefinitionsPerPrefix
+              : undefined,
+          maxMergeRequests:
+            typeof body.maxMergeRequests === 'number' ? body.maxMergeRequests : undefined,
+          maxPipelines:
+            typeof body.maxPipelines === 'number' ? body.maxPipelines : undefined,
+          timeoutMs: typeof body.timeoutMs === 'number' ? body.timeoutMs : undefined
+        });
+
+        res.writeHead(result.grounded ? 200 : 202, {
+          'content-type': 'application/json; charset=utf-8'
+        });
+        res.end(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/gitlab/audit') {
+        const body = (await readJsonBody(req)) as Record<string, unknown>;
+        const externalProjectId = String(body.externalProjectId ?? '').trim();
+        if (!externalProjectId) {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: 'externalProjectId is required' }, null, 2));
+          return;
+        }
+
+        const result = await runGitLabDuoAudit({
+          externalProjectId,
+          branch: typeof body.branch === 'string' ? body.branch : undefined,
+          mergeRequestIid:
+            typeof body.mergeRequestIid === 'number'
+              ? body.mergeRequestIid
+              : typeof body.mergeRequestIid === 'string'
+                ? (() => {
+                    const parsed = Number.parseInt(body.mergeRequestIid, 10);
+                    return Number.isFinite(parsed) ? parsed : undefined;
+                  })()
+                : undefined,
+          commitSha: typeof body.commitSha === 'string' ? body.commitSha : undefined,
+          gitlabBaseUrl: typeof body.gitlabBaseUrl === 'string' ? body.gitlabBaseUrl : undefined,
+          gitlabToken: typeof body.gitlabToken === 'string' ? body.gitlabToken : undefined,
+          rootDir: typeof body.rootDir === 'string' ? body.rootDir : undefined
+        });
+
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(result, null, 2));
+        return;
+      }
+
       if (req.method === 'GET' && url.pathname === '/') {
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         res.end(
@@ -194,7 +268,7 @@ export async function startAgentBuilderServer(port = Number(process.env.PORT ?? 
             {
               name: 'premortem_predictive_audit_agent',
               ready: runtime.ready,
-              routes: ['/healthz', '/run']
+              routes: ['/healthz', '/run', '/audit-plan', '/gitlab/audit']
             },
             null,
             2

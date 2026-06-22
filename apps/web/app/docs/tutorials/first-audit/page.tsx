@@ -3,7 +3,7 @@ import { firstAuditTutorialDoc } from '@/content/marketing/docs-index';
 
 import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
 export const metadata = buildSeoMetadata({
-  title: 'Tutorial: first audit | Premortem Docs',
+  title: 'Tutorial: first audit',
   description: firstAuditTutorialDoc.lead,
   canonical: '/docs/tutorials/first-audit',
   keywords: canonicalDocsKeywords

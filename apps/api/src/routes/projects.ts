@@ -3,6 +3,7 @@ import {
   AuditReadinessError,
   createOrganizationProject,
   EntitlementError,
+  getPublishedIssueAccuracyForProject,
   listOrganizationProjects,
   registerPublicGitLabProject,
   updateProjectSettings,
@@ -10,6 +11,17 @@ import {
 } from '@premortem/db';
 import { ProjectConnectionStatus } from '@premortem/domain';
 
+import { apiErrorResponse } from '../lib/error-response';
+import {
+  readJsonRecord,
+  readOptionalBoolean,
+  readOptionalRecord,
+  readOptionalString,
+  readOptionalStringArray,
+  readOptionalStringLiteral,
+  readRequiredString
+} from '../lib/request-body';
+import { ORG_WRITE_ROLES, requireApiRole } from '../lib/authorization';
 import { resolveApiActorContext } from '../lib/request-context';
 
 function normalizeProvider(provider: string | undefined): 'gitlab' | 'github' {
@@ -18,46 +30,50 @@ function normalizeProvider(provider: string | undefined): 'gitlab' | 'github' {
 }
 
 export async function handleProjectCreate(request: Request) {
-  const body = (await request.json()) as {
-    name?: string;
-    repoUrl?: string;
-    branch?: string;
-    provider?: string;
-    scanCodeSnippet?: string;
-    organizationId?: string;
-  };
+  const body = (await readJsonRecord(request)) ?? {};
 
-  if (!body.name?.trim()) {
+  const name = readRequiredString(body, 'name');
+  if (!name) {
     return Response.json({ error: 'name is required' }, { status: 400 });
   }
 
+  const repoUrl = readOptionalString(body, 'repoUrl');
+  const branch = readOptionalString(body, 'branch');
+  const provider = normalizeProvider(readOptionalString(body, 'provider'));
+  const scanCodeSnippet = readOptionalString(body, 'scanCodeSnippet');
+
   const actor = await resolveApiActorContext(request);
-  if (body.organizationId && body.organizationId !== actor.organizationId) {
+  requireApiRole(actor, ORG_WRITE_ROLES);
+  const organizationId = readOptionalString(body, 'organizationId');
+  if (organizationId && organizationId !== actor.organizationId) {
     return Response.json({ error: 'organizationId is not allowed for this session.' }, { status: 403 });
   }
-  const organizationId = actor.organizationId;
+  const resolvedOrganizationId = actor.organizationId;
 
   try {
-    await assertCanRegisterProject(organizationId);
+    await assertCanRegisterProject(resolvedOrganizationId);
   } catch (error) {
     if (error instanceof EntitlementError) {
-      return Response.json({ error: error.message, code: error.code }, { status: error.status });
+      return Response.json(
+        { error: 'Project limit reached.', code: error.code },
+        { status: error.status }
+      );
     }
     throw error;
   }
 
-  if (normalizeProvider(body.provider) === 'gitlab' && body.repoUrl?.trim()) {
+  if (provider === 'gitlab' && repoUrl?.trim()) {
     try {
       await verifyGitLabRegistrationAccess({
-        organizationId,
-        repoUrl: body.repoUrl.trim(),
+        organizationId: resolvedOrganizationId,
+        repoUrl: repoUrl.trim(),
         requireIssueWrite: false
       });
     } catch (error) {
       if (error instanceof AuditReadinessError) {
         return Response.json(
           {
-            error: error.message,
+            error: 'Repository is not ready for registration.',
             code: error.code,
             field: error.field,
             system: error.system
@@ -71,13 +87,13 @@ export async function handleProjectCreate(request: Request) {
 
   try {
     const project = await createOrganizationProject({
-      organizationId,
-      name: body.name.trim(),
-      provider: normalizeProvider(body.provider),
-      repoUrl: body.repoUrl?.trim(),
-      defaultBranch: body.branch?.trim() || 'main',
+      organizationId: resolvedOrganizationId,
+      name,
+      provider,
+      repoUrl: repoUrl?.trim(),
+      defaultBranch: branch?.trim() || 'main',
       createdById: actor.profileId,
-      scanCodeSnippet: body.scanCodeSnippet
+      scanCodeSnippet
     });
 
     return Response.json({
@@ -101,10 +117,7 @@ export async function handleProjectCreate(request: Request) {
           : undefined
     });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to register project' },
-      { status: 500 }
-    );
+    return apiErrorResponse(error, 'Failed to register project', { fallbackStatus: 500 });
   }
 }
 
@@ -118,18 +131,18 @@ export async function handleProjectList(request: Request) {
   const organizationId = actor.organizationId;
   const projects = await listOrganizationProjects(organizationId);
 
-    return Response.json({
-      projects: projects.map((project) => ({
-        id: project.id,
-        name: project.name,
-        provider: project.provider,
-        repoUrl: project.repoUrl ?? `https://gitlab.com/${project.externalProjectId}`,
-        branch: project.defaultBranch,
-        connectionStatus: project.status ?? ProjectConnectionStatus.ACTIVE,
-        projectSettings: project.projectSettings ?? null,
-        lastAuditScore: null,
-        lastAuditDate: null,
-        infrastructureCount: 0,
+  return Response.json({
+    projects: projects.map((project) => ({
+      id: project.id,
+      name: project.name,
+      provider: project.provider,
+      repoUrl: project.repoUrl ?? `https://gitlab.com/${project.externalProjectId}`,
+      branch: project.defaultBranch,
+      connectionStatus: project.status ?? ProjectConnectionStatus.ACTIVE,
+      projectSettings: project.projectSettings ?? null,
+      lastAuditScore: null,
+      lastAuditDate: null,
+      infrastructureCount: 0,
       apiEndpointsCount: 0,
       unencryptedEndpointsCount: 0,
       scanCodeSnippet:
@@ -143,49 +156,72 @@ export async function handleProjectList(request: Request) {
 }
 
 export async function handleProjectSettingsPatch(request: Request, projectId: string) {
-  const body = (await request.json()) as {
-    autoRunOnPush?: boolean;
-    autoPublishApprovedIssues?: boolean;
-    auditDefaultBranchOnly?: boolean;
-    enabledAgents?: string[];
-    severityThreshold?: 'low' | 'medium' | 'high' | 'critical';
-    labelsTemplate?: string[];
-    ignorePaths?: string[];
-    notificationSettings?: Record<string, unknown>;
-  };
+  const body = (await readJsonRecord(request)) ?? {};
+  const notificationSettings = readOptionalRecord(body, 'notificationSettings');
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_WRITE_ROLES);
 
   const projectSettings = await updateProjectSettings({
     organizationId: actor.organizationId,
     projectId,
-    autoRunOnPush: body.autoRunOnPush,
-    autoPublishApprovedIssues: body.autoPublishApprovedIssues,
-    auditDefaultBranchOnly: body.auditDefaultBranchOnly,
-    enabledAgents: body.enabledAgents,
-    severityThreshold: body.severityThreshold,
-    labelsTemplate: body.labelsTemplate,
-    ignorePaths: body.ignorePaths,
-    notificationSettings: body.notificationSettings
+    autoRunOnPush: readOptionalBoolean(body, 'autoRunOnPush'),
+    autoPublishApprovedIssues: readOptionalBoolean(body, 'autoPublishApprovedIssues'),
+    auditDefaultBranchOnly: readOptionalBoolean(body, 'auditDefaultBranchOnly'),
+    enabledAgents: readOptionalStringArray(body, 'enabledAgents') ?? undefined,
+    severityThreshold: readOptionalStringLiteral(body, 'severityThreshold', [
+      'low',
+      'medium',
+      'high',
+      'critical'
+    ]),
+    labelsTemplate: readOptionalStringArray(body, 'labelsTemplate') ?? undefined,
+    ignorePaths: readOptionalStringArray(body, 'ignorePaths') ?? undefined,
+    notificationSettings
   });
 
   return Response.json({ ok: true, projectSettings });
 }
 
+export async function handleProjectAccuracy(request: Request, projectId: string) {
+  const actor = await resolveApiActorContext(request);
+  const { prisma } = await import('@premortem/db');
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { organizationId: true }
+  });
+
+  if (!project || project.organizationId !== actor.organizationId) {
+    return Response.json({ error: `Project ${projectId} not found` }, { status: 404 });
+  }
+
+  const accuracy = await getPublishedIssueAccuracyForProject({
+    organizationId: actor.organizationId,
+    projectId
+  });
+
+  return Response.json({ ok: true, accuracy });
+}
+
 export async function handlePublicProjectCreate(request: Request) {
-  const body = (await request.json()) as { reference?: string };
-  const reference = body.reference?.trim();
+  const body = (await readJsonRecord(request)) ?? {};
+  const reference = readRequiredString(body, 'reference');
 
   if (!reference) {
     return Response.json({ error: 'reference is required' }, { status: 400 });
   }
 
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_WRITE_ROLES);
 
   try {
     await assertCanRegisterProject(actor.organizationId);
   } catch (error) {
     if (error instanceof EntitlementError) {
-      return Response.json({ error: error.message, code: error.code }, { status: error.status });
+      return Response.json(
+        { error: 'Project limit reached.', code: error.code },
+        { status: error.status }
+      );
     }
     throw error;
   }
@@ -211,7 +247,7 @@ export async function handlePublicProjectCreate(request: Request) {
     if (error instanceof AuditReadinessError) {
       return Response.json(
         {
-          error: error.message,
+          error: 'Repository is not ready for registration.',
           code: error.code,
           field: error.field,
           system: error.system
@@ -219,9 +255,8 @@ export async function handlePublicProjectCreate(request: Request) {
         { status: 422 }
       );
     }
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to register public repository.' },
-      { status: 502 }
-    );
+    return apiErrorResponse(error, 'Failed to register public repository.', {
+      fallbackStatus: 502
+    });
   }
 }

@@ -1,11 +1,10 @@
-import type { AuditRun, Project, RiskCluster } from '@/lib/premortem-os/types';
+import type { AuditRun, RiskCluster } from '@/lib/premortem-os/types';
 
 import { fetchRuntimeAuditSnapshot, type RuntimeApiHeaders } from './client';
 import { mapAuditListItemToAuditRun, mapSnapshotToAuditRun, mapSnapshotsToRiskClusters } from './map-runtime-to-console';
 
 export async function hydrateAuditRunsFromSnapshots(
   audits: AuditRun[],
-  projectNameById: Map<string, string>,
   limit = 12,
   actorHeaders?: RuntimeApiHeaders
 ): Promise<{ audits: AuditRun[]; riskClusters: RiskCluster[] }> {
@@ -27,7 +26,7 @@ export async function hydrateAuditRunsFromSnapshots(
   const hydratedAudits = audits.map((audit) => {
     const snapshot = snapshotByAuditId.get(audit.id);
     if (!snapshot) return audit;
-    return mapSnapshotToAuditRun(snapshot, projectNameById.get(audit.projectId) ?? audit.projectName);
+    return mapSnapshotToAuditRun(snapshot, audit.projectName);
   });
 
   const riskClusters = mapSnapshotsToRiskClusters(
@@ -35,10 +34,6 @@ export async function hydrateAuditRunsFromSnapshots(
   );
 
   return { audits: hydratedAudits, riskClusters };
-}
-
-export function projectNameMapFromProjects(projects: Project[]): Map<string, string> {
-  return new Map(projects.map((project) => [project.id, project.name] as const));
 }
 
 export { mapAuditListItemToAuditRun };

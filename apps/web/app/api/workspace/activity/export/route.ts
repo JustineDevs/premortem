@@ -1,7 +1,5 @@
-import { NextResponse } from 'next/server';
-
 import { getApiBaseUrl } from '@/lib/runtime-config';
-import { bffErrorResponse, readUpstreamJson } from '@/lib/server/bff-errors';
+import { bffErrorResponse } from '@/lib/server/bff-errors';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
 
 export async function GET(request: Request) {
@@ -18,20 +16,7 @@ export async function GET(request: Request) {
         cache: 'no-store'
       }
     );
-
-    if (response.headers.get('content-type')?.includes('text/csv')) {
-      return new NextResponse(await response.text(), {
-        status: response.status,
-        headers: {
-          'content-type': response.headers.get('content-type') ?? 'text/csv; charset=utf-8',
-          'content-disposition':
-            response.headers.get('content-disposition') ?? 'attachment; filename="export.csv"'
-        }
-      });
-    }
-
-    const payload = await readUpstreamJson(response);
-    return NextResponse.json(payload, { status: response.status });
+    return response;
   } catch (error) {
     return bffErrorResponse(error, 'Failed to export activity log');
   }

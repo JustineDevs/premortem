@@ -8,9 +8,18 @@ import {
 import type { Prisma } from '@prisma/client';
 
 import { prisma } from './client';
-import { createAuditRunEvent } from './repositories';
+import { createAuditRunEvent, invalidateRecentAuditRunsCache } from './repositories';
 
 const DEFAULT_LEASE_MS = 15 * 60 * 1000;
+const RECONCILIATION_EVENTS_CACHE_TTL_MS = 120_000;
+const reconciliationEventsCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    promise?: Promise<Awaited<ReturnType<typeof prisma.reconciliationEvent.findMany>>>;
+    value?: Awaited<ReturnType<typeof prisma.reconciliationEvent.findMany>>;
+  }
+>();
 
 function asSummaryObject(summary: unknown): Record<string, unknown> {
   if (!summary || typeof summary !== 'object' || Array.isArray(summary)) {
@@ -305,6 +314,8 @@ export async function cancelAuditRun(auditRunId: string, reason = 'Cancelled by 
     payload: { reason }
   });
 
+  invalidateRecentAuditRunsCache(auditRun.organizationId);
+
   return updated;
 }
 
@@ -348,20 +359,47 @@ export async function createReconciliationEvent(input: {
 }
 
 export async function listReconciliationEvents(organizationId: string, limit = 20) {
-  return prisma.reconciliationEvent.findMany({
-    where: { organizationId },
-    orderBy: { createdAt: 'desc' },
-    take: limit,
-    include: {
-      publishedIssue: {
-        select: {
-          id: true,
-          url: true,
-          publishedTitle: true,
-          syncStatus: true,
-          externalIssueIid: true
+  const cacheKey = `${organizationId}:${limit}`;
+  const cached = reconciliationEventsCache.get(cacheKey);
+  const now = Date.now();
+  if (cached?.value && cached.expiresAt > now) {
+    return cached.value;
+  }
+  if (cached?.promise) {
+    return cached.promise;
+  }
+
+  const promise = prisma.reconciliationEvent
+    .findMany({
+      where: { organizationId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: {
+        publishedIssue: {
+          select: {
+            id: true,
+            url: true,
+            publishedTitle: true,
+            syncStatus: true,
+            externalIssueIid: true
+          }
         }
       }
-    }
-  });
+    })
+    .then((events) => {
+      reconciliationEventsCache.set(cacheKey, {
+        expiresAt: Date.now() + RECONCILIATION_EVENTS_CACHE_TTL_MS,
+        value: events
+      });
+      return events;
+    })
+    .finally(() => {
+      const current = reconciliationEventsCache.get(cacheKey);
+      if (current?.promise === promise) {
+        delete current.promise;
+      }
+    });
+
+  reconciliationEventsCache.set(cacheKey, { expiresAt: 0, promise });
+  return promise;
 }

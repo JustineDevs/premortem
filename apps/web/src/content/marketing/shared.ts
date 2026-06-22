@@ -24,7 +24,7 @@ export const premortemFeatures = [
   '[ Graph, context, Audit history ]'
 ] as const;
 
-export type ScopeStatus = 'included' | 'scaffold' | 'soon';
+export type ScopeStatus = 'included' | 'scaffold' | 'roadmap';
 
 export const ecosystemCards = [
   {

@@ -41,11 +41,17 @@
       "@premortem/evals": [
         "packages/evals/src"
       ],
+      "@premortem/notifications": [
+        "packages/notifications/src"
+      ],
       "@premortem/integrations": [
         "packages/integrations/src"
       ],
       "@premortem/observability": [
         "packages/observability/src"
+      ],
+      "@premortem/observability/server": [
+        "packages/observability/src/server"
       ],
       "@premortem/workflow": [
         "packages/workflow/src"

@@ -372,7 +372,7 @@ if (process.env.NEXT_PUBLIC_POSTHOG_KEY || process.env.POSTHOG_API_KEY) {
 }
 
 pass('ops_and_safety', 'Publish requires explicit reviewer approval (no auto-approve)');
-pass('ops_and_safety', 'Stripe webhook signature path implemented (see apps/web/app/api/webhooks/stripe/route.ts)');
+pass('ops_and_safety', 'Stripe webhook signature path implemented (see apps/web/app/api/stripe/webhook/route.ts)');
 pass('ops_and_safety', 'Plan limits enforced server-side (PLAN_LIMITS)');
 pass('ops_and_safety', 'Audit submit idempotency via active-run reuse');
 

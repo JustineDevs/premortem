@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { hasConfiguredRuntimeCredentials, validateProductionBootEnv } from '@premortem/domain';
+import { captureServerMessage } from '@premortem/observability/server';
 
 import { loadPremortemLocalEnv } from './lib/load-local-env';
 
@@ -14,8 +15,9 @@ if (process.env.PREMORTEM_PRODUCTION_MODE !== '1' && !hasConfiguredRuntimeCreden
 
 const missingProductionEnv = validateProductionBootEnv();
 if (missingProductionEnv.length > 0) {
-  console.warn(
-    '[premortem-api] PREMORTEM_PRODUCTION_MODE=1 but required env is missing:',
-    missingProductionEnv.join(', ')
-  );
+  const message = `[premortem-api] Invalid production boot environment: ${missingProductionEnv.join(', ')}`;
+  if (process.env.PREMORTEM_PRODUCTION_MODE === '1') {
+    throw new Error(message);
+  }
+  captureServerMessage(message, 'warning');
 }

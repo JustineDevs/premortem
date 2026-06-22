@@ -37,6 +37,8 @@ export interface WorkspaceBundle {
     isSlackConnected: boolean;
     alertEmails: string;
     alertSeverity: string;
+    slackNangoConnectionId: string;
+    slackNangoProviderKey: string;
   };
   llm: {
     selectedGeminiModel: string;
@@ -74,7 +76,15 @@ export interface WorkspaceBundle {
     stripeBillingConfigured: boolean;
     canPublish: boolean;
     maxRepos: number;
-    invoices: unknown[];
+    invoices: Array<{
+      id: string;
+      date: string;
+      amount: number;
+      status: string;
+      method: string;
+      hostedInvoiceUrl: string | null;
+      invoicePdfUrl: string | null;
+    }>;
   };
   apiKeys: Array<{
     id: string;

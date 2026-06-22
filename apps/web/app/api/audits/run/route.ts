@@ -10,18 +10,19 @@ import {
 } from '@/lib/premortem-api/client';
 import { mapSandboxScanToAuditRun } from '@/lib/premortem-api/map-sandbox-audit';
 import { bffErrorResponse } from '@/lib/server/bff-errors';
+import { readJsonRecord, readOptionalString, readRequiredString } from '@/lib/server/request-body';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
 
 export async function POST(request: Request) {
-  const body = (await request.json()) as {
-    projectId?: string;
-    branch?: string;
-    customSnippet?: string;
-  };
+  const body = await readJsonRecord(request);
+  if (!body) {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
 
-  if (body.customSnippet?.trim()) {
+  const customSnippet = readOptionalString(body, 'customSnippet')?.trim();
+  if (customSnippet) {
     const runId = randomUUID();
-    const guard = validateInput(body.customSnippet);
+    const guard = validateInput(customSnippet);
     const context = await resolveRequestActorContext(request);
     if (!guard.passed) {
       await recordAuditStep(
@@ -61,26 +62,40 @@ export async function POST(request: Request) {
         summary: `${entry.step} ${entry.status}`
       });
     });
-    const audit = mapSandboxScanToAuditRun(body.customSnippet);
-    await recordActivityEvent({
-      organizationId: context.organizationId,
-      actorId: context.profileId,
-      eventType: 'sandbox.static_scan.completed',
-      objectType: 'sandbox_scan',
-      objectId: audit.id,
-      summary: `Sandbox static scan completed with score ${audit.score}`
-    });
-    return NextResponse.json({ success: true, audit, sandbox: true });
+    try {
+      const audit = await mapSandboxScanToAuditRun(customSnippet);
+      await recordActivityEvent({
+        organizationId: context.organizationId,
+        actorId: context.profileId,
+        eventType: 'sandbox.static_scan.completed',
+        objectType: 'sandbox_scan',
+        objectId: runId,
+        summary: `Sandbox analysis completed with score ${audit.score}`
+      });
+      return NextResponse.json({ success: true, audit, sandbox: true });
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Sandbox scan requires a configured LLM provider.'
+        },
+        { status: 503 }
+      );
+    }
   }
 
   try {
     const context = await resolveRequestActorContext(request);
     const headers = actorHeaders(context);
+    const requestedProjectId = readRequiredString(body, 'projectId');
+    const requestedBranch = readOptionalString(body, 'branch')?.trim();
 
-    let projectId = body.projectId;
+    let projectId = requestedProjectId ?? undefined;
     if (!projectId) {
       const projects = await fetchRuntimeProjects(headers);
-      const firstProject = projects[0] as { id?: string } | undefined;
+      const firstProject = projects[0];
       if (!firstProject?.id) {
         return NextResponse.json(
           { error: 'Connect a repository before running an audit.' },
@@ -93,7 +108,7 @@ export async function POST(request: Request) {
     const submission = await submitRuntimeAudit({
       organizationId: context.organizationId,
       projectId,
-      branch: body.branch ?? 'main',
+      branch: requestedBranch || 'main',
       commitSha: `console-${Date.now()}`,
       triggeredById: context.profileId,
       headers

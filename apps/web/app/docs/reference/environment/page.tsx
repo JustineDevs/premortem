@@ -3,7 +3,7 @@ import { environmentReferenceDoc } from '@/content/marketing/docs-index';
 
 import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
 export const metadata = buildSeoMetadata({
-  title: 'Environment variables | Premortem Docs',
+  title: 'Environment variables',
   description: environmentReferenceDoc.lead,
   canonical: '/docs/reference/environment',
   keywords: canonicalDocsKeywords

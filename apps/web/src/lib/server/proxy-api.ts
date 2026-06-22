@@ -1,8 +1,6 @@
-import { NextResponse } from 'next/server';
-
 import { getApiBaseUrl } from '@/lib/runtime-config';
 import { bffRateLimitKey, bffRateLimitResponse, checkBffRateLimit } from '@/lib/server/bff-rate-limit';
-import { bffErrorResponse, readUpstreamJson } from '@/lib/server/bff-errors';
+import { bffErrorResponse } from '@/lib/server/bff-errors';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
 import { trackServerEvent } from '@/lib/server/track-server-event';
 
@@ -11,7 +9,13 @@ export async function proxyPremortemApi(path: string, init?: RequestInit, reques
     return bffRateLimitResponse();
   }
 
-  const context = await resolveRequestActorContext(request);
+  let context: Awaited<ReturnType<typeof resolveRequestActorContext>>;
+  try {
+    context = await resolveRequestActorContext(request);
+  } catch (error) {
+    return bffErrorResponse(error, 'Unauthorized');
+  }
+
   const startedAt = Date.now();
 
   try {
@@ -25,8 +29,6 @@ export async function proxyPremortemApi(path: string, init?: RequestInit, reques
       cache: 'no-store'
     });
 
-    const payload = await readUpstreamJson(response);
-
     if (!response.ok) {
       trackServerEvent(context.profileId, 'bff_proxy_error', {
         path,
@@ -36,9 +38,14 @@ export async function proxyPremortemApi(path: string, init?: RequestInit, reques
     }
 
     const requestId = response.headers.get('x-request-id');
-    return NextResponse.json(payload, {
+    const headers = new Headers(response.headers);
+    if (requestId) {
+      headers.set('x-request-id', requestId);
+    }
+
+    return new Response(response.body, {
       status: response.status,
-      headers: requestId ? { 'x-request-id': requestId } : undefined
+      headers
     });
   } catch (error) {
     console.error(error);

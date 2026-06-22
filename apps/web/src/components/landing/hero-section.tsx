@@ -81,7 +81,7 @@ export function HeroSection() {
         type="button"
         className="framer-mlk6bw"
         data-border="true"
-        aria-label="GitHub sign-in coming soon"
+        aria-label="GitHub sign-in not enabled"
         aria-disabled="true"
         disabled
         style={{
@@ -101,7 +101,7 @@ export function HeroSection() {
           height={19}
           className="framer-a3dd0r"
         />
-        <span className="landing-cta-soon">(Coming soon)</span>
+        <span className="landing-cta-soon">(Roadmap)</span>
       </button>
 
       <h2 className="framer-jbx38w" style={sectionTitle}>

@@ -23,7 +23,7 @@ export const metadata = buildSeoMetadata({
 export default function HowItWorksPage() {
   return (
     <MarketingPageLayout title={howItWorksPage.title} description={howItWorksPage.description}>
-      <MarketingSectionHeading>Interactive demo</MarketingSectionHeading>
+      <MarketingSectionHeading>Interactive walkthrough</MarketingSectionHeading>
       <MarketingAutoplayDemo variant="how-it-works" />
 
       <MarketingSectionHeading>Listen</MarketingSectionHeading>

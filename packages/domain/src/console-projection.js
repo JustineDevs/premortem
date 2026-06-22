@@ -1,30 +1,77 @@
+import { buildTraceFromEvidence, formatRecommendedPatch, formatSourceCodeEvidence, normalizeEvidenceRefs, primaryEvidenceLocation } from './evidence-projection';
 import { issueCandidateToConsoleStatus } from './review';
 import { runStatusToConsoleRunStatus, scoreFromReviewQueueCounts, scoreFromSeverityCounts } from './status';
 import { countSeverities, severityToConsole } from './severity';
+function relatedFindingsForIssue(snapshot, issue) {
+    const sourceKeys = new Set(issue.sourceFindings ?? []);
+    if (sourceKeys.size > 0) {
+        return snapshot.findings.filter((finding) => sourceKeys.has(finding.findingKey) || sourceKeys.has(finding.id));
+    }
+    const lineageEntry = snapshot.lineage.find((entry) => entry.stage === 'issue_candidate' && entry.id === issue.id);
+    const clusterId = issue.clusterId ?? lineageEntry?.parentId;
+    if (!clusterId)
+        return [];
+    const cluster = snapshot.clusters?.find((item) => item.id === clusterId);
+    const memberIds = new Set(cluster?.memberFindingIds ?? []);
+    if (memberIds.size === 0)
+        return [];
+    return snapshot.findings.filter((finding) => memberIds.has(finding.id)).slice(0, 6);
+}
+function collectIssueEvidence(snapshot, issue) {
+    const issueEvidence = normalizeEvidenceRefs(issue.evidence);
+    if (issueEvidence.length >= 2)
+        return issueEvidence;
+    const related = relatedFindingsForIssue(snapshot, issue);
+    const findingEvidence = related.flatMap((finding) => normalizeEvidenceRefs(finding.evidence));
+    const merged = [...issueEvidence];
+    for (const item of findingEvidence) {
+        const duplicate = merged.some((existing) => existing.ref === item.ref && existing.reason === item.reason);
+        if (!duplicate)
+            merged.push(item);
+    }
+    return merged.slice(0, 8);
+}
 export function projectIssueCandidateToConsoleFinding(snapshot, issue) {
-    const severity = severityToConsole('high');
+    const relatedFindings = relatedFindingsForIssue(snapshot, issue);
+    const primaryFinding = relatedFindings[0];
+    const cluster = snapshot.lineage.find((entry) => entry.stage === 'issue_candidate' && entry.id === issue.id)?.parentId
+        ? snapshot.clusters?.find((item) => item.id ===
+            snapshot.lineage.find((entry) => entry.stage === 'issue_candidate' && entry.id === issue.id)?.parentId)
+        : undefined;
+    const evidenceItems = collectIssueEvidence(snapshot, issue);
+    const location = primaryEvidenceLocation(evidenceItems);
+    const severity = severityToConsole(cluster?.severity ?? primaryFinding?.severity ?? relatedFindings[0]?.severity ?? 'high');
+    const recommendedControls = relatedFindings.flatMap((finding) => finding.recommendedControls ?? []);
+    const suggestedPatchCode = formatRecommendedPatch({
+        recommendedActionSummary: issue.recommendedActionSummary,
+        implementationSteps: issue.implementationSteps,
+        recommendedControls
+    });
     return {
         id: issue.id,
         title: issue.title,
         severity,
         status: issueCandidateToConsoleStatus(issue),
-        category: 'issue_candidate',
-        filepath: snapshot.branch,
-        line: 0,
-        description: issue.title,
-        evidence: `Validation: ${issue.validationStatus}. Reviewer: ${issue.reviewerStatus}.`,
-        trace: snapshot.lineage
-            .filter((entry) => entry.stage === 'issue_candidate' && entry.id === issue.id)
-            .map((entry, index) => ({
-            step: index + 1,
-            description: entry.label,
-            location: entry.parentId ?? snapshot.auditRunId
-        })),
-        recommendation: 'Review and approve before publish.',
-        aiReasoning: snapshot.findings[0]?.predictedFailureSummary ??
+        category: primaryFinding?.category ?? issue.category ?? 'issue_candidate',
+        filepath: location.filepath,
+        line: location.line,
+        description: issue.predictedFailureSummary?.trim() ||
+            primaryFinding?.predictedFailureSummary ||
+            issue.title,
+        evidence: formatSourceCodeEvidence(evidenceItems),
+        trace: buildTraceFromEvidence(evidenceItems),
+        recommendation: issue.recommendedActionSummary?.trim() ||
+            formatRecommendedPatch({ recommendedControls }) ||
+            'Review and approve before publish.',
+        aiReasoning: issue.whyItMatters?.trim() ||
+            primaryFinding?.whyItMatters?.trim() ||
+            primaryFinding?.predictedFailureSummary ||
             'Structured issue candidate synthesized from specialist swarm findings.',
         gitlabIssueId: issue.publishedUrl ?? undefined,
-        whyItMatters: issue.title
+        whyItMatters: issue.whyItMatters ?? primaryFinding?.whyItMatters ?? undefined,
+        suggestedPatchCode,
+        expectedBehavior: primaryFinding?.failureMode ?? undefined,
+        successCriteria: (issue.doneCriteria ?? []).join('\n') || undefined
     };
 }
 export function projectSnapshotToConsoleAudit(snapshot, projectName, createdAt) {

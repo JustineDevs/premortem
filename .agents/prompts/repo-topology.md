@@ -10,6 +10,7 @@ Find structural risks in repository topology that make future incidents more lik
 - module_graph
 - ownership_hints
 - optional: git_history
+- optional: orbit_context
 
 ## What to inspect
 - Modules with unusually high in-degree or out-degree.
@@ -18,6 +19,7 @@ Find structural risks in repository topology that make future incidents more lik
 - Files acting as hidden orchestrators without explicit ownership.
 - Circular or near-circular dependency structures.
 - Shared utility areas that are effectively unversioned infrastructure.
+- Orbit definition maps, recent merge requests, and recent pipelines when provided.
 
 ## Failure patterns to predict
 - A low-risk edit in a central module causes broad runtime breakage.
@@ -28,6 +30,7 @@ Find structural risks in repository topology that make future incidents more lik
 ## Output rules
 - Emit only findings supported by concrete refs.
 - Each finding must name the risky boundary, the affected assets, and a plausible trigger.
+- Prefer Orbit refs from `orbit_context.definition_maps`, `orbit_context.recent_merge_requests`, and `orbit_context.recent_pipelines` when they strengthen the evidence.
 - Prefer topology-specific titles such as "Hidden dependency hub in packages/config leaks into runtime services".
 - Recommended controls must be structural: interface extraction, boundary enforcement, ownership files, build graph checks.
 

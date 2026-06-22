@@ -1,5 +1,25 @@
 import type { StdioConnectionParams } from '@google/adk';
-import { isPhoenixEnabled, resolvePhoenixMcpBaseUrl } from '@premortem/observability';
+
+function isPhoenixEnabled() {
+  return Boolean(
+    process.env.PHOENIX_API_KEY?.trim() ||
+      process.env.PHOENIX_COLLECTOR_ENDPOINT?.trim() ||
+      process.env.PHOENIX_OTEL_ENABLED === '1'
+  );
+}
+
+function resolvePhoenixMcpBaseUrl() {
+  const configured = process.env.PHOENIX_MCP_BASE_URL?.trim();
+  if (configured) return configured.replace(/\/$/, '');
+
+  const collector = process.env.PHOENIX_COLLECTOR_ENDPOINT?.trim();
+  if (collector) {
+    const withoutTraces = collector.replace(/\/v1\/traces\/?$/, '').replace(/\/$/, '');
+    if (withoutTraces.includes('/s/')) return withoutTraces;
+  }
+
+  return 'https://app.phoenix.arize.com';
+}
 
 export function buildPhoenixMcpConnection(): StdioConnectionParams | null {
   if (!isPhoenixEnabled()) return null;

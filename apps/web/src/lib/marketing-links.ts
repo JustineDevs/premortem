@@ -23,6 +23,7 @@ export const marketingLinks = {
   docsReferenceBilling: '/docs/reference/billing-plans',
   docsReferenceNeo4j: '/docs/reference/neo4j-graph',
   docsReferenceObservability: '/docs/reference/observability',
+  docsArchitectureEnterpriseReadiness: '/docs/architecture/enterprise-readiness',
   docsConceptsSecurity: '/docs/concepts/security',
   docsConceptsAuditModel: '/docs/concepts/audit-model',
   docsConceptsDataFlow: '/docs/concepts/data-flow',

@@ -14,10 +14,8 @@ export function useCanonicalFeatureFlag(flag: string, defaultValue = false) {
     };
 
     sync();
-    posthog.onFeatureFlags(sync);
-    return () => {
-      posthog.onFeatureFlags(() => undefined);
-    };
+    const unsubscribe = posthog.onFeatureFlags(sync);
+    return unsubscribe;
   }, [flag, defaultValue]);
 
   return enabled;

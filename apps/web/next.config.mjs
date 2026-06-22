@@ -3,7 +3,9 @@ import { fileURLToPath } from 'node:url';
 
 import { loadPremortemLocalEnv } from '../../scripts/load-local-env.mjs';
 
-loadPremortemLocalEnv(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'));
+if (process.env.NODE_ENV !== 'production') {
+  loadPremortemLocalEnv(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'));
+}
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const monorepoRoot = path.resolve(appDir, '../..');

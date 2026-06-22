@@ -1,3 +1,4 @@
+import { ReviewStatus, ReviewAction } from '@premortem/domain';
 import { prisma } from './client';
 function asJsonObject(value = {}) {
     return value;
@@ -5,6 +6,10 @@ function asJsonObject(value = {}) {
 function asJsonArray(value) {
     return value;
 }
+const LOCAL_TRANSACTION_OPTIONS = {
+    maxWait: 10_000,
+    timeout: 60_000
+};
 export async function createAuditRun(input) {
     return prisma.auditRun.create({
         data: {
@@ -19,15 +24,22 @@ export async function createAuditRun(input) {
     });
 }
 export async function markAuditRunning(auditRunId) {
+    const leaseExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
     return prisma.auditRun.update({
         where: { id: auditRunId },
-        data: { runStatus: 'running', startedAt: new Date() }
+        data: { runStatus: 'running', startedAt: new Date(), leaseExpiresAt }
     });
 }
 export async function markAuditCompleted(auditRunId, summary) {
     return prisma.auditRun.update({
         where: { id: auditRunId },
         data: { runStatus: 'completed', completedAt: new Date(), summary }
+    });
+}
+export async function markAuditPaused(auditRunId, summary) {
+    return prisma.auditRun.update({
+        where: { id: auditRunId },
+        data: { runStatus: 'paused', summary }
     });
 }
 export async function markAuditFailed(auditRunId, errorMessage) {
@@ -262,7 +274,99 @@ export async function persistGraphSnapshot(input) {
 export async function listOrganizationProjects(organizationId) {
     return prisma.project.findMany({
         where: { organizationId },
-        orderBy: { createdAt: 'desc' }
+        orderBy: { createdAt: 'desc' },
+        include: { projectSettings: true }
+    });
+}
+function slugifyProjectName(name) {
+    const base = name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 40);
+    return base || 'project';
+}
+export function slugifyProjectNameForRepo(name) {
+    return slugifyProjectName(name);
+}
+function externalProjectIdFromRepoUrl(repoUrl, fallback) {
+    try {
+        const pathname = new URL(repoUrl).pathname.replace(/^\//, '').replace(/\.git$/, '');
+        return pathname || fallback;
+    }
+    catch {
+        return fallback;
+    }
+}
+export async function createOrganizationProject(input) {
+    const slugBase = slugifyProjectName(input.name);
+    const slug = `${slugBase}-${Date.now().toString(36).slice(-6)}`;
+    const externalProjectId = input.repoUrl
+        ? externalProjectIdFromRepoUrl(input.repoUrl, slug)
+        : slug;
+    const metadata = {};
+    if (input.scanCodeSnippet) {
+        metadata.scanCodeSnippet = input.scanCodeSnippet;
+    }
+    return prisma.$transaction(async (tx) => {
+        const project = await tx.project.create({
+            data: {
+                organizationId: input.organizationId,
+                name: input.name,
+                slug,
+                provider: input.provider,
+                repoUrl: input.repoUrl,
+                defaultBranch: input.defaultBranch ?? 'main',
+                externalProjectId,
+                createdById: input.createdById,
+                metadata: asJsonObject(metadata)
+            },
+            include: { projectSettings: true }
+        });
+        await tx.projectSetting.create({
+            data: { projectId: project.id }
+        });
+        return {
+            ...project,
+            projectSettings: await tx.projectSetting.findUnique({
+                where: { projectId: project.id }
+            })
+        };
+    });
+}
+export async function updateProjectSettings(input) {
+    const project = await prisma.project.findFirstOrThrow({
+        where: {
+            id: input.projectId,
+            organizationId: input.organizationId
+        }
+    });
+    const current = await prisma.projectSetting.findUnique({
+        where: { projectId: project.id }
+    });
+    return prisma.projectSetting.upsert({
+        where: { projectId: project.id },
+        update: {
+            autoRunOnPush: input.autoRunOnPush ?? current?.autoRunOnPush,
+            autoPublishApprovedIssues: input.autoPublishApprovedIssues ?? current?.autoPublishApprovedIssues,
+            auditDefaultBranchOnly: input.auditDefaultBranchOnly ?? current?.auditDefaultBranchOnly,
+            enabledAgents: input.enabledAgents ?? current?.enabledAgents,
+            severityThreshold: input.severityThreshold ?? current?.severityThreshold,
+            labelsTemplate: input.labelsTemplate ?? current?.labelsTemplate,
+            ignorePaths: input.ignorePaths ?? current?.ignorePaths,
+            notificationSettings: (input.notificationSettings ?? current?.notificationSettings ?? {})
+        },
+        create: {
+            projectId: project.id,
+            autoRunOnPush: input.autoRunOnPush ?? false,
+            autoPublishApprovedIssues: input.autoPublishApprovedIssues ?? false,
+            auditDefaultBranchOnly: input.auditDefaultBranchOnly ?? true,
+            enabledAgents: (input.enabledAgents ?? []),
+            severityThreshold: input.severityThreshold ?? 'medium',
+            labelsTemplate: (input.labelsTemplate ?? []),
+            ignorePaths: (input.ignorePaths ?? []),
+            notificationSettings: (input.notificationSettings ?? {})
+        }
     });
 }
 export async function getIssueCandidateDetails(issueCandidateId) {
@@ -277,11 +381,126 @@ export async function getIssueCandidateDetails(issueCandidateId) {
         }
     });
 }
+export class PublishNotApprovedError extends Error {
+    code = 'publish_not_approved';
+    field = 'reviewerStatus';
+    status = 422;
+    constructor() {
+        super('Issue must be explicitly approved or edited before publish. Confirm the finding in review, then publish.');
+        this.name = 'PublishNotApprovedError';
+    }
+}
+export async function assertIssueCandidateApprovedForPublish(issueCandidateId) {
+    const issue = await prisma.issueCandidate.findUniqueOrThrow({
+        where: { id: issueCandidateId },
+        select: { reviewerStatus: true, publishedIssue: { select: { id: true } } }
+    });
+    if (issue.publishedIssue) {
+        return;
+    }
+    if (issue.reviewerStatus !== ReviewStatus.APPROVED &&
+        issue.reviewerStatus !== ReviewStatus.EDITED) {
+        throw new PublishNotApprovedError();
+    }
+}
+export async function splitIssueCandidate(input) {
+    return prisma.$transaction(async (tx) => {
+        const parent = await tx.issueCandidate.findUniqueOrThrow({
+            where: { id: input.issueCandidateId },
+            include: {
+                cluster: { include: { members: true } }
+            }
+        });
+        const clusterKey = `${parent.cluster.clusterKey}:split:${Date.now()}`;
+        const splitCluster = await tx.dedupeCluster.create({
+            data: {
+                organizationId: parent.organizationId,
+                projectId: parent.projectId,
+                auditRunId: parent.auditRunId,
+                clusterKey,
+                categoryOwner: parent.category,
+                titleHint: input.title,
+                severity: parent.severity,
+                confidence: parent.confidence,
+                blastRadius: parent.blastRadius,
+                assetScope: asJsonArray(Array.isArray(parent.cluster.assetScope) ? parent.cluster.assetScope : []),
+                triggerSignature: asJsonArray(Array.isArray(parent.cluster.triggerSignature) ? parent.cluster.triggerSignature : [])
+            }
+        });
+        if (parent.cluster.members.length > 0) {
+            await tx.dedupeClusterMember.createMany({
+                data: parent.cluster.members.map((member) => ({
+                    clusterId: splitCluster.id,
+                    findingId: member.findingId,
+                    role: member.role,
+                    similarityScore: member.similarityScore
+                }))
+            });
+        }
+        const child = await tx.issueCandidate.create({
+            data: {
+                organizationId: parent.organizationId,
+                projectId: parent.projectId,
+                auditRunId: parent.auditRunId,
+                clusterId: splitCluster.id,
+                title: input.title,
+                category: parent.category,
+                severity: parent.severity,
+                priority: parent.priority,
+                confidence: parent.confidence,
+                predictedFailureSummary: parent.predictedFailureSummary,
+                failureMode: parent.failureMode,
+                blastRadius: parent.blastRadius,
+                whyItMatters: parent.whyItMatters,
+                triggerConditions: asJsonArray(Array.isArray(parent.triggerConditions) ? parent.triggerConditions : []),
+                evidence: asJsonArray(Array.isArray(parent.evidence) ? parent.evidence : []),
+                recommendedActionSummary: parent.recommendedActionSummary,
+                implementationSteps: asJsonArray(Array.isArray(parent.implementationSteps) ? parent.implementationSteps : []),
+                doneCriteria: asJsonArray(Array.isArray(parent.doneCriteria) ? parent.doneCriteria : []),
+                affectedAssets: asJsonArray(Array.isArray(parent.affectedAssets) ? parent.affectedAssets : []),
+                sourceAgents: asJsonArray(Array.isArray(parent.sourceAgents) ? parent.sourceAgents : []),
+                sourceFindings: asJsonArray(Array.isArray(parent.sourceFindings) ? parent.sourceFindings : []),
+                validationStatus: parent.validationStatus,
+                validationErrors: asJsonArray(Array.isArray(parent.validationErrors) ? parent.validationErrors : []),
+                reviewerStatus: 'pending',
+                reviewerNotes: input.notes ?? null,
+                versions: {
+                    create: {
+                        versionNo: 1,
+                        editedById: input.actorId,
+                        editReason: input.notes ?? 'Split from parent issue candidate',
+                        bodySnapshot: asJsonObject({
+                            title: input.title,
+                            splitFromIssueCandidateId: parent.id
+                        })
+                    }
+                }
+            }
+        });
+        await tx.issueCandidate.update({
+            where: { id: parent.id },
+            data: {
+                reviewerNotes: input.notes ?? `Split child created: ${child.id}`
+            }
+        });
+        const action = await tx.reviewAction.create({
+            data: {
+                issueCandidateId: parent.id,
+                actorId: input.actorId,
+                actionType: ReviewAction.SPLIT,
+                notes: input.notes,
+                payload: asJsonObject({
+                    title: input.title,
+                    childIssueCandidateId: child.id,
+                    splitClusterId: splitCluster.id
+                })
+            }
+        });
+        return { parent, child, action };
+    });
+}
 export async function recordReviewAction(input) {
     return prisma.$transaction(async (tx) => {
-        const issue = await tx.issueCandidate.findUniqueOrThrow({
-            where: { id: input.issueCandidateId }
-        });
         const action = await tx.reviewAction.create({
             data: {
                 issueCandidateId: input.issueCandidateId,
@@ -291,7 +510,7 @@ export async function recordReviewAction(input) {
                 payload: asJsonObject(input.payload)
             }
         });
-        if (input.actionType === 'approve') {
+        if (input.actionType === ReviewAction.APPROVE) {
             await tx.issueCandidate.update({
                 where: { id: input.issueCandidateId },
                 data: {
@@ -300,14 +519,27 @@ export async function recordReviewAction(input) {
                     approvedAt: new Date()
                 }
             });
+            return action;
         }
-        if (input.actionType === 'reject') {
+        if (input.actionType === ReviewAction.REJECT) {
             await tx.issueCandidate.update({
                 where: { id: input.issueCandidateId },
                 data: { reviewerStatus: 'rejected', reviewerNotes: input.notes }
             });
+            return action;
         }
-        if (input.actionType === 'edit') {
+        const issue = await tx.issueCandidate.findUniqueOrThrow({
+            where: { id: input.issueCandidateId }
+        });
+        if (input.actionType === ReviewAction.EDIT) {
+            const isDeferred = input.payload?.deferred === true;
+            if (isDeferred) {
+                await tx.issueCandidate.update({
+                    where: { id: input.issueCandidateId },
+                    data: { reviewerNotes: input.notes ?? issue.reviewerNotes }
+                });
+                return action;
+            }
             const versionCount = await tx.issueCandidateVersion.count({
                 where: { issueCandidateId: input.issueCandidateId }
             });
@@ -331,34 +563,68 @@ export async function recordReviewAction(input) {
                         : issue.recommendedActionSummary
                 }
             });
+            return action;
+        }
+        if (input.actionType === ReviewAction.MERGE) {
+            await tx.issueCandidate.update({
+                where: { id: input.issueCandidateId },
+                data: {
+                    reviewerStatus: 'rejected',
+                    reviewerNotes: input.notes ??
+                        (typeof input.payload?.mergedIntoIssueCandidateId === 'string'
+                            ? `Merged into ${input.payload.mergedIntoIssueCandidateId}`
+                            : 'Merged duplicate finding')
+                }
+            });
+            return action;
+        }
+        if (input.actionType === ReviewAction.SPLIT) {
+            // Real split creates a child issue via splitIssueCandidate().
+            await tx.issueCandidate.update({
+                where: { id: input.issueCandidateId },
+                data: {
+                    title: typeof input.payload?.title === 'string' ? input.payload.title : issue.title,
+                    reviewerNotes: input.notes ?? issue.reviewerNotes
+                }
+            });
+            return action;
         }
         return action;
-    });
+    }, LOCAL_TRANSACTION_OPTIONS);
 }
 export async function listRecentAuditRuns(limit = 12) {
     return prisma.auditRun.findMany({
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: {
-            issueCandidates: {
-                select: {
-                    id: true,
-                    reviewerStatus: true,
-                    validationStatus: true
-                }
-            },
-            rejectedIssueCandidateArtifacts: {
-                select: {
-                    id: true
-                }
-            },
-            events: {
-                orderBy: { createdAt: 'asc' },
-                select: {
-                    eventType: true,
-                    createdAt: true
-                }
-            }
+        include: listRecentAuditRunsInclude
+    });
+}
+const listRecentAuditRunsInclude = {
+    issueCandidates: {
+        select: {
+            id: true,
+            reviewerStatus: true,
+            validationStatus: true
         }
+    },
+    rejectedIssueCandidateArtifacts: {
+        select: {
+            id: true
+        }
+    },
+    events: {
+        orderBy: { createdAt: 'asc' },
+        select: {
+            eventType: true,
+            createdAt: true
+        }
+    }
+};
+export async function listRecentAuditRunsForOrganization(organizationId, limit = 12) {
+    return prisma.auditRun.findMany({
+        where: { organizationId },
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: listRecentAuditRunsInclude
     });
 }

@@ -4,9 +4,12 @@ import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { loadPremortemProductionEnv } from '../load-local-env.mjs';
 import { withHiddenRootDeployConfig } from './with-hidden-root-deploy-config.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+loadPremortemProductionEnv(ROOT);
+process.env.CLOUDFLARE_ENV = 'production';
 
 function run(command, args) {
   const result = spawnSync(command, args, {
@@ -25,8 +28,12 @@ function run(command, args) {
 const exitCode = withHiddenRootDeployConfig(() => {
   const steps = [
     ['pnpm', ['--dir', 'apps/web', 'run', 'predeploy']],
-    ['pnpm', ['--filter', '@premortem/web', 'exec', 'opennextjs-cloudflare', 'build', '--dangerouslyUseUnsupportedNextVersion']],
-    ['pnpm', ['--filter', '@premortem/web', 'exec', 'opennextjs-cloudflare', 'deploy']]
+    [
+      'pnpm',
+      ['--dir', 'apps/web', 'exec', 'opennextjs-cloudflare', 'build', '--dangerouslyUseUnsupportedNextVersion']
+    ],
+    ['node', ['./scripts/cloudflare/sanitize-open-next-env.mjs', 'apps/web/.open-next/cloudflare/next-env.mjs']],
+    ['pnpm', ['--dir', 'apps/web', 'exec', 'opennextjs-cloudflare', 'deploy']]
   ];
 
   for (const [command, args] of steps) {

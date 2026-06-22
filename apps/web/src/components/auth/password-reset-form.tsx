@@ -29,6 +29,19 @@ function getSupabaseClient() {
   return createClient(url, anonKey);
 }
 
+function getCanonicalAppOrigin() {
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (!configured) {
+    return window.location.origin;
+  }
+
+  try {
+    return new URL(configured).origin;
+  } catch {
+    return configured.replace(/\/$/, '');
+  }
+}
+
 export function PasswordResetForm({
   mode,
   title,
@@ -59,7 +72,7 @@ export function PasswordResetForm({
       }
 
       if (isRequestMode) {
-        const redirectTo = new URL(authLinks.resetPassword, window.location.origin);
+        const redirectTo = new URL(authLinks.resetPassword, getCanonicalAppOrigin());
         redirectTo.pathname = authLinks.callback;
         redirectTo.searchParams.set('next', authLinks.resetPassword);
 

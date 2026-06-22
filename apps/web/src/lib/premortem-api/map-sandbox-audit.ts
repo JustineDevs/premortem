@@ -3,8 +3,8 @@ import { ConsoleIssueStatus } from '@premortem/domain';
 import type { AuditRun, Finding } from '@/lib/premortem-os/types';
 import { performStaticAudit } from '@/lib/premortem-os/static-audit';
 
-export function mapSandboxScanToAuditRun(customSnippet: string): AuditRun {
-  const { overallScore, findings } = performStaticAudit(customSnippet);
+export async function mapSandboxScanToAuditRun(customSnippet: string): Promise<AuditRun> {
+  const { overallScore, findings } = await performStaticAudit(customSnippet);
   const auditId = `sandbox-${Date.now().toString(36)}`;
 
   const mappedFindings: Finding[] = findings.map((finding, index) => ({
@@ -17,7 +17,15 @@ export function mapSandboxScanToAuditRun(customSnippet: string): AuditRun {
     line: finding.line,
     description: finding.description,
     evidence: finding.evidence,
-    trace: finding.trace,
+    trace: Array.isArray(finding.trace)
+      ? finding.trace
+      : [
+          {
+            step: 1,
+            description: finding.description,
+            location: finding.filepath
+          }
+        ],
     recommendation: finding.recommendation,
     aiReasoning: finding.aiReasoning,
     suggestedPatchCode: finding.suggestedPatchCode

@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: Premortem canonical eval for issue validator prompt surface.
+prompts:
+  - file://prompt-loader.mjs
+providers:
+  - file://provider.mjs
+defaultTest:
+  threshold: 0.95
+  options:
+    provider:
+      id: premortem-issue-validator
+      config:
+        temperature: 0.1
+tests:
+  - file://tests-issue-validator.mjs

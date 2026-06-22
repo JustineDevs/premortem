@@ -5,7 +5,6 @@ import {
   ConsoleReviewAction,
   ReviewAction,
   consoleReviewActionNotes,
-  consoleReviewActionPayload,
   consoleReviewActionToReviewAction
 } from '@premortem/domain';
 
@@ -19,9 +18,18 @@ import {
   splitRuntimeIssue
 } from '@/lib/premortem-api/client';
 import { CanonicalEvents } from '@/lib/canonical/events';
+import { bffErrorResponse } from '@/lib/server/bff-errors';
 import { bffRateLimitKey, bffRateLimitResponse, checkBffRateLimit } from '@/lib/server/bff-rate-limit';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
+import {
+  readJsonRecord,
+  readOptionalRecord,
+  readOptionalString,
+  readOptionalStringLiteral
+} from '@/lib/server/request-body';
 import { trackServerEvent } from '@/lib/server/track-server-event';
+
+const ALLOWED_CONSOLE_ACTIONS = Object.values(ConsoleReviewAction) as ConsoleReviewActionValue[];
 
 export async function POST(
   request: Request,
@@ -33,33 +41,27 @@ export async function POST(
     return bffRateLimitResponse();
   }
 
-  const body = (await request.json()) as {
-    action?: ConsoleReviewActionValue;
-    mergedIntoIssueCandidateId?: string;
-    fields?: {
-      title?: string;
-      whyItMatters?: string;
-      recommendedActionSummary?: string;
-    };
-  };
+  const body = (await readJsonRecord(request)) ?? {};
+  const action = readOptionalStringLiteral(body, 'action', ALLOWED_CONSOLE_ACTIONS);
+  const fields = readOptionalRecord(body, 'fields') ?? undefined;
 
-  if (!body.action) {
+  if (!action) {
     return NextResponse.json({ error: 'action is required' }, { status: 400 });
   }
 
   try {
     const context = await resolveRequestActorContext(request);
     const headers = actorHeaders(context);
-    const reviewAction = consoleReviewActionToReviewAction(body.action);
-    const notes = consoleReviewActionNotes(body.action);
-    const payload = consoleReviewActionPayload(body.action, body.fields);
+    const reviewAction = consoleReviewActionToReviewAction(action);
+    const notes = consoleReviewActionNotes(action);
 
     if (reviewAction === ReviewAction.APPROVE) {
       await approveRuntimeIssue(issueId, notes, headers);
     } else if (reviewAction === ReviewAction.REJECT) {
       await rejectRuntimeIssue(issueId, notes, headers);
     } else if (reviewAction === ReviewAction.MERGE) {
-      if (!body.mergedIntoIssueCandidateId) {
+      const mergedIntoIssueCandidateId = readOptionalString(body, 'mergedIntoIssueCandidateId');
+      if (!mergedIntoIssueCandidateId) {
         return NextResponse.json(
           { error: 'mergedIntoIssueCandidateId is required for merge' },
           { status: 400 }
@@ -68,13 +70,13 @@ export async function POST(
       await mergeRuntimeIssue(
         issueId,
         {
-          mergedIntoIssueCandidateId: body.mergedIntoIssueCandidateId,
+          mergedIntoIssueCandidateId,
           notes
         },
         headers
       );
     } else if (reviewAction === ReviewAction.SPLIT) {
-      await splitRuntimeIssue(issueId, body.fields ?? {}, headers);
+      await splitRuntimeIssue(issueId, fields ?? {}, headers);
     } else if (reviewAction === ReviewAction.EDIT && body.action === ConsoleReviewAction.DEFER) {
       await deferRuntimeIssue(issueId, notes, headers);
     } else if (reviewAction === ReviewAction.PUBLISH) {
@@ -88,8 +90,8 @@ export async function POST(
       return NextResponse.json({ error: 'Unsupported action' }, { status: 400 });
     }
 
-    if (body.fields && Object.keys(body.fields).length > 0 && reviewAction !== ReviewAction.SPLIT) {
-      await editRuntimeIssue(issueId, body.fields, headers);
+    if (fields && Object.keys(fields).length > 0 && reviewAction !== ReviewAction.SPLIT) {
+      await editRuntimeIssue(issueId, fields, headers);
     }
 
     trackServerEvent(context.profileId, CanonicalEvents.issueReviewed, {
@@ -102,12 +104,10 @@ export async function POST(
       success: true,
       auditId: id,
       issueId,
-      action: body.action,
+      action,
       reviewAction
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Review action failed';
-    const status = message.includes('(422)') ? 422 : 502;
-    return NextResponse.json({ error: message }, { status });
+    return bffErrorResponse(error, 'Review action failed');
   }
 }

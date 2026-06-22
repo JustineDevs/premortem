@@ -1,3 +1,7 @@
+/**
+ * Orchestrates the end-to-end audit lifecycle: submit, execute, persist, and
+ * snapshot the runtime state that powers the reviewer console.
+ */
 import { AuditEvent, AuditCheckpointPhase, DEFAULT_GEMINI_MODEL, RUNTIME_LANE_AGENTS, STRUCTURE_LANE_AGENTS } from '@premortem/domain';
 import {
   assertCanRunAudit,
@@ -20,20 +24,28 @@ import {
 import type { CanonicalFinding, IssueCandidate } from '@premortem/agent-kit';
 import type { GraphSnapshotPayload } from '@premortem/graph-model';
 import { buildAuditJob, type AuditJob } from '@premortem/workflow';
-import { uploadArtifact, downloadArtifact } from '@premortem/storage';
 import {
-  appendAuditMissionToPhoenixDataset,
   captureServerException,
   createLangfuseScore,
+  isLangfuseConfigured,
+  trackServerEvent,
+} from '@premortem/observability';
+import {
+  ensurePremortemAuditJudgePrompt,
+  isPhoenixPromptSyncEnabled
+} from '@premortem/observability/phoenix-prompts';
+import {
+  appendAuditMissionToPhoenixDataset,
+  ensurePremortemAuditDataset,
+  isPhoenixDatasetSyncEnabled
+} from '@premortem/observability/phoenix-datasets';
+import {
   evaluateAuditMissionQuality,
   evaluateAuditMissionWithLlmJudge,
-  isLangfuseConfigured,
-  isPhoenixDatasetSyncEnabled,
   isPhoenixLlmEvalEnabled,
-  trackServerEvent,
   trace,
   tracePremortemAuditJob
-} from '@premortem/observability';
+} from '../telemetry/phoenix-lite';
 import { isNeo4jGraphEnabled, writeGraphSnapshotToNeo4j } from '@premortem/integrations';
 import { isProductionMode } from '@premortem/domain';
 import { clusterFindings } from '../merge/cluster-findings';
@@ -52,8 +64,20 @@ import {
   saveIssueCandidates,
   saveRejectedIssueArtifacts
 } from '../services/audit-persistence';
+import { normalizePersistedEvidenceRefs } from '../evidence/persisted-evidence';
 import { buildGraphFromIngestion } from '../graph/build-graph-snapshot';
-import { resolveGraphSnapshotPayload } from '../graph/resolve-graph-payload';
+import {
+  buildGraphGroundingContext,
+  summarizeGraphGrounding
+} from '../graph/graph-grounding';
+import {
+  AUDIT_WORKFLOW_CONTRACT,
+  DEFAULT_SPECIALIST_CONCURRENCY
+} from './audit-workflow-contract';
+import {
+  resolveGraphSnapshotPayload,
+  resolveStrictGraphSnapshotPayload
+} from '../graph/resolve-graph-payload';
 import { enrichEvidenceWithSourceSnippets } from '../evidence/resolve-evidence-snippets';
 import { prepareAuditExecution } from './prepare-audit-context';
 import {
@@ -76,6 +100,17 @@ interface AgentBuilderMissionTrace {
   engine: 'orchestrator-inline-trace';
   model: string;
   gitlabMcpEnabled: boolean;
+  workflow: {
+    goal: string;
+    loopPolicy: typeof AUDIT_WORKFLOW_CONTRACT.loopPolicy;
+    triage: typeof AUDIT_WORKFLOW_CONTRACT.triage;
+    circuitBreakers: readonly string[];
+  };
+  analysisRoles: {
+    auditor: string[];
+    critic: string[];
+    synthesizer: string[];
+  };
   steps: Array<{ step: string; at: string; detail?: Record<string, unknown> }>;
 }
 
@@ -92,6 +127,28 @@ function uniqueEvidence(values: CanonicalFinding['evidence']) {
     if (!duplicate) merged.push(item);
   }
   return merged;
+}
+
+type IssueCandidateCountSource = Record<string, unknown> & {
+  _count?: {
+    versions?: number;
+    validationResults?: number;
+  };
+};
+
+function countIssueCandidateRelation(
+  issue: IssueCandidateCountSource,
+  relation: 'versions' | 'validationResults'
+) {
+  const counted = issue._count?.[relation];
+  if (typeof counted === 'number') return counted;
+
+  const value = issue[relation];
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function readEvidenceRefs(value: unknown): CanonicalFinding['evidence'] {
+  return normalizePersistedEvidenceRefs(value);
 }
 
 function mergeFindingRecords(existing: CanonicalFinding, incoming: CanonicalFinding): CanonicalFinding {
@@ -142,6 +199,37 @@ function dedupeFindings(findings: CanonicalFinding[]) {
   return [...unique.values()];
 }
 
+async function runWithConcurrencyLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await worker(items[currentIndex]!, currentIndex);
+    }
+  });
+
+  await Promise.all(runners);
+  return results;
+}
+
+/**
+ * Filter the active swarm to the subset enabled for the current project settings.
+ *
+ * @param agents - Registered agents in registry order.
+ * @param enabledAgents - Project-level allowlist of specialist agent names.
+ * @returns The filtered agent list, keeping always-on synthesis and validation agents.
+ */
 export function filterAgentsForProjectSettings(
   agents: RegisteredAgent[],
   enabledAgents: string[]
@@ -165,59 +253,100 @@ export function filterAgentsForProjectSettings(
 }
 
 export interface SubmitAuditInput {
+  /** Optional root directory used when the orchestrator is run from a local checkout. */
   rootDir?: string;
+  /** Organization that owns the audit run. */
   organizationId: string;
+  /** Project being scanned. */
   projectId: string;
+  /** Branch to analyze. */
   branch: string;
+  /** Optional commit SHA for traceability. */
   commitSha?: string;
+  /** Actor that triggered the run, if known. */
   triggeredById?: string;
+  /** Source of the trigger for telemetry and policy decisions. */
   triggerSource?: 'manual' | 'webhook' | 'scheduled' | 'api';
 }
 
 export interface ExecuteAuditJobInput {
+  /** Optional root directory used when loading prompts and repo fixtures. */
   rootDir?: string;
+  /** The persisted job payload to execute. */
   job: AuditJob;
+  /** Optional prebuilt registry agents for test and worker injection. */
   registryAgents?: RegisteredAgent[];
 }
 
 export interface SubmittedAuditResult {
+  /** Newly created or reused audit run identifier. */
   auditRunId: string;
+  /** Queue state after submission. */
   runStatus: 'queued';
+  /** Deterministic idempotency key used to deduplicate submissions. */
   idempotencyKey: string;
+  /** Normalized audit job payload that was queued. */
   job: AuditJob;
+  /** Present when the submission reused an already running audit. */
   reusedActiveRun?: boolean;
 }
 
 export interface AuditExecutionResult {
+  /** Audit run identifier that completed or failed. */
   auditRunId: string;
+  /** Terminal state after orchestration finishes. */
   runStatus: 'completed' | 'failed' | 'paused';
+  /** Number of canonical findings persisted for the run. */
   findingsCount: number;
+  /** Number of clusters produced from those findings. */
   clusterCount: number;
+  /** Number of review-ready issue candidates created. */
   issueCandidateCount: number;
+  /** Number of rejected or invalid issue candidates. */
   rejectedIssueCount: number;
 }
 
 export interface AuditRunListItem {
+  /** Audit run identifier shown in list views. */
   auditRunId: string;
+  /** Project associated with the audit run. */
   projectId: string;
+  /** Display name of the project for UI rendering without a second lookup. */
+  projectName: string;
+  /** Branch analyzed by the audit run. */
   branch: string;
+  /** Optional commit SHA for the audit run. */
   commitSha?: string | null;
+  /** Current run state used by the console. */
   runStatus: string;
+  /** Creation timestamp used for ordering. */
   createdAt: string;
+  /** Number of issues ready for review. */
   reviewableIssueCount: number;
+  /** Number of issue candidates rejected by validation. */
   rejectedIssueCount: number;
+  /** Most recent event type attached to the run. */
   latestEventType?: string;
 }
 
 export interface AuditRunSnapshot {
+  /** Audit run identifier for this snapshot. */
   auditRunId: string;
+  /** Organization that owns the run. */
   organizationId: string;
+  /** Project that was scanned. */
   projectId: string;
+  /** Branch analyzed during the run. */
   branch: string;
+  /** Optional commit SHA for the run. */
   commitSha?: string | null;
+  /** Terminal or in-flight state of the run. */
   runStatus: string;
+  /** Error message surfaced from a failed run, if any. */
   errorMessage?: string | null;
+  /** Free-form summary emitted by the orchestrator for console rendering. */
   summary: unknown;
+  /** Persisted graph snapshot metadata and payload for traceability views. */
   graphSnapshot?: {
     id: string;
     nodeCount: number;
@@ -226,21 +355,32 @@ export interface AuditRunSnapshot {
     storageRef?: string | null;
     payload?: unknown;
   } | null;
+  /** Aggregate counts used by dashboard badges and progress indicators. */
   counts: {
+    /** Total agent run records for the audit. */
     agentRuns: number;
+    /** Total canonical findings for the audit. */
     findings: number;
+    /** Total clusters merged from the findings. */
     clusters: number;
+    /** Total review-ready issue candidates. */
     issueCandidates: number;
+    /** Total rejected issue candidate artifacts. */
     rejectedIssueCandidateArtifacts: number;
+    /** Total saved issue candidate versions. */
     issueCandidateVersions: number;
+    /** Total validation results recorded for the run. */
     validationResults: number;
+    /** Total event records emitted during orchestration. */
     events: number;
   };
+  /** Ordered event stream used for timeline rendering. */
   events: Array<{
     eventType: string;
     actor: string;
     createdAt: string;
   }>;
+  /** Per-agent runtime records in execution order. */
   agentRuns: Array<{
     id: string;
     agentName: string;
@@ -248,6 +388,7 @@ export interface AuditRunSnapshot {
     startedAt?: string | null;
     completedAt?: string | null;
   }>;
+  /** Canonical findings stored for the run. */
   findings: Array<{
     id: string;
     findingKey: string;
@@ -263,6 +404,7 @@ export interface AuditRunSnapshot {
     recommendedControls?: string[];
     evidence?: Array<{ kind: string; ref: string; reason: string; codeSnippet?: string }>;
   }>;
+  /** Clustered groups of related findings. */
   clusters: Array<{
     id: string;
     categoryOwner: string;
@@ -271,6 +413,7 @@ export interface AuditRunSnapshot {
     findingCount: number;
     memberFindingIds?: string[];
   }>;
+  /** Reviewable issue candidates and their synthesis metadata. */
   issueCandidates: Array<{
     id: string;
     title: string;
@@ -290,6 +433,7 @@ export interface AuditRunSnapshot {
     sourceFindings?: string[];
     evidence?: Array<{ kind: string; ref: string; reason: string; codeSnippet?: string }>;
   }>;
+  /** Issue candidates that validation rejected. */
   rejectedIssueCandidates: Array<{
     id: string;
     title: string;
@@ -297,6 +441,7 @@ export interface AuditRunSnapshot {
     validatorName: string;
     validationErrorCount: number;
   }>;
+  /** Lineage map from raw findings through clustering and issue synthesis. */
   lineage: Array<{
     stage: string;
     id: string;
@@ -323,13 +468,19 @@ async function loadGraphPayloadForResume(auditRunId: string) {
     throw new Error('Missing graph snapshot for resumed audit run');
   }
 
-  const payload = await resolveGraphSnapshotPayload({
-    auditRunId,
-    projectId: auditRun.projectId,
-    storageRef: auditRun.graphSnapshot.storageRef,
-    metadata: auditRun.graphSnapshot.metadata as Record<string, unknown>,
-    download: downloadArtifact
-  });
+  const payload = isProductionMode()
+    ? await resolveStrictGraphSnapshotPayload({
+        auditRunId,
+        projectId: auditRun.projectId,
+        metadata: auditRun.graphSnapshot.metadata as Record<string, unknown>,
+        storageRef: auditRun.graphSnapshot.storageRef
+      })
+    : await resolveGraphSnapshotPayload({
+        auditRunId,
+        projectId: auditRun.projectId,
+        metadata: auditRun.graphSnapshot.metadata as Record<string, unknown>,
+        storageRef: auditRun.graphSnapshot.storageRef
+      });
 
   if (!payload) {
     throw new Error('Unable to load graph payload for resumed audit run');
@@ -376,9 +527,7 @@ async function loadFindingsForClustering(auditRunId: string): Promise<CanonicalF
     },
     why_it_matters: row.whyItMatters ?? row.predictedFailureSummary,
     affected_assets: Array.isArray(row.affectedAssets) ? (row.affectedAssets as string[]) : [],
-    evidence: Array.isArray(row.evidence)
-      ? (row.evidence as unknown as CanonicalFinding['evidence'])
-      : [],
+    evidence: readEvidenceRefs(row.evidence),
     recommended_controls: Array.isArray(row.recommendedControls)
       ? (row.recommendedControls as string[])
       : [],
@@ -487,6 +636,7 @@ function createAgentBuilderMissionTrace(input: {
   branch: string;
   ingestionSource: 'local' | 'gitlab';
   model: string;
+  analysisRoles: AgentBuilderMissionTrace['analysisRoles'];
 }): AgentBuilderMissionTrace {
   const traceSteps: AgentBuilderMissionTrace['steps'] = [
     {
@@ -544,6 +694,13 @@ function createAgentBuilderMissionTrace(input: {
     engine: 'orchestrator-inline-trace',
     model: input.model,
     gitlabMcpEnabled: input.ingestionSource === 'gitlab',
+    workflow: {
+      goal: AUDIT_WORKFLOW_CONTRACT.goal,
+      loopPolicy: AUDIT_WORKFLOW_CONTRACT.loopPolicy,
+      triage: AUDIT_WORKFLOW_CONTRACT.triage,
+      circuitBreakers: AUDIT_WORKFLOW_CONTRACT.circuitBreakers
+    },
+    analysisRoles: input.analysisRoles,
     steps: traceSteps
   };
 }
@@ -558,12 +715,20 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
     input.registryAgents ?? prepared.agents,
     prepared.projectSettings.enabledAgents
   );
+  const analysisRoles = agents.reduce<AgentBuilderMissionTrace['analysisRoles']>(
+    (acc, agent) => {
+      acc[agent.analysisRole].push(agent.name);
+      return acc;
+    },
+    { auditor: [], critic: [], synthesizer: [] }
+  );
   const agentBuilderMission = createAgentBuilderMissionTrace({
     auditRunId: input.job.id,
     projectId: input.job.projectId,
     branch: input.job.branch,
     ingestionSource: prepared.ingestionSource,
-    model: prepared.llmConfig.model ?? DEFAULT_GEMINI_MODEL
+    model: prepared.llmConfig.model ?? DEFAULT_GEMINI_MODEL,
+    analysisRoles
   });
   ingestion.metadata = {
     ...ingestion.metadata,
@@ -638,13 +803,11 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
         bundle: ingestion
       });
 
-      let storageRef: string | null = null;
       let graphPersistedToNeo4j = false;
 
       if (isNeo4jGraphEnabled()) {
         try {
           await writeGraphSnapshotToNeo4j(graphPayload);
-          storageRef = `neo4j://${input.job.id}`;
           graphPersistedToNeo4j = true;
         } catch (neo4jError) {
           captureServerException(neo4jError, { auditRunId: input.job.id, kind: 'graph-neo4j' });
@@ -658,20 +821,6 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
         throw new Error(
           'Neo4j is required in production mode. Set NEO4J_URI and start docker compose neo4j, or unset PREMORTEM_PRODUCTION_MODE for local fallback.'
         );
-      }
-
-      if (!graphPersistedToNeo4j) {
-        try {
-          storageRef = await uploadArtifact({
-            organizationId: input.job.organizationId,
-            projectId: input.job.projectId,
-            auditRunId: input.job.id,
-            kind: 'graph',
-            payload: graphPayload
-          });
-        } catch (storageError) {
-          captureServerException(storageError, { auditRunId: input.job.id, kind: 'graph' });
-        }
       }
 
       const savedGraph = await saveGraphSnapshot({
@@ -688,10 +837,10 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
           apps: ingestion.apps,
           services: ingestion.services,
           ingestionSource: prepared.ingestionSource,
-          graphStore: graphPersistedToNeo4j ? 'neo4j' : storageRef ? 'supabase' : 'inline',
-          ...(graphPersistedToNeo4j || storageRef ? {} : { inlinePayload: graphPayload })
+          graphStore: graphPersistedToNeo4j ? 'neo4j' : 'inline',
+          ...(graphPersistedToNeo4j ? {} : { inlinePayload: graphPayload })
         },
-        storageRef: storageRef ?? `graph://${input.job.id}`
+        storageRef: graphPersistedToNeo4j ? `neo4j://${input.job.id}` : `graph://${input.job.id}`
       });
       graphSnapshotId = savedGraph.id;
 
@@ -716,11 +865,19 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
 
     await assertAuditContinuing(input.job.id);
 
+    const graphGrounding = buildGraphGroundingContext({
+      graph: graphPayload,
+      sourcePaths: ingestion.source_files.map((source) => source.path)
+    });
+    const graphGroundingSummary = summarizeGraphGrounding(graphGrounding);
+
     const sharedPayload = {
       projectId: input.job.projectId,
       branch: input.job.branch,
       commitSha: input.job.commitSha,
       attempt: input.job.attempt,
+      analysis_roles: analysisRoles,
+      orbit_context: prepared.orbitContext,
       repo_tree: ingestion.repo_tree,
       ci_config: ingestion.ci_config,
       has_ci: ingestion.has_ci,
@@ -730,13 +887,300 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       existing_issues: ingestion.existing_issues,
       graph_nodes: graphPayload.nodes,
       graph_edges: graphPayload.edges,
+      graph_grounding: graphGroundingSummary,
       ingestion_metadata: ingestion.metadata,
       ingestion_source: prepared.ingestionSource,
+      workflow_contract: AUDIT_WORKFLOW_CONTRACT,
       validation_policy: {
         dedupe: dedupePolicy,
         severity: severityPolicy
       }
     };
+
+    const synthesisPayload = {
+      projectId: sharedPayload.projectId,
+      branch: sharedPayload.branch,
+      commitSha: sharedPayload.commitSha,
+      attempt: sharedPayload.attempt,
+      analysis_roles: sharedPayload.analysis_roles,
+      ingestion_source: sharedPayload.ingestion_source,
+      validation_policy: sharedPayload.validation_policy,
+      graph_grounding: sharedPayload.graph_grounding,
+      workflow_contract: sharedPayload.workflow_contract,
+      orbit_context: prepared.orbitContext
+        ? {
+            status: prepared.orbitContext.status,
+            reason: prepared.orbitContext.reason,
+            definitionMapCount: prepared.orbitContext.definitionMaps.length,
+            recentMergeRequestCount: prepared.orbitContext.recentMergeRequests.length,
+            recentPipelineCount: prepared.orbitContext.recentPipelines.length
+          }
+        : null
+    };
+
+    const releaseSafetyPayload = {
+      projectId: sharedPayload.projectId,
+      branch: sharedPayload.branch,
+      commitSha: sharedPayload.commitSha,
+      attempt: sharedPayload.attempt,
+      ci_config: sharedPayload.ci_config,
+      deploy_jobs: ingestion.ci_history.pipelines.slice(0, 10).map((pipeline) => ({
+        id: pipeline.id,
+        status: pipeline.status,
+        ref: pipeline.ref,
+        sha: pipeline.sha,
+        webUrl: pipeline.webUrl,
+        createdAt: pipeline.createdAt,
+        durationSeconds: pipeline.durationSeconds,
+        failedJobs: pipeline.failedJobs.slice(0, 5).map((job) => ({
+          id: job.id,
+          name: job.name,
+          stage: job.stage,
+          status: job.status,
+          webUrl: job.webUrl,
+          durationSeconds: job.durationSeconds,
+          failureReason: job.failureReason
+        }))
+      })),
+      migrations: ingestion.repo_tree
+        .filter((filePath) => filePath.includes('migrations/') || filePath.endsWith('.sql'))
+        .slice(0, 50),
+      release_docs: ingestion.repo_tree
+        .filter((filePath) => /(^|\/)(README|readme|docs)\b/.test(filePath))
+        .slice(0, 30),
+      validation_policy: sharedPayload.validation_policy
+    };
+
+    const analysisPayload = {
+      projectId: sharedPayload.projectId,
+      branch: sharedPayload.branch,
+      commitSha: sharedPayload.commitSha,
+      attempt: sharedPayload.attempt,
+      repo_tree: ingestion.repo_tree,
+      ci_config: ingestion.ci_config,
+      package_manifests: ingestion.package_manifests,
+      pipeline_files: ingestion.pipeline_files,
+      services: ingestion.services,
+      apps: ingestion.apps,
+      ownership_hints: ingestion.ownership_hints.slice(0, 80),
+      ci_history: {
+        pipelines: ingestion.ci_history.pipelines.slice(0, 10),
+        totals: ingestion.ci_history.totals,
+        recentFailedStages: ingestion.ci_history.recentFailedStages.slice(0, 20)
+      },
+      existing_issues: ingestion.existing_issues.slice(0, 20),
+      graph_nodes: graphPayload.nodes.slice(0, 120),
+      graph_edges: graphPayload.edges.slice(0, 160),
+      graph_grounding: sharedPayload.graph_grounding,
+      orbit_context: prepared.orbitContext
+        ? {
+            status: prepared.orbitContext.status,
+            reason: prepared.orbitContext.reason,
+            definitionMapCount: prepared.orbitContext.definitionMaps.length,
+            recentMergeRequestCount: prepared.orbitContext.recentMergeRequests.length,
+            recentPipelineCount: prepared.orbitContext.recentPipelines.length
+          }
+        : null,
+      validation_policy: sharedPayload.validation_policy
+    };
+
+    const topologyPayload = {
+      projectId: sharedPayload.projectId,
+      branch: sharedPayload.branch,
+      commitSha: sharedPayload.commitSha,
+      attempt: sharedPayload.attempt,
+      repo_tree: ingestion.repo_tree.slice(0, 400),
+      module_graph: {
+        nodes: graphPayload.nodes.slice(0, 160),
+        edges: graphPayload.edges.slice(0, 220)
+      },
+      graph_grounding: sharedPayload.graph_grounding,
+      ownership_hints: ingestion.ownership_hints.slice(0, 120),
+      git_history: {
+        pipelines: ingestion.ci_history.pipelines.slice(0, 8),
+        totals: ingestion.ci_history.totals,
+        recentFailedStages: ingestion.ci_history.recentFailedStages.slice(0, 20)
+      },
+      orbit_context: prepared.orbitContext
+        ? {
+            status: prepared.orbitContext.status,
+            reason: prepared.orbitContext.reason,
+            definitionMapCount: prepared.orbitContext.definitionMaps.length,
+            recentMergeRequestCount: prepared.orbitContext.recentMergeRequests.length,
+            recentPipelineCount: prepared.orbitContext.recentPipelines.length
+          }
+        : null
+    };
+
+    const crossRepoPayload = {
+      projectId: sharedPayload.projectId,
+      branch: sharedPayload.branch,
+      commitSha: sharedPayload.commitSha,
+      attempt: sharedPayload.attempt,
+      repo_tree: ingestion.repo_tree,
+      package_manifests: ingestion.package_manifests,
+      apps: ingestion.apps,
+      services: ingestion.services,
+      release_docs: ingestion.repo_tree
+        .filter((filePath) => /(^|\/)(README|readme|docs)\b/.test(filePath))
+        .slice(0, 30),
+      graph_grounding: sharedPayload.graph_grounding,
+      orbit_context: prepared.orbitContext
+        ? {
+            status: prepared.orbitContext.status,
+            reason: prepared.orbitContext.reason,
+            definitionMapCount: prepared.orbitContext.definitionMaps.length,
+            recentMergeRequestCount: prepared.orbitContext.recentMergeRequests.length,
+            recentPipelineCount: prepared.orbitContext.recentPipelines.length
+          }
+        : null,
+      validation_policy: sharedPayload.validation_policy
+    };
+
+    const generatedFiles = ingestion.repo_tree
+      .filter((filePath) =>
+        /(^|\/)(vendor|dist)\//.test(filePath) ||
+        /\.generated\.(ts|tsx|js|mjs|json)$/.test(filePath) ||
+        /\.(min|bundle)\.(js|mjs|css)$/.test(filePath) ||
+        /\/src\/.*\.(js|mjs)$/.test(filePath) ||
+        filePath.endsWith('client.js') ||
+        filePath.endsWith('index.js') ||
+        filePath.endsWith('repositories.js') ||
+        filePath.endsWith('audit-events.js') ||
+        filePath.endsWith('console-projection.js') ||
+        filePath.endsWith('review.js') ||
+        filePath.endsWith('severity.js') ||
+        filePath.endsWith('status.js')
+      )
+      .slice(0, 120);
+
+    const sourceOfTruthRefs = uniqueStrings([
+      ...ingestion.repo_tree.filter((filePath) =>
+        /(\.agents\/schemas\/|supabase\/migrations\/|prisma\/schema\.prisma$|package\.json$|wrangler(\.production)?\.toml$|next\.config\.(mjs|ts)$|\.env\.example$|SECURITY\.md$|README\.md$|docs\/.*\.md$)/.test(
+          filePath
+        )
+      ),
+      ...ingestion.package_manifests,
+      ...ingestion.pipeline_files,
+      ...Object.keys(ingestion.ci_config ?? {})
+    ]).slice(0, 120);
+
+    const artifactIntegrityPayload = {
+      projectId: sharedPayload.projectId,
+      branch: sharedPayload.branch,
+      commitSha: sharedPayload.commitSha,
+      attempt: sharedPayload.attempt,
+      generated_files: generatedFiles,
+      source_of_truth_refs: sourceOfTruthRefs,
+      codegen_scripts: {
+        package_manifests: ingestion.package_manifests.slice(0, 20),
+        pipeline_files: ingestion.pipeline_files.slice(0, 20)
+      },
+      ci_checks: {
+        workflow_files: ingestion.pipeline_files.slice(0, 20),
+        failed_stages: ingestion.ci_history.recentFailedStages.slice(0, 20),
+        totals: ingestion.ci_history.totals
+      },
+      validation_policy: sharedPayload.validation_policy
+    };
+
+    const configDriftPayload = {
+      projectId: sharedPayload.projectId,
+      branch: sharedPayload.branch,
+      commitSha: sharedPayload.commitSha,
+      attempt: sharedPayload.attempt,
+      env_example_refs: ingestion.repo_tree.filter((filePath) => /\.env\.example$|\.env\.template$|\.env\.sample$/.test(filePath)).slice(0, 20),
+      runtime_config_refs: ingestion.repo_tree.filter((filePath) =>
+        /(production-mode\.ts|feature-flags\.ts|use-canonical-feature-flag\.ts|next\.config\.(mjs|ts)|wrangler(\.production)?\.toml|docker-compose\.yml|workspace\.ts|production-boundaries\.md)/.test(
+          filePath
+        )
+      ).slice(0, 40),
+      deployment_config_refs: ingestion.repo_tree.filter((filePath) =>
+        /(wrangler(\.production)?\.toml|docker-compose\.yml|kustomization\.ya?ml|helm\/|\.github\/workflows\/|\.gitlab-ci\.yml|package\.json|next\.config\.(mjs|ts))/.test(
+          filePath
+        )
+      ).slice(0, 40),
+      fallback_mismatch_refs: ingestion.repo_tree.filter((filePath) =>
+        /(fallback|mock|fixture|local-dev|production|config|env|flags?|defaults?)/i.test(filePath)
+      ).slice(0, 40),
+      validation_policy: sharedPayload.validation_policy
+    };
+
+    const supplyChainPayload = {
+      projectId: sharedPayload.projectId,
+      branch: sharedPayload.branch,
+      commitSha: sharedPayload.commitSha,
+      attempt: sharedPayload.attempt,
+      manifests: ingestion.package_manifests.slice(0, 30),
+      lockfiles: ingestion.repo_tree.filter((filePath) =>
+        /(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb|Cargo.lock|go\.sum|poetry.lock|Pipfile.lock|requirements(\.lock)?\.txt)/.test(
+          filePath
+        )
+      ).slice(0, 20),
+      dependency_graph: {
+        node_count: graphPayload.nodes.length,
+        edge_count: graphPayload.edges.length
+      },
+      ci_security_reports: ingestion.ci_history.recentFailedStages.slice(0, 12),
+      validation_policy: sharedPayload.validation_policy
+    };
+
+    const secretRotationPayload = {
+      projectId: sharedPayload.projectId,
+      branch: sharedPayload.branch,
+      commitSha: sharedPayload.commitSha,
+      attempt: sharedPayload.attempt,
+      high_risk_secrets: ingestion.repo_tree.filter((filePath) =>
+        /(auth|oauth|secret|token|password|key|stripe|supabase|gitlab|phoenix|posthog|sentry|cloudflare|nango|slack)/i.test(
+          filePath
+        )
+      ).slice(0, 60),
+      rotation_docs: ingestion.repo_tree.filter((filePath) =>
+        /(rotation|revocation|security\.md|secrets?\.md|trust-boundary|production-boundaries|data-retention)/i.test(
+          filePath
+        )
+      ).slice(0, 40),
+      revocation_paths: [
+        'apps/web/app/api/auth/[provider]/route.ts',
+        'apps/web/app/api/billing/portal/route.ts',
+        'apps/web/app/api/workspace/integrations/[id]/disconnect/route.ts',
+        'packages/db/src/workspace.ts',
+        'packages/db/src/organization-connections.ts'
+      ].filter((path) => ingestion.repo_tree.includes(path)),
+      scope_reduction_opportunities: [
+        'Narrow provider token scopes to read-only where publish is not required.',
+        'Prefer short-lived connect/session tokens over long-lived API keys.',
+        'Rotate workspace secrets and revoke stale OAuth refresh tokens on disconnect.'
+      ],
+      validation_policy: sharedPayload.validation_policy
+    };
+
+    const agentsThatNeedTheFullPayload = new Set([
+      'repo_topology_agent',
+      'integration_boundary_agent',
+      'trust_boundary_agent',
+      'onboarding_operability_agent',
+      'test_adequacy_agent',
+      'observability_recovery_agent',
+      'issue_memory_agent'
+    ]);
+
+    if (prepared.orbitContext?.status === 'enabled') {
+      trackServerEvent(input.job.organizationId, 'orbit_context_loaded', {
+        auditRunId: input.job.id,
+        projectId: input.job.projectId,
+        branch: input.job.branch,
+        definitionPrefixCount: prepared.orbitContext.definitionMaps.length,
+        mergeRequestCount: prepared.orbitContext.recentMergeRequests.length,
+        pipelineCount: prepared.orbitContext.recentPipelines.length
+      });
+    } else {
+      trackServerEvent(input.job.organizationId, 'orbit_context_unavailable', {
+        auditRunId: input.job.id,
+        projectId: input.job.projectId,
+        reason: prepared.orbitContext?.reason ?? 'Orbit disabled or unavailable'
+      });
+    }
 
     const completedSpecialists = new Set(checkpoint?.completedSpecialists ?? []);
     const seenFindingIds = new Set<string>();
@@ -756,67 +1200,140 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
         !(RUNTIME_LANE_AGENTS as readonly string[]).includes(specialist.name)
     );
 
+    const orchestratorAnalysisPayload = {
+      projectId: sharedPayload.projectId,
+      branch: sharedPayload.branch,
+      commitSha: sharedPayload.commitSha,
+      attempt: sharedPayload.attempt,
+      auditRunId: input.job.id,
+      analysis_roles: analysisRoles,
+      scheduler_state: {
+        checkpointPhase: checkpoint?.phase ?? null,
+        resume,
+        skipGraph,
+        laneSizes: {
+          structure: structureLane.length,
+          runtime: runtimeLane.length,
+          unassigned: unassignedLane.length
+        },
+        completedSpecialists: [...completedSpecialists].slice(0, 40),
+        pendingSpecialists: pendingSpecialists.map((specialist) => specialist.name).slice(0, 40)
+      },
+      queue_contract: {
+        maxBatchSize: 1,
+        maxRetries: 3,
+        deadLetterQueue: 'premortem-audit-jobs-dlq-dev'
+      },
+      workflow_contract: AUDIT_WORKFLOW_CONTRACT,
+      scheduler_refs: [
+        'services/orchestrator/src/scheduler/run-audit.ts',
+        'services/orchestrator/src/services/audit-persistence.ts',
+        'apps/api/src/index.ts',
+        'apps/api/wrangler.toml',
+        'apps/api/wrangler.production.toml'
+      ],
+      graph_grounding: sharedPayload.graph_grounding,
+      validation_policy: sharedPayload.validation_policy
+    };
+
     async function runSpecialistBatch(batch: RegisteredAgent[]): Promise<{
       findings: CanonicalFinding[];
       mapEntries: Array<[string, string]>;
     }> {
+      const specialistResults = await runWithConcurrencyLimit(
+        batch,
+        DEFAULT_SPECIALIST_CONCURRENCY,
+        async (specialist) => {
+          await assertAuditContinuing(input.job.id);
+
+          const { agentRun, result } = await runAgentWithPersistence({
+            auditRunId: input.job.id,
+            agentName: specialist.name,
+            runMode: specialist.runMode,
+            execute: () =>
+              specialist.executor.kind === 'specialist'
+                ? specialist.executor.run({
+                    rootDir,
+                    projectId: input.job.projectId,
+                    auditRunId: input.job.id,
+                    payload:
+                      specialist.name === 'repo_topology_agent'
+                        ? topologyPayload
+                        : specialist.name === 'release_safety_agent'
+                          ? releaseSafetyPayload
+                          : specialist.name === 'cross_repo_boundary_agent'
+                            ? crossRepoPayload
+                            : specialist.name === 'artifact_integrity_agent'
+                              ? artifactIntegrityPayload
+                              : specialist.name === 'dependency_supply_chain_agent'
+                                ? supplyChainPayload
+                                : specialist.name === 'supply_chain_vulnerability_agent'
+                                  ? supplyChainPayload
+                                  : specialist.name === 'config_drift_agent'
+                                    ? configDriftPayload
+                                    : specialist.name === 'secret_rotation_risk_agent'
+                                      ? secretRotationPayload
+                                      : specialist.name === 'orchestrator_analysis_agent'
+                                        ? orchestratorAnalysisPayload
+                                        : agentsThatNeedTheFullPayload.has(specialist.name)
+                                          ? sharedPayload
+                                          : analysisPayload
+                  })
+                : Promise.resolve([]),
+            serialize: (value) => ({
+              findingCount: value.length,
+              promptPath: specialist.promptPath
+            })
+          });
+
+          const validFindings = result.filter((finding) => validateFinding(finding).length === 0);
+          const uniqueFindings = dedupeFindings(validFindings).filter((finding) => {
+            if (seenFindingIds.has(finding.finding_id)) {
+              return false;
+            }
+            seenFindingIds.add(finding.finding_id);
+            return true;
+          });
+
+          if (uniqueFindings.length > 0) {
+            const persisted = await saveFindings({
+              organizationId: input.job.organizationId,
+              projectId: input.job.projectId,
+              auditRunId: input.job.id,
+              agentRunId: agentRun.id,
+              findings: uniqueFindings
+            });
+
+            return {
+              findings: uniqueFindings,
+              mapEntries: uniqueFindings.map(
+                (finding, index) => [finding.finding_id, persisted[index]!.id] as [string, string]
+              )
+            };
+          }
+
+          return { findings: [], mapEntries: [] as Array<[string, string]> };
+        }
+      );
+
       const laneFindings: CanonicalFinding[] = [];
       const mapEntries: Array<[string, string]> = [];
 
-      for (const specialist of batch) {
-        await assertAuditContinuing(input.job.id);
+      for (const [index, specialist] of batch.entries()) {
+        const result = specialistResults[index];
+        if (!result) continue;
 
-        const { agentRun, result } = await runAgentWithPersistence({
-          auditRunId: input.job.id,
-          agentName: specialist.name,
-          runMode: specialist.runMode,
-          execute: () =>
-            specialist.executor.kind === 'specialist'
-              ? specialist.executor.run({
-                  rootDir,
-                  projectId: input.job.projectId,
-                  auditRunId: input.job.id,
-                  payload: sharedPayload
-                })
-              : Promise.resolve([]),
-          serialize: (value) => ({
-            findingCount: value.length,
-            promptPath: specialist.promptPath
-          })
-        });
-
-        const validFindings = result.filter((finding) => validateFinding(finding).length === 0);
-        const uniqueFindings = dedupeFindings(validFindings).filter((finding) => {
-          if (seenFindingIds.has(finding.finding_id)) {
-            return false;
-          }
-          seenFindingIds.add(finding.finding_id);
-          return true;
-        });
-
-        if (uniqueFindings.length > 0) {
-          const persisted = await saveFindings({
-            organizationId: input.job.organizationId,
-            projectId: input.job.projectId,
-            auditRunId: input.job.id,
-            agentRunId: agentRun.id,
-            findings: uniqueFindings
-          });
-
-          uniqueFindings.forEach((finding, index) => {
-            mapEntries.push([finding.finding_id, persisted[index]!.id]);
-          });
-          laneFindings.push(...uniqueFindings);
-        }
-
+        laneFindings.push(...result.findings);
+        mapEntries.push(...result.mapEntries);
         completedSpecialists.add(specialist.name);
-        await persistPhaseCheckpoint(input.job.id, AuditCheckpointPhase.SPECIALISTS, {
-          completedSpecialists: [...completedSpecialists],
-          graphSnapshotId,
-          findingCount: findingIdMap.size + mapEntries.length,
-          clusterCount: checkpoint?.clusterCount ?? 0
-        });
       }
+
+      await persistPhaseCheckpoint(input.job.id, AuditCheckpointPhase.SPECIALISTS, {
+        completedSpecialists: [...completedSpecialists],
+        graphSnapshotId,
+        findingCount: findingIdMap.size + mapEntries.length,
+        clusterCount: checkpoint?.clusterCount ?? 0
+      });
 
       return { findings: laneFindings, mapEntries };
     }
@@ -955,11 +1472,11 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
                 rootDir,
                 projectId: input.job.projectId,
                 auditRunId: input.job.id,
-                payload: sharedPayload
+                payload: synthesisPayload
               },
-              rawIssues as unknown as CanonicalFinding[]
+              rawIssues
             );
-          } catch (error) {
+          } catch (error: unknown) {
             captureServerException(error, {
               auditRunId: input.job.id,
               phase: 'issue_validation_fallback'
@@ -1045,6 +1562,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
 
     const auditSummary = {
       findingCount: findingIdMap.size,
+      criticalCount: findings.filter((finding) => finding.severity === 'critical').length,
       clusterCount: persistedClusters.length,
       issueCandidateCount,
       rejectedIssueCount,
@@ -1069,11 +1587,25 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       summary: auditSummary
     });
 
+    const findingConfidenceAvg =
+      findings.length > 0
+        ? findings.reduce((total, finding) => total + finding.confidence, 0) / findings.length
+        : undefined;
+    const evidenceCountMin =
+      findings.length > 0
+        ? Math.min(...findings.map((finding) => finding.evidence.length))
+        : undefined;
+    const refusalRate =
+      issueCandidateCount > 0 ? rejectedIssueCount / Math.max(issueCandidateCount, 1) : undefined;
+
     const phoenixEval = evaluateAuditMissionQuality({
       auditRunId: input.job.id,
       findingCount: findingIdMap.size,
       issueCandidateCount,
-      hasHumanReviewGate: true
+      hasHumanReviewGate: true,
+      findingConfidenceAvg,
+      evidenceCountMin,
+      refusalRate
     });
 
     let phoenixLlmEval: Awaited<ReturnType<typeof evaluateAuditMissionWithLlmJudge>> | null =
@@ -1082,6 +1614,16 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim() || '';
     if (isPhoenixLlmEvalEnabled() && geminiApiKey) {
       try {
+        if (isPhoenixPromptSyncEnabled()) {
+          await ensurePremortemAuditJudgePrompt(
+            process.env.LLM_MODEL?.trim() || DEFAULT_GEMINI_MODEL
+          ).catch((error: unknown) => {
+            captureServerException(error, {
+              auditRunId: input.job.id,
+              phase: 'phoenix_prompt_sync'
+            });
+          });
+        }
         phoenixLlmEval = await evaluateAuditMissionWithLlmJudge({
           auditRunId: input.job.id,
           findingCount: findingIdMap.size,
@@ -1092,7 +1634,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
           apiKey: geminiApiKey,
           model: process.env.LLM_MODEL?.trim() || DEFAULT_GEMINI_MODEL
         });
-      } catch (error) {
+      } catch (error: unknown) {
         captureServerException(error, { auditRunId: input.job.id, phase: 'phoenix_llm_eval' });
       }
     }
@@ -1114,6 +1656,12 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
     }
 
     if (isPhoenixDatasetSyncEnabled()) {
+      await ensurePremortemAuditDataset().catch((error: unknown) => {
+        captureServerException(error, {
+          auditRunId: input.job.id,
+          phase: 'phoenix_dataset_bootstrap'
+        });
+      });
       void appendAuditMissionToPhoenixDataset({
         input: {
           auditRunId: input.job.id,
@@ -1133,7 +1681,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
           evaluator: phoenixEval.evaluator,
           label: phoenixEval.label
         }
-      }).catch((error) => {
+      }).catch((error: unknown) => {
         captureServerException(error, {
           auditRunId: input.job.id,
           phase: 'phoenix_dataset_sync'
@@ -1149,7 +1697,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       issueCandidateCount,
       rejectedIssueCount
     };
-  } catch (error) {
+  } catch (error: unknown) {
     if (error instanceof AuditExecutionHalted) {
       if (error.kind === 'cancelled') {
         return {
@@ -1196,17 +1744,22 @@ export async function getAuditRunSnapshot(auditRunId: string): Promise<AuditRunS
   const auditRun = await getPersistedAuditRun(auditRunId);
   if (!auditRun) return null;
 
-  const issueCandidateVersions = auditRun.issueCandidates.reduce((total, issue) => total + issue.versions.length, 0);
-  const validationResults = auditRun.issueCandidates.reduce((total, issue) => total + issue.validationResults.length, 0);
+  const issueCandidateVersions = auditRun.issueCandidates.reduce(
+    (total, issue) => total + countIssueCandidateRelation(issue as IssueCandidateCountSource, 'versions'),
+    0
+  );
+  const validationResults = auditRun.issueCandidates.reduce(
+    (total, issue) => total + countIssueCandidateRelation(issue as IssueCandidateCountSource, 'validationResults'),
+    0
+  );
 
   let graphPayload: unknown = null;
   if (auditRun.graphSnapshot) {
     graphPayload = await resolveGraphSnapshotPayload({
       auditRunId: auditRun.id,
       projectId: auditRun.projectId,
-      storageRef: auditRun.graphSnapshot.storageRef,
       metadata: auditRun.graphSnapshot.metadata as Record<string, unknown>,
-      download: downloadArtifact
+      storageRef: auditRun.graphSnapshot.storageRef
     });
   }
 
@@ -1294,8 +1847,8 @@ export async function getAuditRunSnapshot(auditRunId: string): Promise<AuditRunS
         category: issue.category,
         validationStatus: issue.validationStatus,
         reviewerStatus: issue.reviewerStatus,
-        versionCount: issue.versions.length,
-        validationResultCount: issue.validationResults.length,
+        versionCount: countIssueCandidateRelation(issue as IssueCandidateCountSource, 'versions'),
+        validationResultCount: countIssueCandidateRelation(issue as IssueCandidateCountSource, 'validationResults'),
         publishedUrl: issue.publishedIssue?.url ?? null,
         predictedFailureSummary: issue.predictedFailureSummary,
         whyItMatters: issue.whyItMatters,
@@ -1405,12 +1958,13 @@ export async function getRecentAuditRuns(
   return auditRuns.map((auditRun) => ({
     auditRunId: auditRun.id,
     projectId: auditRun.projectId,
+    projectName: auditRun.project?.name ?? auditRun.projectId,
     branch: auditRun.branch,
     commitSha: auditRun.commitSha,
     runStatus: auditRun.runStatus,
     createdAt: auditRun.createdAt.toISOString(),
-    reviewableIssueCount: auditRun.issueCandidates.length,
-    rejectedIssueCount: auditRun.rejectedIssueCandidateArtifacts.length,
-    latestEventType: auditRun.events.at(-1)?.eventType
+    reviewableIssueCount: auditRun._count.issueCandidates,
+    rejectedIssueCount: auditRun._count.rejectedIssueCandidateArtifacts,
+    latestEventType: auditRun.events[0]?.eventType
   }));
 }

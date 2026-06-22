@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, Suspense, useCallback } from 'react';
+import React, { useState, useEffect, Suspense, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
+import { useQueryClient } from '@tanstack/react-query';
 import { Sidebar } from './Sidebar';
 import { DashboardView } from './DashboardView';
 import { ProjectsView } from './ProjectsView';
@@ -10,10 +11,10 @@ import { AdHocSandboxView } from './AdHocSandboxView';
 import { SettingsView } from './SettingsView';
 import { AuditHistoryView } from './AuditHistoryView';
 import { Project, AuditRun, ProviderType, Finding, RiskCluster } from '@/lib/premortem-os/types';
+import type { RuntimeAuditSnapshot } from '@/lib/premortem-api/client';
 import { ConsoleReviewAction, consoleStatusAfterReviewAction, ConsoleIssueStatus } from '@premortem/domain';
 import type { ConsoleReviewActionValue } from '@premortem/domain';
 import { premortemBrand } from '@/lib/premortem-os/branding';
-import { AlertCircle } from 'lucide-react';
 
 import { useWorkspace } from '@/hooks/use-workspace';
 import { useOsConsoleData, useAuditMutations } from '@/hooks/use-os-console-data';
@@ -22,9 +23,13 @@ import { usePublishedIssueSyncCycle } from '@/hooks/use-published-issue-sync-cyc
 import { OsAnalyticsIdentity, OsPageAnalytics } from './os-analytics';
 import { OsLoadingScreen } from './os-loading-screen';
 import { OsToast } from './os-toast';
+import { OsDiagnosticBanner } from './os-diagnostic-banner';
 import { resolveGitLabAccessState } from '@/lib/provider-access';
 import { bffFetchJson } from '@/lib/bff-client';
 import { formatIntegrationNotice } from '@/lib/integration-notices';
+import { buildOsDiagnostic } from '@/lib/diagnostics';
+
+const hasSameJson = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 
 const WorkflowCanvasView = dynamic(
   () => import('./WorkflowCanvasView').then((module) => module.WorkflowCanvasView),
@@ -72,6 +77,8 @@ export function PremortemOsApp() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [localFixtureMode, setLocalFixtureMode] = useState(false);
   const [systemScore, setSystemScore] = useState<number>(0);
+  const hasInitializedUrlStateRef = useRef(false);
+  const queryClient = useQueryClient();
 
   const handleOpenRiskCluster = useCallback((cluster: RiskCluster) => {
     if (!cluster.auditRunId) return;
@@ -82,10 +89,26 @@ export function PremortemOsApp() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (hasInitializedUrlStateRef.current) return;
+    hasInitializedUrlStateRef.current = true;
+
     const params = new URLSearchParams(window.location.search);
+    const auditId = params.get('audit');
     const tab = params.get('tab');
-    if (tab === 'settings' || tab === 'history' || tab === 'projects' || tab === 'audits' || tab === 'dashboard') {
+    if (
+      tab === 'settings' ||
+      tab === 'history' ||
+      tab === 'projects' ||
+      tab === 'audits' ||
+      tab === 'dashboard' ||
+      tab === 'canvas' ||
+      tab === 'sandbox'
+    ) {
       setActiveTab(tab);
+    }
+    if (auditId) {
+      setSelectedAuditId(auditId);
+      setActiveTab('audits');
     }
     const notice = params.get('integration_notice');
     const resolvedNotice = notice;
@@ -120,21 +143,60 @@ export function PremortemOsApp() {
   }, [reloadWorkspace, refetchProjects]);
 
   useEffect(() => {
+    if (!hasInitializedUrlStateRef.current || typeof window === 'undefined') return;
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('tab') !== activeTab) {
+      params.set('tab', activeTab);
+    }
+
+    if (activeTab === 'audits' && selectedAuditId) {
+      params.set('audit', selectedAuditId);
+    } else {
+      params.delete('audit');
+    }
+
+    if (activeTab !== 'projects') {
+      params.delete('discover');
+    }
+
+    const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (nextUrl !== currentUrl) {
+      window.history.replaceState({}, '', nextUrl);
+    }
+  }, [activeTab, selectedAuditId]);
+
+  useEffect(() => {
     if (!toastMessage) return;
     const timer = window.setTimeout(() => setToastMessage(null), 5000);
     return () => window.clearTimeout(timer);
   }, [toastMessage]);
 
+  const alert = useCallback((message: string) => {
+    setToastMessage(message);
+  }, []);
+
   useEffect(() => {
-    setProjects(projects);
+    setProjects((current) => (hasSameJson(current, projects) ? current : projects));
   }, [projects]);
 
   useEffect(() => {
     const workspaceAudits = loadedAudits.filter(
       (audit) => !audit.isSandbox && audit.projectId !== 'sandbox' && !audit.id.startsWith('sandbox-')
     );
-    setAudits(workspaceAudits);
-    setRiskClusters(loadedRiskClusters as RiskCluster[]);
+    const auditFromUrl =
+      typeof window === 'undefined'
+        ? null
+        : new URLSearchParams(window.location.search).get('audit');
+    setAudits((current) => (hasSameJson(current, workspaceAudits) ? current : workspaceAudits));
+    setRiskClusters((current) =>
+      hasSameJson(current, loadedRiskClusters) ? current : (loadedRiskClusters as RiskCluster[])
+    );
+    if (auditFromUrl && workspaceAudits.some((audit) => audit.id === auditFromUrl)) {
+      setSelectedAuditId(auditFromUrl);
+      return;
+    }
     if (workspaceAudits.length > 0 && !selectedAuditId) {
       setSelectedAuditId(workspaceAudits[0].id);
     }
@@ -185,16 +247,25 @@ export function PremortemOsApp() {
     );
   };
 
-  const fetchAuditDetail = async (auditId: string): Promise<AuditRun | null> => {
+  const fetchAuditDetail = useCallback(async (auditId: string): Promise<AuditRun | null> => {
     try {
-      const res = await fetch(`/api/audits/${auditId}`);
-      if (!res.ok) {
-        const { readBffErrorMessage } = await import('@/lib/bff-client');
-        console.warn(await readBffErrorMessage(res, 'Failed to load audit detail.'));
-        return null;
-      }
-      const payload = await res.json();
+      const payload = await queryClient.fetchQuery({
+        queryKey: ['os', 'audit-detail', auditId],
+        staleTime: 60_000,
+        queryFn: async () => {
+          const res = await fetch(`/api/audits/${auditId}?hydrate=0`, { cache: 'no-store' });
+          if (!res.ok) {
+            const { readBffErrorMessage } = await import('@/lib/bff-client');
+            throw new Error(await readBffErrorMessage(res, 'Failed to load audit detail.'));
+          }
+          return res.json() as Promise<{
+            snapshot?: RuntimeAuditSnapshot | null;
+            auditRun?: RuntimeAuditSnapshot | null;
+          }>;
+        }
+      });
       const snapshot = payload.snapshot ?? payload.auditRun;
+      if (!snapshot) return null;
       const project = projectsState.find((item) => item.id === snapshot?.projectId);
       const { mapSnapshotToAuditRun } = await import('@/lib/premortem-api/map-runtime-to-console');
       const hydrated = mapSnapshotToAuditRun(
@@ -206,7 +277,7 @@ export function PremortemOsApp() {
     } catch {
       return null;
     }
-  };
+  }, [projectsState, queryClient]);
   const handleRegisterProject = async (newProjPayload: {
     name: string;
     repoUrl: string;
@@ -455,7 +526,7 @@ export function PremortemOsApp() {
   const runtimeStopAllVisible =
     continuousAuditEnabled ||
     (workspace?.runtime.runningAudits ?? 0) > 0 ||
-    audits.some((audit) => audit.status === 'RUNNING' || audit.status === 'PAUSED');
+    audits.some((audit) => audit.status === 'RUNNING');
 
   const gitLabAccess = resolveGitLabAccessState(workspace?.integrations);
 
@@ -465,27 +536,16 @@ export function PremortemOsApp() {
 
   // Error wrapper screen
   if (errorMessage) {
+    const diagnostic = buildOsDiagnostic(errorMessage);
     return (
-      <div className="w-screen h-screen bg-[#FBFBFA] flex items-center justify-center font-sans px-6">
-        <div className="max-w-md p-6 border border-rose-200 bg-rose-50 text-xs rounded text-rose-800 space-y-4 shadow-sm">
-          <div className="flex gap-2 items-center font-display font-semibold uppercase text-[10px] tracking-wider text-rose-800">
-            <AlertCircle size={14} className="text-rose-600 animate-pulse" />
+      <div className="flex h-screen w-screen items-center justify-center bg-[#FBFBFA] px-6 font-sans">
+        <div className="w-full max-w-2xl space-y-4">
+          <OsDiagnosticBanner diagnostic={diagnostic} />
+          <div className="flex flex-wrap items-center justify-between gap-3 px-1 text-[10px] font-mono uppercase tracking-[0.24em] text-[#717A75]">
             <span>{premortemBrand.errorTitle}</span>
-          </div>
-          <p className="leading-relaxed">{errorMessage}</p>
-          {errorMessage === 'Unauthorized' ? (
-            <a
-              href="/login?next=/app"
-              className="inline-flex text-[10px] font-mono font-semibold uppercase tracking-wider text-rose-900 underline-offset-2 hover:underline"
-            >
-              Sign in to continue
-            </a>
-          ) : null}
-          <div className="pt-2 border-t border-rose-100 flex gap-2 font-mono text-[9px] text-zinc-500">
-            <span>Check that the API is running and you are signed in.</span>
             <a
               href={`mailto:${premortemBrand.supportEmail}`}
-              className="ml-auto text-zinc-500 hover:text-rose-900 underline-offset-2 hover:underline"
+              className="text-[#5C6560] underline-offset-2 hover:text-[#1E2522] hover:underline"
             >
               {premortemBrand.errorSupportLabel}
             </a>
@@ -515,7 +575,7 @@ export function PremortemOsApp() {
       <main id="workspace-main" className="flex-1 overflow-hidden flex flex-col h-full bg-[#FBFBFA]">
         {localFixtureMode ? (
           <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-[11px] text-amber-950">
-            Local developer fixture mode is active (auth bypass). Judges and new users should sign up at{' '}
+            Local development mode is active (auth bypass). Use Supabase sign-in for configured environments at{' '}
             <a href={`${premortemBrand.siteUrl}/signup`} className="font-semibold underline underline-offset-2">
               {premortemBrand.domain}/signup
             </a>{' '}

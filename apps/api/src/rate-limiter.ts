@@ -1,3 +1,5 @@
+import { readJsonRecord } from './lib/request-body';
+
 export class RateLimiter {
   constructor(private readonly state: { storage: { get(key: string): Promise<unknown>; put(key: string, value: unknown): Promise<void> } }) {}
 
@@ -6,18 +8,18 @@ export class RateLimiter {
       return Response.json({ error: 'Method not allowed' }, { status: 405 });
     }
 
-    const body = (await request.json().catch(() => null)) as
-      | { key?: string; limit?: number; windowMs?: number }
-      | null;
+    const body = (await readJsonRecord(request)) ?? {};
 
-    if (!body?.key || !Number.isFinite(body.limit) || !Number.isFinite(body.windowMs)) {
+    const key = typeof body.key === 'string' ? body.key.trim() : '';
+    const limit = Number(body.limit);
+    const windowMs = Number(body.windowMs);
+
+    if (!key || !Number.isFinite(limit) || !Number.isFinite(windowMs)) {
       return Response.json({ error: 'Invalid rate limit payload' }, { status: 400 });
     }
 
-    const limit = body.limit as number;
-    const windowMs = body.windowMs as number;
     const now = Date.now();
-    const current = (await this.state.storage.get(body.key)) as
+    const current = (await this.state.storage.get(key)) as
       | { count?: number; resetAt?: number }
       | null
       | undefined;
@@ -28,7 +30,7 @@ export class RateLimiter {
     const allowed = next.count <= limit;
 
     if (allowed) {
-      await this.state.storage.put(body.key, next);
+      await this.state.storage.put(key, next);
     }
 
     return Response.json({ allowed, count: next.count, resetAt: next.resetAt });

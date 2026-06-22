@@ -11,13 +11,12 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "pnpm --filter @premortem/db build && tsc -p tsconfig.json",
+    "typecheck": "pnpm --filter @premortem/db build && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@premortem/agent-kit": "workspace:*",
-    "@premortem/llm": "workspace:*",
-    "@premortem/security": "workspace:*"
+    "@premortem/db": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

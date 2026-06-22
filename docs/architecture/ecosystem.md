@@ -6,7 +6,7 @@
 - Cloudflare Workers via Wrangler for API edge entrypoints.
 - GitLab as the primary issue publishing and repository provider.
 - MCP Toolbox for Databases as the official MCP server for database introspection and safe SQL-oriented agent access.
-- Gemini as the default LLM path, with Azure OpenAI as the Microsoft-backed enterprise alternative.
+- Gemini as the default LLM path for audits and agent flows.
 - Gemini Enterprise Agent Platform / Vertex AI as the managed deployment option for the optional `services/agent-builder` runtime.
 - Neo4j as the graph persistence and traversal layer for repository structure and risk context.
 

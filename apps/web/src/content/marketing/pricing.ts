@@ -1,4 +1,4 @@
-/** Public pricing aligned with PLAN_LIMITS + Settings billing UI. Demo/marketing only. */
+/** Public pricing aligned with PLAN_LIMITS + Settings billing UI. */
 export const marketingPricingTiers = [
   {
     id: 'free',
@@ -7,7 +7,7 @@ export const marketingPricingTiers = [
     priceAnnual: 0,
     description: 'Evaluate Premortem on a single repository.',
     limits: ['1 connected repo', '10 audits / month', 'Reviewer console'],
-    features: ['Multi-lens mock audits', 'Structured issue candidates', 'No GitLab publish'],
+    features: ['Multi-lens audits', 'Structured issue candidates', 'No GitLab publish'],
     cta: 'Start free',
     ctaHref: '/signup',
     highlighted: false
@@ -42,7 +42,7 @@ export const marketingPricingTiers = [
     priceMonthly: null,
     priceAnnual: null,
     description: 'SSO, custom quotas, and dedicated support.',
-    limits: ['Unlimited repos (contract)', 'Custom audit quotas', 'Entra ID SSO (soon)'],
+    limits: ['Unlimited repos (contract)', 'Custom audit quotas', 'Entra ID SSO (roadmap)'],
     features: ['Dedicated success', 'Custom retention', 'Private deployment options'],
     cta: 'Contact sales',
     ctaHref: 'mailto:justinedevs@jstn.site',
@@ -74,11 +74,11 @@ export const marketingDemoSequence = [
     phase: '02 · Audit',
     headline: 'Specialist swarm runs in parallel',
     lines: [
-      '13 agents analyze topology, CI, trust boundaries, and dependencies.',
+      '24 agents analyze topology, CI, trust boundaries, dependencies, and product gaps.',
       'Findings cluster into deduplicated issue candidates with validation gates.'
     ],
     metrics: [
-      { label: 'Agents', value: '13' },
+      { label: 'Agents', value: '24' },
       { label: 'Findings', value: '11' },
       { label: 'Graph nodes', value: '21' }
     ],

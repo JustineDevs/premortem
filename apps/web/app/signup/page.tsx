@@ -7,7 +7,7 @@ import { buildSeoMetadata, canonicalSupportKeywords } from '@/lib/seo-metadata';
 
 export const metadata = buildSeoMetadata({
   title: 'Sign up | Premortem',
-  description: 'Create a Premortem account with GitLab.',
+  description: 'Create a Premortem account with GitLab. When enabled, Cloudflare Turnstile runs before sign-in continues.',
   canonical: '/signup',
   keywords: canonicalSupportKeywords,
   noIndex: true,
@@ -21,7 +21,7 @@ export default function SignUpPage() {
         <AuthProviderForm
           mode="signup"
           title="Sign up"
-          description="Connect GitLab to create your Premortem workspace and start predictive audits."
+          description="Connect GitLab to create your Premortem workspace and start predictive audits. When enabled, Cloudflare Turnstile runs before sign-in continues."
           alternateHref={authLinks.login}
           alternateLabel="Already have an account? Log in"
         />

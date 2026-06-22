@@ -15,8 +15,17 @@ export const authLinks = {
 export function authProviderHref(
   provider: AuthProvider,
   mode: AuthMode,
-  next: string = authLinks.defaultNext
+  next: string = authLinks.defaultNext,
+  requestOrigin?: string
 ): string {
   const params = new URLSearchParams({ mode, next });
-  return `/api/auth/${provider}?${params.toString()}`;
+  const path = `/api/auth/${provider}?${params.toString()}`;
+  if (requestOrigin) {
+    try {
+      return `${new URL(requestOrigin).origin}${path}`;
+    } catch {
+      return `${requestOrigin.replace(/\/$/, '')}${path}`;
+    }
+  }
+  return path;
 }

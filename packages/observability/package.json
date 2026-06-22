@@ -8,10 +8,43 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./sentry": {
+      "types": "./dist/sentry.d.ts",
+      "default": "./dist/sentry.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./phoenix": {
+      "types": "./dist/phoenix.d.ts",
+      "default": "./dist/phoenix.js"
+    },
+    "./phoenix-client-config": {
+      "types": "./dist/phoenix-client-config.d.ts",
+      "default": "./dist/phoenix-client-config.js"
+    },
+    "./phoenix-code-evaluator": {
+      "types": "./dist/phoenix-code-evaluator.d.ts",
+      "default": "./dist/phoenix-code-evaluator.js"
+    },
+    "./phoenix-datasets": {
+      "types": "./dist/phoenix-datasets.d.ts",
+      "default": "./dist/phoenix-datasets.js"
+    },
+    "./phoenix-prompts": {
+      "types": "./dist/phoenix-prompts.d.ts",
+      "default": "./dist/phoenix-prompts.js"
+    },
+    "./phoenix-semantic-graph": {
+      "types": "./dist/phoenix-semantic-graph.d.ts",
+      "default": "./dist/phoenix-semantic-graph.js"
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "pnpm --filter @premortem/security build && tsc -p tsconfig.json",
+    "postbuild": "node ../../scripts/fix-esm-imports.mjs dist",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -19,6 +52,7 @@
     "@arizeai/phoenix-otel": "^1.0.2",
     "@langfuse/client": "^4.6.1",
     "@sentry/node": "^9.47.1",
+    "@premortem/security": "workspace:^",
     "posthog-node": "^5.11.2"
   },
   "devDependencies": {

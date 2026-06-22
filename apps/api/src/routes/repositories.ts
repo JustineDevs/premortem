@@ -6,6 +6,12 @@ import {
   listDiscoveredRepositories
 } from '@premortem/db';
 
+import { apiErrorResponse } from '../lib/error-response';
+import {
+  readJsonRecord,
+  readOptionalStringArray,
+  readRequiredString
+} from '../lib/request-body';
 import { resolveApiActorContext } from '../lib/request-context';
 
 export async function handleIntegrationRepositoriesList(
@@ -22,12 +28,15 @@ export async function handleIntegrationRepositoriesList(
     return Response.json(payload);
   } catch (error) {
     if (error instanceof GitLabTokenError) {
-      return Response.json({ error: error.message, code: error.code }, { status: 401 });
+      return Response.json(
+        { error: 'GitLab authorization required.', code: error.code },
+        { status: 401 }
+      );
     }
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to list repositories.' },
-      { status: error instanceof Error && error.message.includes('not found') ? 404 : 502 }
-    );
+    return apiErrorResponse(error, 'Failed to list repositories.', {
+      fallbackStatus: 502,
+      notFoundStatus: 404
+    });
   }
 }
 
@@ -35,10 +44,10 @@ export async function handleIntegrationRepositoriesEnable(
   request: Request,
   connectionId: string
 ) {
-  const body = (await request.json()) as { externalProjectIds?: string[] };
-  const externalProjectIds = body.externalProjectIds ?? [];
+  const body = (await readJsonRecord(request)) ?? {};
+  const externalProjectIds = readOptionalStringArray(body, 'externalProjectIds');
 
-  if (!Array.isArray(externalProjectIds) || externalProjectIds.length === 0) {
+  if (!externalProjectIds || externalProjectIds.length === 0) {
     return Response.json({ error: 'externalProjectIds is required' }, { status: 400 });
   }
 
@@ -67,15 +76,18 @@ export async function handleIntegrationRepositoriesEnable(
     return Response.json(error ? { ...result, error } : result, { status });
   } catch (error) {
     if (error instanceof EntitlementError) {
-      return Response.json({ error: error.message, code: error.code }, { status: error.status });
+      return Response.json(
+        { error: 'Plan limit reached.', code: error.code },
+        { status: error.status }
+      );
     }
     if (error instanceof GitLabTokenError) {
-      return Response.json({ error: error.message, code: error.code }, { status: 401 });
+      return Response.json(
+        { error: 'GitLab authorization required.', code: error.code },
+        { status: 401 }
+      );
     }
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to enable repositories.' },
-      { status: 502 }
-    );
+    return apiErrorResponse(error, 'Failed to enable repositories.', { fallbackStatus: 502 });
   }
 }
 
@@ -83,8 +95,9 @@ export async function handleIntegrationRepositoriesDisable(
   request: Request,
   connectionId: string
 ) {
-  const body = (await request.json()) as { projectId?: string };
-  if (!body.projectId?.trim()) {
+  const body = (await readJsonRecord(request)) ?? {};
+  const projectId = readRequiredString(body, 'projectId');
+  if (!projectId) {
     return Response.json({ error: 'projectId is required' }, { status: 400 });
   }
 
@@ -93,7 +106,7 @@ export async function handleIntegrationRepositoriesDisable(
   try {
     const project = await disableOrganizationProject({
       organizationId: actor.organizationId,
-      projectId: body.projectId.trim()
+      projectId
     });
 
     if (project.connectionId && project.connectionId !== connectionId) {
@@ -102,9 +115,9 @@ export async function handleIntegrationRepositoriesDisable(
 
     return Response.json({ ok: true, project: { id: project.id, status: project.status } });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to disable repository.' },
-      { status: error instanceof Error && error.message.includes('not found') ? 404 : 502 }
-    );
+    return apiErrorResponse(error, 'Failed to disable repository.', {
+      fallbackStatus: 502,
+      notFoundStatus: 404
+    });
   }
 }

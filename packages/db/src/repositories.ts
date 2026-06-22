@@ -368,17 +368,19 @@ export async function getAuditRunDetails(auditRunId: string) {
       dedupeClusters: {
         orderBy: { createdAt: 'asc' },
         include: {
-          members: true
+          members: {
+            select: { findingId: true }
+          }
         }
       },
       issueCandidates: {
         orderBy: { createdAt: 'asc' },
         include: {
-          versions: {
-            orderBy: { versionNo: 'asc' }
-          },
-          validationResults: {
-            orderBy: { createdAt: 'asc' }
+          _count: {
+            select: {
+              versions: true,
+              validationResults: true
+            }
           },
           publishedIssue: true
         }
@@ -417,12 +419,58 @@ export async function persistGraphSnapshot(input: {
   });
 }
 
-export async function listOrganizationProjects(organizationId: string) {
+const PROJECT_LIST_CACHE_TTL_MS = 120_000;
+const projectListCache = new Map<
+  string,
+  { expiresAt: number; promise?: Promise<Awaited<ReturnType<typeof loadOrganizationProjects>>>; value?: Awaited<ReturnType<typeof loadOrganizationProjects>> }
+>();
+
+async function loadOrganizationProjects(organizationId: string) {
   return prisma.project.findMany({
     where: { organizationId },
     orderBy: { createdAt: 'desc' },
-    include: { projectSettings: true }
+    select: {
+      id: true,
+      name: true,
+      provider: true,
+      repoUrl: true,
+      defaultBranch: true,
+      status: true,
+      metadata: true,
+      externalProjectId: true,
+      projectSettings: true
+    }
   });
+}
+
+export async function listOrganizationProjects(organizationId: string) {
+  const cacheKey = organizationId;
+  const now = Date.now();
+  const cached = projectListCache.get(cacheKey);
+  if (cached?.value && cached.expiresAt > now) {
+    return cached.value;
+  }
+  if (cached?.promise) {
+    return cached.promise;
+  }
+
+  const promise = loadOrganizationProjects(organizationId)
+    .then((projects) => {
+      projectListCache.set(cacheKey, {
+        expiresAt: Date.now() + PROJECT_LIST_CACHE_TTL_MS,
+        value: projects
+      });
+      return projects;
+    })
+    .finally(() => {
+      const current = projectListCache.get(cacheKey);
+      if (current?.promise === promise) {
+        delete current.promise;
+      }
+    });
+
+  projectListCache.set(cacheKey, { expiresAt: 0, promise });
+  return promise;
 }
 
 function slugifyProjectName(name: string): string {
@@ -822,20 +870,20 @@ export async function listRecentAuditRuns(limit = 12) {
 }
 
 const listRecentAuditRunsInclude = {
-  issueCandidates: {
+  project: {
     select: {
-      id: true,
-      reviewerStatus: true,
-      validationStatus: true
+      name: true
     }
   },
-  rejectedIssueCandidateArtifacts: {
+  _count: {
     select: {
-      id: true
+      issueCandidates: true,
+      rejectedIssueCandidateArtifacts: true
     }
   },
   events: {
-    orderBy: { createdAt: 'asc' as const },
+    orderBy: { createdAt: 'desc' as const },
+    take: 1,
     select: {
       eventType: true,
       createdAt: true
@@ -843,11 +891,64 @@ const listRecentAuditRunsInclude = {
   }
 } as const;
 
-export async function listRecentAuditRunsForOrganization(organizationId: string, limit = 12) {
+const RECENT_AUDIT_RUNS_CACHE_TTL_MS = 120_000;
+const recentAuditRunsCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    promise?: Promise<Awaited<ReturnType<typeof loadRecentAuditRuns>>>;
+    value?: Awaited<ReturnType<typeof loadRecentAuditRuns>>;
+  }
+>();
+
+async function loadRecentAuditRuns(organizationId: string, limit: number) {
   return prisma.auditRun.findMany({
     where: { organizationId },
     take: limit,
     orderBy: { createdAt: 'desc' },
     include: listRecentAuditRunsInclude
   });
+}
+
+export async function listRecentAuditRunsForOrganization(organizationId: string, limit = 12) {
+  const cacheKey = `${organizationId}:${limit}`;
+  const now = Date.now();
+  const cached = recentAuditRunsCache.get(cacheKey);
+  if (cached?.value && cached.expiresAt > now) {
+    return cached.value;
+  }
+  if (cached?.promise) {
+    return cached.promise;
+  }
+
+  const promise = loadRecentAuditRuns(organizationId, limit)
+    .then((auditRuns) => {
+      recentAuditRunsCache.set(cacheKey, {
+        expiresAt: Date.now() + RECENT_AUDIT_RUNS_CACHE_TTL_MS,
+        value: auditRuns
+      });
+      return auditRuns;
+    })
+    .finally(() => {
+      const current = recentAuditRunsCache.get(cacheKey);
+      if (current?.promise === promise) {
+        delete current.promise;
+      }
+    });
+
+  recentAuditRunsCache.set(cacheKey, { expiresAt: 0, promise });
+  return promise;
+}
+
+export function invalidateRecentAuditRunsCache(organizationId?: string) {
+  if (!organizationId) {
+    recentAuditRunsCache.clear();
+    return;
+  }
+
+  for (const key of recentAuditRunsCache.keys()) {
+    if (key.startsWith(`${organizationId}:`)) {
+      recentAuditRunsCache.delete(key);
+    }
+  }
 }

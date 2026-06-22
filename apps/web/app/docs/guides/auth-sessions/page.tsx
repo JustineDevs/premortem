@@ -3,7 +3,7 @@ import { authSessionsGuideDoc } from '@/content/marketing/docs-additional-conten
 
 import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
 export const metadata = buildSeoMetadata({
-  title: 'Auth & sessions | Premortem Docs',
+  title: 'Auth & sessions',
   description: authSessionsGuideDoc.lead,
   canonical: '/docs/guides/auth-sessions',
   keywords: canonicalDocsKeywords

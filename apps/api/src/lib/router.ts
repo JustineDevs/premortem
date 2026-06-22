@@ -1,4 +1,4 @@
-import { captureServerException } from '@premortem/observability';
+import { captureServerException } from '@premortem/observability/server';
 
 import {
   handleAuditCancel,
@@ -14,6 +14,7 @@ import {
   handleIssueApprove,
   handleIssueEdit,
   handleIssueMerge,
+  handleIssueOutcome,
   handleIssuePublish,
   handleIssueReconcile,
   handleIssueReject,
@@ -25,6 +26,8 @@ import {
   handleWorkspaceApiKeyDelete,
   handleWorkspaceApiKeysPost,
   handleWorkspaceGet,
+  handleWorkspaceMembersInvitePost,
+  handleWorkspaceNangoConnectSessionPost,
   handleWorkspaceIntegrationSync,
   handleWorkspaceIntegrationsPost,
   handleWorkspaceLlmPatch,
@@ -38,8 +41,10 @@ import {
   handleWorkspaceRuntimeStopAll,
   handleWorkspaceWorkItemAttributesPatch
 } from '../routes/workspace';
+import { handleSlackPremortemCommandPost } from '../routes/slack';
 import {
   handleProjectCreate,
+  handleProjectAccuracy,
   handleProjectList,
   handleProjectSettingsPatch,
   handlePublicProjectCreate
@@ -50,9 +55,14 @@ import {
   handleIntegrationRepositoriesList
 } from '../routes/repositories';
 import { handleReconciliationList } from '../routes/reconciliation';
+import {
+  handleInvitationAccept,
+  handleInvitationRead
+} from '../routes/invitations';
 import { handleGitLabIssueWebhookPost } from '../routes/webhooks';
 import type { AppEnv, ExecutionContextLike } from './types';
 import { withCorsRouter } from './cors';
+import { ApiForbiddenError } from './authorization';
 import { ApiUnauthorizedError } from './request-context';
 import {
   attachRequestId,
@@ -81,7 +91,16 @@ async function routeRequest(request: Request, env: AppEnv = {}, _ctx?: Execution
     return attachRequestId(response, requestId);
   } catch (error) {
     if (error instanceof ApiUnauthorizedError) {
-      return attachRequestId(Response.json({ error: error.message, requestId }, { status: 401 }), requestId);
+      return attachRequestId(
+        Response.json({ error: 'Unauthorized', requestId }, { status: 401 }),
+        requestId
+      );
+    }
+    if (error instanceof ApiForbiddenError) {
+      return attachRequestId(
+        Response.json({ error: 'Forbidden', requestId }, { status: 403 }),
+        requestId
+      );
     }
     captureServerException(error, {
       route: url.pathname,
@@ -141,6 +160,14 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
 
   if (url.pathname === '/api/workspace/integrations' && request.method === 'POST') {
     return handleWorkspaceIntegrationsPost(request);
+  }
+
+  if (url.pathname === '/api/workspace/members/invite' && request.method === 'POST') {
+    return handleWorkspaceMembersInvitePost(request);
+  }
+
+  if (url.pathname === '/api/workspace/integrations/nango-session' && request.method === 'POST') {
+    return handleWorkspaceNangoConnectSessionPost(request);
   }
 
   const integrationSyncMatch = url.pathname.match(/^\/api\/workspace\/integrations\/([^/]+)\/sync$/);
@@ -211,6 +238,16 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
     return handleAuditList(request);
   }
 
+  const invitationMatch = url.pathname.match(/^\/api\/invitations\/([^/]+)$/);
+  if (invitationMatch && request.method === 'GET') {
+    return handleInvitationRead(request, invitationMatch[1]!);
+  }
+
+  const invitationAcceptMatch = url.pathname.match(/^\/api\/invitations\/([^/]+)\/accept$/);
+  if (invitationAcceptMatch && request.method === 'POST') {
+    return handleInvitationAccept(request, invitationAcceptMatch[1]!);
+  }
+
   const auditMatch = url.pathname.match(/^\/api\/audits\/([^/]+)$/);
   if (auditMatch && request.method === 'GET') {
     return handleAuditRead(request, auditMatch[1]!);
@@ -275,12 +312,26 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
     return handleIssuePublish(request, issuePublishMatch[1]!);
   }
 
+  const issueOutcomeMatch = url.pathname.match(/^\/api\/issues\/([^/]+)\/outcome$/);
+  if (issueOutcomeMatch && request.method === 'POST') {
+    return handleIssueOutcome(request, issueOutcomeMatch[1]!);
+  }
+
   if (url.pathname === '/api/issues/reconcile' && request.method === 'POST') {
     return handleIssueReconcile(request);
   }
 
+  const projectAccuracyMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/accuracy$/);
+  if (projectAccuracyMatch && request.method === 'GET') {
+    return handleProjectAccuracy(request, projectAccuracyMatch[1]!);
+  }
+
   if (url.pathname === '/api/webhooks/gitlab' && request.method === 'POST') {
     return handleGitLabIssueWebhookPost(request, env);
+  }
+
+  if (url.pathname === '/api/slack/premortem' && request.method === 'POST') {
+    return handleSlackPremortemCommandPost(request, env);
   }
 
   if (url.pathname === '/health') {

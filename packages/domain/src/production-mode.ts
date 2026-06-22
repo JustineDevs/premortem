@@ -37,14 +37,80 @@ export function prefersRealUserAuth(): boolean {
 export function hasConfiguredRuntimeCredentials(): boolean {
   const hasDb = Boolean(process.env.DATABASE_URL?.trim());
   const hasGitlab = Boolean(process.env.GITLAB_TOKEN?.trim());
-  const hasLlm =
-    Boolean(process.env.GEMINI_API_KEY?.trim()) ||
-    Boolean(
-      process.env.AZURE_OPENAI_ENDPOINT?.trim() &&
-        process.env.AZURE_OPENAI_API_KEY?.trim() &&
-        (process.env.AZURE_OPENAI_DEPLOYMENT?.trim() || process.env.AZURE_OPENAI_MODEL?.trim())
-    );
+  const hasLlm = Boolean(
+    process.env.GEMINI_API_KEY?.trim() ||
+      process.env.OPENAI_API_KEY?.trim() ||
+      process.env.ANTHROPIC_API_KEY?.trim()
+  );
   return hasDb && hasGitlab && hasLlm;
+}
+
+function hasTrimmedEnv(env: NodeJS.ProcessEnv, key: string): boolean {
+  return Boolean(env[key]?.trim());
+}
+
+function hasSupabaseOAuthEnv(env: NodeJS.ProcessEnv): boolean {
+  return hasTrimmedEnv(env, 'NEXT_PUBLIC_SUPABASE_URL') && hasTrimmedEnv(env, 'NEXT_PUBLIC_SUPABASE_ANON_KEY');
+}
+
+function hasLlmEnv(env: NodeJS.ProcessEnv): boolean {
+  return Boolean(
+    env.GEMINI_API_KEY?.trim() ||
+      env.OPENAI_API_KEY?.trim() ||
+      env.ANTHROPIC_API_KEY?.trim()
+  );
+}
+
+function hasGitLabEnv(env: NodeJS.ProcessEnv): boolean {
+  return (
+    Boolean(env.GITLAB_TOKEN?.trim()) ||
+    Boolean(env.GITLAB_CLIENT_ID?.trim() && env.GITLAB_CLIENT_SECRET?.trim())
+  );
+}
+
+export function collectProductionBootEnvIssues(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (env.PREMORTEM_PRODUCTION_MODE !== '1') return [];
+
+  const missing: string[] = [];
+  for (const key of [
+    'DATABASE_URL',
+    'DIRECT_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'NEO4J_URI',
+    'NEO4J_PASSWORD',
+    'STRIPE_WEBHOOK_SECRET',
+    'SENTRY_DSN',
+    'NEXT_PUBLIC_POSTHOG_KEY'
+  ] as const) {
+    if (!hasTrimmedEnv(env, key)) missing.push(key);
+  }
+
+  if (!hasSupabaseOAuthEnv(env)) {
+    missing.push('NEXT_PUBLIC_SUPABASE_URL');
+    missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+  }
+
+  if (!hasLlmEnv(env)) {
+    missing.push('GEMINI_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY');
+  }
+
+  if (!hasGitLabEnv(env)) {
+    missing.push('GITLAB_TOKEN or GITLAB_CLIENT_ID/SECRET');
+  }
+
+  if (!hasTrimmedEnv(env, 'NANGO_SECRET_KEY') && !hasTrimmedEnv(env, 'NANGO_API_KEY')) {
+    missing.push('NANGO_SECRET_KEY');
+  }
+
+  if (env.NEO4J_DISABLED === '1') {
+    missing.push('NEO4J_DISABLED must be unset when PREMORTEM_PRODUCTION_MODE=1');
+  }
+
+  if (env.PREMORTEM_AUTH_DISABLED === '1') {
+    missing.push('PREMORTEM_AUTH_DISABLED must be unset when PREMORTEM_PRODUCTION_MODE=1');
+  }
+
+  return missing;
 }
 
 function envFlag(name: string): boolean | undefined {
@@ -57,40 +123,7 @@ function envFlag(name: string): boolean | undefined {
 export function validateProductionBootEnv(): string[] {
   if (!isProductionMode()) return [];
 
-  const missing: string[] = [];
-  if (!process.env.DATABASE_URL?.trim()) missing.push('DATABASE_URL');
-  if (!hasSupabaseAuthEnv()) {
-    missing.push('NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL');
-    missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY or SUPABASE_ANON_KEY');
-  }
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()) missing.push('SUPABASE_SERVICE_ROLE_KEY');
-  if (!process.env.ENCRYPTION_KEY?.trim()) missing.push('ENCRYPTION_KEY');
-  if (!process.env.NEO4J_URI?.trim()) missing.push('NEO4J_URI');
-  if (!process.env.NEO4J_PASSWORD?.trim()) missing.push('NEO4J_PASSWORD');
-
-  const hasLlm =
-    Boolean(process.env.GEMINI_API_KEY?.trim()) ||
-    Boolean(
-      process.env.AZURE_OPENAI_ENDPOINT?.trim() &&
-        process.env.AZURE_OPENAI_API_KEY?.trim() &&
-        process.env.AZURE_OPENAI_DEPLOYMENT?.trim()
-    );
-  if (!hasLlm) {
-    missing.push('GEMINI_API_KEY or AZURE_OPENAI_*');
-  }
-
-  const hasGitLab =
-    Boolean(process.env.GITLAB_TOKEN?.trim()) ||
-    Boolean(process.env.GITLAB_CLIENT_ID?.trim() && process.env.GITLAB_CLIENT_SECRET?.trim());
-  if (!hasGitLab) {
-    missing.push('GITLAB_TOKEN or GITLAB_CLIENT_ID/SECRET');
-  }
-
-  if (process.env.PREMORTEM_AUTH_DISABLED === '1') {
-    missing.push('PREMORTEM_AUTH_DISABLED must be unset when PREMORTEM_PRODUCTION_MODE=1');
-  }
-
-  return missing;
+  return collectProductionBootEnvIssues(process.env);
 }
 
 export function allowsMockExecutor(): boolean {

@@ -1,4 +1,5 @@
 import { gitLabAuthHeaders } from './gitlab-auth';
+import { fetchWithTimeout } from './fetch-with-timeout';
 
 export interface GitLabTreeEntry {
   id: string;
@@ -19,7 +20,7 @@ export interface GitLabCommitSummary {
 }
 
 async function gitlabRequest(baseUrl: string, token: string, apiPath: string) {
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/v4${apiPath}`, {
+  const response = await fetchWithTimeout(`${baseUrl.replace(/\/$/, '')}/api/v4${apiPath}`, {
     headers: gitLabAuthHeaders(token)
   });
 

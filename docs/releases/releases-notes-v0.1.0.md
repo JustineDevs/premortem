@@ -3,12 +3,12 @@
 ## Summary
 Premortem v0.1.0 establishes the GitLab-first foundation for predictive repository audits, structured issue synthesis, dedupe clustering, review-ready issue candidates, and publish/reconcile workflows.
 
-This tag is the foundation cut for the alpha channel: it proves the end-to-end loop from repository ingest to clustered findings, reviewer approval, and GitLab publish/reconcile, with Cloudflare, Supabase, Neo4j, Gemini, Azure OpenAI, and observability wiring in place for the public runtime surfaces.
+This tag is the foundation cut for the alpha channel: it proves the end-to-end loop from repository ingest to clustered findings, reviewer approval, and GitLab publish/reconcile, with Cloudflare, Supabase, Neo4j, Gemini, and observability wiring in place for the public runtime surfaces.
 
 ## Included
 - Agent registry, policies, real specialist prompts, and strict Zod validation.
 - Prisma persistence, Supabase starter schema, and RLS/auth migration starters.
-- LLM adapter seams for Gemini and Azure OpenAI.
+- LLM adapter seams for Gemini.
 - Neo4j driver-backed graph snapshot write path.
 - GitLab publish and reconciliation worker starters.
 - Queueing, idempotency, leasing, dead-letter, observability, eval, billing, notification, and enterprise-readiness scaffolding.

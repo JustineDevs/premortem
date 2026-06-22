@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
-
-import { mergeRuntimeIssue } from '@/lib/premortem-api/client';
+import { proxyPremortemApi } from '@/lib/server/proxy-api';
+import { bffErrorResponse } from '@/lib/server/bff-errors';
 import { bffRateLimitKey, bffRateLimitResponse, checkBffRateLimit } from '@/lib/server/bff-rate-limit';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
+import { readJsonRecord, readOptionalString } from '@/lib/server/request-body';
 
 export async function POST(
   request: Request,
@@ -15,24 +15,26 @@ export async function POST(
   }
 
   try {
-    const context = await resolveRequestActorContext();
-    const body = (await request.json()) as {
-      mergedIntoIssueCandidateId?: string;
-      notes?: string;
-    };
-    const payload = await mergeRuntimeIssue(
-      issueId,
+    const context = await resolveRequestActorContext(request);
+    const body = (await readJsonRecord(request)) ?? {};
+    const mergedIntoIssueCandidateId = readOptionalString(body, 'mergedIntoIssueCandidateId');
+    const notes = readOptionalString(body, 'notes');
+    return proxyPremortemApi(
+      path,
       {
-        mergedIntoIssueCandidateId: body.mergedIntoIssueCandidateId ?? '',
-        notes: body.notes
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...actorHeaders(context)
+        },
+        body: JSON.stringify({
+          mergedIntoIssueCandidateId: mergedIntoIssueCandidateId ?? '',
+          notes
+        })
       },
-      actorHeaders(context)
+      request
     );
-    return NextResponse.json(payload);
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Merge failed' },
-      { status: 502 }
-    );
+    return bffErrorResponse(error, 'Merge failed');
   }
 }

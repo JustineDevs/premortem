@@ -2,8 +2,6 @@
 
 import { useWorkspaceMutations, useWorkspaceQuery } from '@/hooks/use-os-console-data';
 
-export type { WorkspaceIntegration, WorkspaceBundle } from '@/hooks/workspace-types';
-
 export function useWorkspace() {
   const query = useWorkspaceQuery();
   const mutations = useWorkspaceMutations();
@@ -26,6 +24,7 @@ export function useWorkspace() {
     registerIntegration: mutations.registerIntegration,
     syncIntegration: mutations.syncIntegration,
     startCheckout: mutations.startCheckout,
+    startBillingPortal: mutations.startBillingPortal,
     reconcileIssues: mutations.reconcileIssues,
     cancelAudit: mutations.cancelAudit,
     pauseAudit: mutations.pauseAudit,

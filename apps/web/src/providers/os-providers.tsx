@@ -13,6 +13,7 @@ export function OsProviders({ children }: { children: ReactNode }) {
           queries: {
             staleTime: 30_000,
             refetchOnWindowFocus: false,
+            gcTime: 5 * 60 * 1000,
             retry: 1
           }
         }

@@ -71,6 +71,17 @@ Dashboard “Active Risk Clusters” must link to real audit/issue scope (`audit
 }
 ```
 
+Issue bodies are rendered by the shared published-issue formatter and must include:
+
+- a System Grounding Manifest (SGM / ARPS) block
+- a predicted-failure summary
+- repository context when available
+- trigger conditions
+- source evidence with code snippets when available
+- an evidence-vs-recommendation comparison block
+- lineage and traceability fields
+- the standard Premortem attribution footer
+
 Review state enums: `ReviewStatus` in `packages/domain/src/review.ts`. Edits must bump version; publish requires approved/edited state per production boundaries.
 
 ## Review record

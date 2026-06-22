@@ -6,14 +6,14 @@ const GITHUB = 'https://github.com/JustineDevs/premortem/blob/main';
 
 export const deployProductionGuideDoc: StructuredDoc = {
   title: 'Deploy to production',
-  lead: 'Ship Premortem on Cloudflare Pages + Worker with Supabase, Neo4j, and Stripe.',
+  lead: 'Deploy Premortem on Cloudflare Pages and Worker with Supabase, Neo4j, and Stripe using the production env wrapper.',
   audience: 'Platform engineers preparing a production cutover.',
   prerequisites: [
     'Cloudflare account with Workers, Pages, and Queues enabled.',
     'Supabase project with migrations applied.',
     'Stripe products and webhook endpoint configured.'
   ],
-  expectedResult: 'Marketing and /app on premortem.jstn.site, API on api.jstn.site, smoke tests passing.',
+  expectedResult: 'Marketing and /app on premortem.jstn.site, API on api.jstn.site, verification checks passing.',
   githubSource: `${GITHUB}/docs/releases/DEPLOY-PRODUCTION.md`,
   toc: [
     { id: 'topology', label: 'Runtime topology' },
@@ -21,7 +21,7 @@ export const deployProductionGuideDoc: StructuredDoc = {
     { id: 'api-worker', label: 'API Worker' },
     { id: 'pages', label: 'Cloudflare Pages' },
     { id: 'stripe', label: 'Stripe webhooks' },
-    { id: 'verify', label: 'Pre-flight smokes' }
+    { id: 'verify', label: 'Pre-flight checks' }
   ],
   callouts: [
     {
@@ -58,6 +58,7 @@ export const deployProductionGuideDoc: StructuredDoc = {
       heading: 'API Worker',
       bullets: [
         'Requires CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in GitHub secrets.',
+        'The deploy wrapper loads repo-root .env.production and sets CLOUDFLARE_ENV=production before wrangler runs.',
         'Queue bootstrap creates premortem-audit-jobs and premortem-audit-jobs-dlq during deploy when Cloudflare credentials are present.',
         'Set Worker secrets via wrangler (DATABASE_URL, GEMINI_API_KEY, GitLab OAuth, Neo4j, Supabase service role).'
       ],
@@ -74,6 +75,7 @@ export const deployProductionGuideDoc: StructuredDoc = {
       bullets: [
         'Connect GitHub repo; production branch main.',
         'Build: pnpm install --frozen-lockfile && pnpm run build:pages.',
+        'The build wrapper loads repo-root .env.production and sets CLOUDFLARE_ENV=production before the Pages build starts.',
         'Set NEXT_PUBLIC_APP_URL=https://premortem.jstn.site and PREMORTEM_API_BASE_URL=https://api.jstn.site.',
         'Include Supabase public keys, Stripe secrets, Sentry/PostHog public keys on Pages.'
       ],
@@ -88,17 +90,17 @@ export const deployProductionGuideDoc: StructuredDoc = {
       id: 'stripe',
       heading: 'Stripe webhooks',
       bullets: [
-        'Webhook endpoint: https://premortem.jstn.site/api/webhooks/stripe.',
+        'Webhook endpoint: https://premortem.jstn.site/api/stripe/webhook.',
         'Map Starter and Growth price IDs to STRIPE_PRICE_PRO, STRIPE_PRICE_TEAM, and annual variants.',
         'Test mode uses sk_test_*; live mode drives entitlements via webhook events.'
       ]
     },
     {
       id: 'verify',
-      heading: 'Pre-flight smokes',
+      heading: 'Pre-flight checks',
       codeBlocks: [
         {
-          title: 'Production smoke (against live URLs)',
+          title: 'Production verification (against live URLs)',
           code: 'PREMORTEM_WEB_BASE=https://premortem.jstn.site \\\nPREMORTEM_API_BASE=https://api.jstn.site \\\npnpm run smoke:production-readiness'
         },
         {
@@ -165,7 +167,7 @@ export const workflowCanvasGuideDoc: StructuredDoc = {
       heading: 'Controls',
       bullets: [
         'Execute Stream: trigger or resume pipeline execution for the selected project.',
-        'Simulate Trace: preview layout without a live run (when available).',
+        'Preview layout: view canvas placement without starting a live run.',
         'Reset Layout / Reset View: restore canvas zoom and ELK auto-layout.'
       ]
     }
@@ -197,7 +199,7 @@ export const auditHistoryGuideDoc: StructuredDoc = {
       id: 'timeline',
       heading: 'Compliance timeline',
       bullets: [
-        'Plots compliance rating (0-100) across successive scanner sweeps.',
+        'Plots compliance rating (0-100) across successive audit runs.',
         'Filter by workspace project via Milestones Filter dropdown.',
         'Export CSV for reporting; continuous checks badge shows when auto-rotation is on.'
       ]
@@ -227,29 +229,29 @@ export const auditHistoryGuideDoc: StructuredDoc = {
 };
 
 export const aiPlaygroundGuideDoc: StructuredDoc = {
-  title: 'AI Code Playground',
-  lead: 'Run focused Gemini security traces on ad-hoc TypeScript snippets without a full repo audit.',
-  audience: 'Engineers validating a suspicious function or teaching Premortem to stakeholders.',
-  prerequisites: ['GEMINI_API_KEY configured for live analysis.', 'Optional: use preset vulnerable snippets for demos.'],
+  title: 'Code analysis',
+  lead: 'Run focused code analysis on a TypeScript snippet without a full repository audit.',
+  audience: 'Engineers validating a suspicious function or sharing the workflow with stakeholders.',
+  prerequisites: ['GEMINI_API_KEY configured for analysis.', 'Optional: use preset snippets for validation.'],
   expectedResult: 'Structured findings with severity, line references, trace nodes, and resolution guidance.',
   screenshot: {
     src: '/landing/demo/8.png',
-    alt: 'Premortem AI Code Playground findings with SQL injection detail',
-    caption: 'Review findings step with compliance score and hotfix guidance.'
+    alt: 'Premortem code analysis findings with SQL injection detail',
+    caption: 'Review findings step with compliance score and resolution guidance.'
   },
   toc: [
-    { id: 'workflow', label: 'Three-step workflow' },
+    { id: 'workflow', label: 'Analysis flow' },
     { id: 'input', label: 'Source input' },
-    { id: 'results', label: 'Evaluation results' },
-    { id: 'limits', label: 'Limits vs full audit' }
+    { id: 'results', label: 'Results' },
+    { id: 'limits', label: 'Scope vs full audit' }
   ],
   sections: [
     {
       id: 'workflow',
-      heading: 'Three-step workflow',
+      heading: 'Analysis flow',
       bullets: [
-        '1. Edit Snippet: paste or pick a preset TypeScript buffer.',
-        '2. Run Analyzer: Execute AI Security Analysis Scan (Gemini trace).',
+        '1. Edit snippet: paste or pick a preset TypeScript buffer.',
+        '2. Run analysis: execute the focused analysis path.',
         '3. Review Findings: severity, category, execution path, and patch hints.'
       ]
     },
@@ -257,31 +259,31 @@ export const aiPlaygroundGuideDoc: StructuredDoc = {
       id: 'input',
       heading: 'Source input',
       bullets: [
-        'Console accepts server-side TypeScript/JSON for static security analysis.',
-        'Presets demonstrate SQL injection and credential logging patterns.',
-        'Custom code from Projects register form can also be scanned on audit trigger.'
+        'Console accepts server-side TypeScript/JSON for focused code analysis.',
+        'Preset snippets cover SQL injection and credential logging patterns.',
+        'Custom code from Projects can also be analyzed before a full audit trigger.'
       ],
       screenshot: {
         src: '/landing/demo/7.png',
-        alt: 'Premortem AI Code Playground analyzing snippet',
-        caption: 'Analyzer step with Gemini trace in progress.'
+        alt: 'Premortem code analysis reviewing a TypeScript buffer',
+        caption: 'Analysis step in progress.'
       }
     },
     {
       id: 'results',
-      heading: 'Evaluation results',
+      heading: 'Results',
       bullets: [
         'Compliance index score for the snippet (not whole-repo rating).',
         'Critical/High/Medium findings with line numbers and categories.',
-        'Resolution guideline and optional automated hotfix patch link.'
+        'Resolution guideline and optional suggested patch.'
       ]
     },
     {
       id: 'limits',
-      heading: 'Limits vs full audit',
+      heading: 'Scope vs full audit',
       bullets: [
-        'Playground runs a static analyzer path, not the full 13-agent swarm.',
-        'No GitLab publish from playground: use Audits & Tracing for governed issue sync.',
+        'Focused analysis runs a smaller analysis path, not the full 13-agent swarm.',
+        'No GitLab publish from code analysis: use Audits & Tracing for governed issue sync.',
         'Full audits include graph ingest, dual lanes, clustering, and reviewer gates.'
       ],
       callouts: [
@@ -294,7 +296,7 @@ export const aiPlaygroundGuideDoc: StructuredDoc = {
   ],
   relatedLinks: [
     { href: marketingLinks.docsGuidesRunAudit, label: 'Run an audit' },
-    { href: marketingLinks.docsReferenceEnvironment, label: 'GEMINI_API_KEY setup' }
+    { href: marketingLinks.docsReferenceEnvironment, label: 'Environment variables' }
   ]
 };
 
@@ -332,17 +334,17 @@ export const workspaceSettingsGuideDoc: StructuredDoc = {
       heading: 'Integrations & providers',
       bullets: [
         'GitLab: OAuth connect, reconnect, sync work item attributes.',
-        'GitHub, Bitbucket, Azure DevOps, Gitea: listed with rollout status (coming soon).',
+        'GitHub, Bitbucket, Azure DevOps, and Gitea are not available in this release.',
         'Sync integration refreshes metadata tags from provider APIs.'
       ]
     },
     {
       id: 'llm',
-      heading: 'AI model config',
+      heading: 'LLM configuration',
       bullets: [
         'Default Gemini model, max tokens, temperature.',
         'Vendor routing tiers for fallback providers.',
-        'Custom provider hosts for enterprise Azure OpenAI or self-hosted endpoints.',
+        'Custom provider hosts for self-hosted endpoints.',
         'PATCH /api/workspace/llm persists configuration.'
       ]
     },
@@ -360,7 +362,7 @@ export const workspaceSettingsGuideDoc: StructuredDoc = {
       heading: 'Billing',
       bullets: [
         'View plan tier, usage (scans, tokens), and upgrade via Stripe Checkout.',
-        'Free tier: local plan patch works without Checkout in dev.',
+        'Free tier: local plan patch works without Checkout in local development.',
         'See Billing & plan limits reference for quotas.'
       ]
     },
@@ -400,6 +402,7 @@ export const authSessionsGuideDoc: StructuredDoc = {
       heading: 'Supabase Auth',
       bullets: [
         '/login and /signup use Supabase SSR cookies via apps/web middleware.',
+        'When Cloudflare Turnstile is enabled, the widget appears before the OAuth redirect and must succeed before the GitLab handoff continues.',
         'BFF routes read session and map to organization membership.',
         'GET /api/auth/status reports whether auth is configured.'
       ]
@@ -409,7 +412,7 @@ export const authSessionsGuideDoc: StructuredDoc = {
       heading: 'Local dev modes',
       bullets: [
         'Real auth: set Supabase keys; pnpm run dev uses your Supabase user as profileId.',
-        'Smoke/fixture mode: PREMORTEM_AUTH_DISABLED=1 with LOCAL_DEV_FIXTURE (smoke scripts only).',
+        'Local verification mode: PREMORTEM_AUTH_DISABLED=1 with LOCAL_DEV_FIXTURE (verification scripts only).',
         'Never enable PREMORTEM_AUTH_DISABLED in production.'
       ],
       callouts: [
@@ -420,7 +423,7 @@ export const authSessionsGuideDoc: StructuredDoc = {
       ],
       codeBlocks: [
         {
-          title: 'Auth-disabled smoke only',
+          title: 'Auth-disabled local verification only',
           code: 'PREMORTEM_AUTH_DISABLED=1\nPREMORTEM_SMOKE_USE_FIXTURE=1\npnpm run smoke:local'
         }
       ]
@@ -445,7 +448,9 @@ export const authSessionsGuideDoc: StructuredDoc = {
       heading: 'Common auth issues',
       bullets: [
         'ERR_TOO_MANY_REDIRECTS on /login: canonical host redirect; align APP URL and OAuth callback host.',
-        '401 on /api/workspace: session expired or auth disabled without fixture.',
+        '401 on /api/workspace: session expired or auth disabled without local verification credentials.',
+        'Callback failure on /login or /signup: Supabase could not exchange the external code for a session, or the callback host did not match NEXT_PUBLIC_APP_URL.',
+        'Captcha-config notice on /login or /signup: Turnstile is enabled but NEXT_PUBLIC_TURNSTILE_SITE_KEY or TURNSTILE_SECRET_KEY is missing in the deployment environment.',
         'Empty /app after login: workspace exists but no projects registered yet (not an auth failure).'
       ]
     }
@@ -475,7 +480,7 @@ export const billingPlansReferenceDoc: StructuredDoc = {
         'Free: 1 repo, 10 audits/month, reviewer console, no GitLab publish.',
         'Starter (pro): 10 repos, 100 audits/month, GitLab publish + reconcile.',
         'Growth (team): 50 repos, 500 audits/month, priority reconciliation.',
-        'Enterprise: contract quotas, SSO roadmap, custom deployment.'
+        'Enterprise: contract quotas, SSO tracked on the roadmap, custom deployment.'
       ],
       codeBlocks: [
         {
@@ -500,14 +505,14 @@ export const billingPlansReferenceDoc: StructuredDoc = {
       heading: 'Stripe integration',
       bullets: [
         'Checkout: POST /api/billing/checkout with plan and billing cycle.',
-        'Webhook: POST /api/webhooks/stripe updates OrganizationBillingAccount.',
+        'Webhook: POST /api/stripe/webhook updates OrganizationBillingAccount.',
         'Env: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_* for each tier.',
         'Test mode: plan PATCH in Settings works without Checkout when Stripe is not configured.'
       ],
       callouts: [
         {
           variant: 'local',
-          text: 'Stripe checkout with placeholder price IDs fails locally; use Settings plan patch or test catalog IDs.'
+          text: 'Stripe checkout requires configured test or live price IDs; local development can still use Settings plan patch.'
         }
       ]
     },
@@ -567,7 +572,7 @@ export const neo4jGraphReferenceDoc: StructuredDoc = {
       bullets: [
         'NEO4J_URI: Bolt connection string (Aura or local).',
         'NEO4J_USERNAME, NEO4J_PASSWORD: credentials.',
-        'NEO4J_DISABLED=1: skip graph persistence (smoke/dev fallback).'
+        'NEO4J_DISABLED=1: skip graph persistence (local development fallback).'
       ]
     },
     {
@@ -653,7 +658,7 @@ export const observabilityReferenceDoc: StructuredDoc = {
 
 export const securityConceptDoc: StructuredDoc = {
   title: 'Security & trust boundaries',
-  lead: 'Human review gates publish; provider tokens are scoped; multi-tenant data stays org-bound.',
+  lead: 'Human review gates publish; provider tokens are scoped; multi-tenant data stays organization-bound.',
   audience: 'Security reviewers and architects evaluating Premortem deployment.',
   githubSource: `${GITHUB}/docs/security/session-design.md`,
   toc: [
@@ -670,7 +675,7 @@ export const securityConceptDoc: StructuredDoc = {
       bullets: [
         'Marketing and /app: public vs authenticated Supabase session.',
         'BFF (/api/* on web): proxies to API worker with session context.',
-        'API worker: orchestration, no direct browser access to secrets.',
+        'API worker: orchestration layer with no direct browser access to secrets.',
         'GitLab: OAuth scopes limit repo and issue API access.'
       ]
     },
@@ -680,6 +685,7 @@ export const securityConceptDoc: StructuredDoc = {
       bullets: [
         'Agents produce issue candidates, not live GitLab issues.',
         'Reviewer must approve in /app before POST publish executes.',
+        'Consensus validation and clustering suppress low-signal worker noise before the review queue sees it.',
         'PREMORTEM_PUBLISH_DRY_RUN=1 skips remote issue creation in dev.'
       ]
     },
@@ -716,7 +722,132 @@ export const securityConceptDoc: StructuredDoc = {
   relatedLinks: [
     { href: marketingLinks.docsGuidesAuthSessions, label: 'Auth & sessions' },
     { href: marketingLinks.docsConceptsDataFlow, label: 'Data flow' },
+    { href: marketingLinks.docsArchitectureEnterpriseReadiness, label: 'Enterprise readiness' },
     { href: marketingLinks.privacy, label: 'Privacy policy' }
+  ]
+};
+
+export const enterpriseReadinessDoc: StructuredDoc = {
+  title: 'Enterprise readiness',
+  lead: 'A production-safe operating model for data handling, worker isolation, review gating, and tenant boundaries across the supported integration surfaces.',
+  audience: 'Security reviewers, platform teams, and procurement stakeholders.',
+  prerequisites: ['A configured workspace or a sandbox environment.'],
+  expectedResult:
+    'You can explain what data is processed, what is persisted, how tenants are separated, which providers are live today, and how the system refuses weak or under-evidenced output.',
+  githubSource: `${GITHUB}/docs/architecture/enterprise-readiness.md`,
+  toc: [
+    { id: 'developer-tests', label: 'Developer tests' },
+    { id: 'gateway', label: 'Data gateway' },
+    { id: 'ai-flow', label: 'AI privacy' },
+    { id: 'isolation', label: 'Tenant isolation' },
+    { id: 'integrations', label: 'Provider support matrix' },
+    { id: 'controls', label: 'Operational controls' },
+    { id: 'compliance', label: 'Compliance evidence' },
+    { id: 'faq', label: 'FAQ / security defensibility' },
+    { id: 'deployment', label: 'Deployment modes' }
+  ],
+  callouts: [
+    {
+      variant: 'warning',
+      text: 'GitLab repository connect, publish, and reconcile are shipped today. GitHub repository integration, Bitbucket, Azure DevOps, and Gitea remain roadmap surfaces in this release.'
+    },
+    {
+      variant: 'note',
+      text:
+        'If you need a zero data retention LLM contract, choose a provider plan that explicitly guarantees it. Premortem can route and validate requests, but provider policy still matters.'
+    }
+  ],
+  sections: [
+    {
+      id: 'developer-tests',
+      heading: 'Developer tests',
+      bullets: [
+        "Don't Waste My Time: findings must be concrete, structural, and code-specific.",
+        'Context Boundary: findings must be grounded in the repository, not guessed from a short prompt alone.',
+        'Workflow Disruption: the review loop must stay inside the existing git workflow, terminal commands, and repo-native evals.',
+        'If the system cannot point at a real file, route, config key, graph edge, or CI artifact, it should return no finding instead of generic advice.'
+      ]
+    },
+    {
+      id: 'gateway',
+      heading: 'Data gateway',
+      bullets: [
+        'Repository content is consumed by background workers and reduced into structured findings, clusters, issue candidates, and audit snapshots.',
+        'The reviewer console persists operational artifacts, not a copy of the repository tree.',
+        'Provider tokens remain server-side and are scoped to the integration needed for the task.'
+      ]
+    },
+    {
+      id: 'ai-flow',
+      heading: 'AI privacy',
+      bullets: [
+        'Prompts are shaped by a workflow contract that rejects generic output and refuses weak evidence.',
+        'Consensus validation drops low-confidence worker noise before it reaches reviewer queues.',
+        'Output scrubbing removes sensitive strings from generated text before persistence or publish.'
+      ]
+    },
+    {
+      id: 'isolation',
+      heading: 'Tenant isolation',
+      bullets: [
+        'Organization-scoped queries, Supabase RLS, and server-side session context separate workspace data.',
+        'Webhook handlers validate inbound signatures before they can enqueue work.',
+        'The worker boundary is designed so one tenant cannot read another tenant’s audit state.'
+      ]
+    },
+    {
+      id: 'integrations',
+      heading: 'Provider support matrix',
+      bullets: [
+        'GitLab: supported for connect, ingest, publish, and reconciliation.',
+        'GitHub: sign-in and auth primitives exist; repository integration is roadmap.',
+        'Bitbucket: roadmap.',
+        'Azure DevOps: roadmap.',
+        'Gitea: roadmap.'
+      ]
+    },
+    {
+      id: 'controls',
+      heading: 'Operational controls',
+      bullets: [
+        'Audit runs are logged with actor, organization, timestamps, and workflow state.',
+        'Review gates prevent direct agent-to-provider publish.',
+        'Dedicated stop and resume controls make background runs observable and reversible.'
+      ]
+    },
+    {
+      id: 'compliance',
+      heading: 'Compliance evidence',
+      bullets: [
+        'Audit trails should capture who triggered the run, which workspace it used, and what was approved.',
+        'The system is structured to support SOC 2 style evidence collection through immutable run records and reconciliation history.',
+        'Exportable audit history and workspace settings make security review evidence easier to assemble.'
+      ]
+    },
+    {
+      id: 'faq',
+      heading: 'FAQ / security defensibility',
+      body:
+        '**What data is stored?** Operational artifacts such as audit runs, findings, issue candidates, and reconciliation records. The reviewer console is not a mirrored copy of the repository tree.\n\n' +
+        '**How does the system avoid noisy output?** Worker lanes are filtered through a consensus validator. Candidates that lack concrete repository evidence, fail the confidence threshold, or look generic are rejected before they reach the review queue.\n\n' +
+        '**How is prompt injection handled?** Prompt payloads are sanitized before they reach the LLM layer, and generated text is scrubbed before persistence or publish.\n\n' +
+        '**Which providers are production-supported today?** GitLab is supported for connect, ingest, publish, and reconciliation. GitHub, Bitbucket, Azure DevOps, and Gitea remain roadmap surfaces until they are shipped and documented.\n\n' +
+        '**Can teams run this in their own environment?** SaaS is the default. Private-cloud or BYOK deployment is treated as a separate delivery track and must be documented and validated on its own terms.'
+    },
+    {
+      id: 'deployment',
+      heading: 'Deployment modes',
+      bullets: [
+        'SaaS is the default operational mode.',
+        'The web, API, orchestrator, database, and graph layers are separated so a private-cloud deployment can be reasoned about cleanly.',
+        'Self-hosted or BYOK packaging is a separate delivery track and should be documented before any enterprise commitment.'
+      ]
+    }
+  ],
+  relatedLinks: [
+    { href: marketingLinks.docsConceptsSecurity, label: 'Security & trust' },
+    { href: marketingLinks.docsReferenceObservability, label: 'Observability' },
+    { href: marketingLinks.docsGuidesDeployProduction, label: 'Deploy to production' }
   ]
 };
 

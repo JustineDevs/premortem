@@ -8,6 +8,7 @@ import { AuditRuntimeConsole } from './audit-runtime-console';
 import { FindingSourceEvidence } from './finding-source-evidence';
 import { SwarmDualLanePanel } from './swarm-dual-lane-panel';
 import { OsTabs } from './os-tabs';
+import { OsToast } from './os-toast';
 import {
   buildSwarmTimelineActions,
   classifySwarmLane,
@@ -43,6 +44,7 @@ import {
   CheckSquare,
   Sparkle
 } from 'lucide-react';
+import { parseAuditCheckpoint } from '@premortem/domain';
 
 interface AuditsViewProps {
   audits: AuditRun[];
@@ -95,6 +97,8 @@ export function AuditsView({
   const [splitTitle, setSplitTitle] = useState('');
   const [isSplitting, setIsSplitting] = useState(false);
   const [activeAgentId, setActiveAgentId] = useState<string>('');
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastTone, setToastTone] = useState<'success' | 'error'>('success');
   const [runtimeSnapshot, setRuntimeSnapshot] = useState<{
     agentRuns: Array<{ id: string; agentName: string; status: string; startedAt?: string | null; completedAt?: string | null }>;
     lineage: Array<{ stage: string; id: string; label: string; parentId?: string }>;
@@ -105,6 +109,26 @@ export function AuditsView({
   } | null>(null);
 
   const selectedAudit = audits.find((a) => a.id === selectedAuditId) || audits[0];
+  const runtimeCheckpoint = parseAuditCheckpoint(runtimeSnapshot?.summary);
+
+  const showToast = (message: string, tone: 'success' | 'error' = 'success') => {
+    setToastMessage(message);
+    setToastTone(tone);
+    setTimeout(() => setToastMessage(null), 3050);
+  };
+
+  const alert = (message: string) => showToast(message, 'error');
+
+  const setSeverityFilterFromValue = (value: string) => {
+    if (value === 'ALL') {
+      setSeverityFilter('ALL');
+      return;
+    }
+
+    if (value === 'CRITICAL' || value === 'HIGH' || value === 'MEDIUM' || value === 'LOW') {
+      setSeverityFilter(value.toLowerCase() as SeverityType);
+    }
+  };
 
   React.useEffect(() => {
     if (!selectedAudit?.id) {
@@ -113,37 +137,57 @@ export function AuditsView({
     }
 
     let cancelled = false;
+    let inFlight = false;
+    let currentController: AbortController | null = null;
 
-    const loadSnapshot = () => {
-      void fetch(`/api/audits/${selectedAudit.id}`)
-        .then((response) => response.json())
-        .then((payload) => {
-          const snapshot = payload.snapshot ?? payload.auditRun;
-          if (cancelled || !snapshot) return;
-          setRuntimeSnapshot(snapshot);
-          if (snapshot.agentRuns?.[0]?.id && !activeAgentId) {
-            setActiveAgentId(snapshot.agentRuns[0].id);
-          }
+    const loadSnapshot = async (hydrate: boolean) => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      const controller = new AbortController();
+      currentController = controller;
+      try {
+        const response = await fetch(
+          `/api/audits/${selectedAudit.id}${hydrate ? '?hydrate=1' : '?hydrate=0'}`,
+          { signal: controller.signal }
+        );
+        const payload = await response.json();
+        const snapshot = payload.snapshot ?? payload.auditRun;
+        if (cancelled || !snapshot) return;
+        setRuntimeSnapshot(snapshot);
+        if (snapshot.agentRuns?.[0]?.id && !activeAgentId) {
+          setActiveAgentId(snapshot.agentRuns[0].id);
+        }
 
-          const hydrated = mapSnapshotToAuditRun(snapshot, selectedAudit.projectName);
-          onAuditHydrated(selectedAudit.id, hydrated);
-        })
-        .catch(() => {
-          if (!cancelled) setRuntimeSnapshot(null);
-        });
+        const hydrated = mapSnapshotToAuditRun(snapshot, selectedAudit.projectName);
+        onAuditHydrated(selectedAudit.id, hydrated);
+      } catch {
+        if (!cancelled) setRuntimeSnapshot(null);
+      } finally {
+        inFlight = false;
+        if (currentController === controller) {
+          currentController = null;
+        }
+      }
     };
 
-    loadSnapshot();
+    void loadSnapshot(true);
 
     const shouldPoll =
       selectedAudit.status === 'RUNNING' ||
       selectedAudit.status === 'PAUSED' ||
       activeTab === 'swarm';
-    if (!shouldPoll) return () => { cancelled = true; };
+    if (!shouldPoll)
+      return () => {
+        cancelled = true;
+        currentController?.abort();
+      };
 
-    const timer = window.setInterval(loadSnapshot, 2000);
+    const timer = window.setInterval(() => {
+      void loadSnapshot(false);
+    }, 2000);
     return () => {
       cancelled = true;
+      currentController?.abort();
       window.clearInterval(timer);
     };
   }, [selectedAudit?.id, selectedAudit?.projectName, selectedAudit?.status, activeTab, onAuditHydrated]);
@@ -532,11 +576,31 @@ export function AuditsView({
           {/* TAB 1: SUMMARY */}
           {activeTab === 'summary' && (
             <div className="p-6 overflow-y-auto h-full space-y-6">
-              <div className="p-4 bg-zinc-50 border border-zinc-200 rounded text-xs space-y-1">
-                <h4 className="font-bold text-[#1E2522]">Summary Checklist Findings</h4>
-                <p className="text-[#5C6560]">
-                  Listed below are the targeted vulnerabilities analyzed by Premortem Engine {premortemBrand.engineVersion}. Implement patches below or flag false positives.
-                </p>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div className="p-4 bg-zinc-50 border border-zinc-200 rounded text-xs space-y-1">
+                  <h4 className="font-bold text-[#1E2522]">Compliance summary</h4>
+                  <p className="text-[#5C6560]">
+                    Structured from the persisted audit checkpoint, runtime counts, and trace lineage.
+                  </p>
+                </div>
+                <div className="p-4 bg-white border border-[#EAE6DF] rounded text-xs space-y-1">
+                  <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A958F]">Phase</span>
+                  <p className="font-semibold text-[#1E2522]">
+                    {runtimeCheckpoint?.phase?.replace(/_/g, ' ') ?? selectedAudit.status}
+                  </p>
+                </div>
+                <div className="p-4 bg-white border border-[#EAE6DF] rounded text-xs space-y-1">
+                  <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A958F]">Completed specialists</span>
+                  <p className="font-semibold text-[#1E2522]">
+                    {runtimeCheckpoint?.completedSpecialists.length ?? runtimeAgentRuns.length}
+                  </p>
+                </div>
+                <div className="p-4 bg-white border border-[#EAE6DF] rounded text-xs space-y-1">
+                  <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A958F]">Checkpoint saved</span>
+                  <p className="font-semibold text-[#1E2522]">
+                    {runtimeCheckpoint?.savedAt ? new Date(runtimeCheckpoint.savedAt).toLocaleString() : new Date(selectedAudit.date).toLocaleString()}
+                  </p>
+                </div>
               </div>
 
               <div className="border border-[#EAE6DF] rounded overflow-hidden">
@@ -620,7 +684,7 @@ export function AuditsView({
                   <span className="text-[#8A958F] font-bold uppercase">FILTER SEVERITY</span>
                   <select
                     value={severityFilter}
-                    onChange={(e) => setSeverityFilter(e.target.value as any)}
+                    onChange={(e) => setSeverityFilterFromValue(e.target.value)}
                     className="p-1 px-1.5 border border-[#EAE6DF] bg-white rounded focus:outline-none focus:border-emerald-950 font-bold uppercase text-[9px] text-[#1E2522]"
                   >
                     <option value="ALL">ALL RISK SIZES</option>
@@ -845,34 +909,19 @@ export function AuditsView({
                         </div>
                       </div>
 
-                      {/* Auto Code Diffs patches */}
-                      {activeFinding.suggestedPatchCode && (
+                      {/* Canonical published issue body preview */}
+                      {activeFinding.publishedIssueBodyMarkdown && (
                         <div className="space-y-3">
                           <h4 className="text-[11px] font-mono tracking-wider font-bold text-indigo-700 uppercase flex items-center gap-1">
-                            <Wrench size={12} />
-                            Automated Hotfix Patch Diff
+                            <FileText size={12} />
+                            Canonical Published Issue Body
                           </h4>
-                          
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="border border-rose-200 rounded overflow-hidden">
-                              <div className="p-2 bg-rose-50 border-b border-rose-200 font-mono text-[9px] font-bold text-rose-800 uppercase">
-                                - Original Vulnerable Segment
-                              </div>
-                              <pre className="p-3 bg-neutral-950 text-neutral-300 font-mono text-[10px] overflow-x-auto min-h-[120px] leading-relaxed select-text">
-                                {activeFinding.evidence}
-                              </pre>
-                            </div>
-
-                            <div className="border border-emerald-200 rounded overflow-hidden">
-                              <div className="p-2 bg-emerald-50 border-b border-emerald-200 font-mono text-[9px] font-bold text-emerald-800 uppercase flex justify-between items-center">
-                                <span>+ Proposed Secure Patch Implementation</span>
-                                <Sparkles size={10} className="text-emerald-700" />
-                              </div>
-                              <pre className="p-3 bg-neutral-950 text-neutral-300 font-mono text-[10px] overflow-x-auto min-h-[120px] leading-relaxed block select-text">
-                                {activeFinding.suggestedPatchCode}
-                              </pre>
-                            </div>
-                          </div>
+                          <p className="text-[10px] font-mono text-[#717A75] uppercase tracking-wider">
+                            Exact markdown body used for GitLab and GitHub publish, including the evidence comparison block and attribution footer.
+                          </p>
+                          <pre className="p-4 bg-neutral-950 text-neutral-100 border border-neutral-900 rounded font-mono text-[10px] overflow-x-auto whitespace-pre-wrap leading-relaxed select-text">
+                            {activeFinding.publishedIssueBodyMarkdown}
+                          </pre>
                         </div>
                       )}
 
@@ -1205,10 +1254,17 @@ export function AuditsView({
                 <div className="md:col-span-2 space-y-1">
                   <h4 className="font-bold text-[#1E2522] uppercase tracking-wide text-xs flex items-center gap-1.5">
                     <Activity size={14} className="text-emerald-700" />
-                    Premortem Audit Swarm
+                    Swarm orchestration plan
                   </h4>
                   <p className="text-[#5C6560] leading-relaxed text-[11px]">
-                    Specialist agents run in parallel across repository and runtime lenses. Shared graph memory deduplicates overlapping risk vectors before synthesis.
+                    Specialist agents run in parallel across repository and runtime lenses. The checkpoint shows the current phase, completed specialists, and persisted graph state.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-white border border-[#EAE6DF] rounded text-center space-y-1">
+                  <span className="block text-[9px] uppercase tracking-wider font-mono text-[#8A958F]">CURRENT PHASE</span>
+                  <p className="text-xl font-bold font-display text-zinc-900">
+                    {runtimeCheckpoint?.phase?.replace(/_/g, ' ') ?? selectedAudit.status}
                   </p>
                 </div>
 
@@ -1287,6 +1343,7 @@ export function AuditsView({
 
         </div>
       </div>
+      <OsToast message={toastMessage ?? ''} tone={toastTone} />
     </div>
   );
 }

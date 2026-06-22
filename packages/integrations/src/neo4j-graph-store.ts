@@ -1,16 +1,25 @@
+/**
+ * Neo4j persistence helpers for audit graph snapshots.
+ *
+ * These helpers keep the graph store aligned with the orchestrator snapshot
+ * model so graph reads can be reconstructed deterministically.
+ */
 import type { GraphSnapshotPayload } from '@premortem/graph-model';
 
 import { createNeo4jConfig, createNeo4jDriver } from './neo4j';
 
+/** Return true when Neo4j graph persistence is enabled and configured. */
 export function isNeo4jGraphEnabled(): boolean {
   if (process.env.NEO4J_DISABLED === '1') return false;
   return Boolean(process.env.NEO4J_URI ?? createNeo4jConfig().uri);
 }
 
+/** Serialize graph node and edge properties into Neo4j-safe JSON text. */
 function serializeProps(props: Record<string, unknown> | undefined): string {
   return JSON.stringify(props ?? {});
 }
 
+/** Deserialize persisted Neo4j JSON text back into plain graph properties. */
 function deserializeProps(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== 'string' || value.length === 0) return undefined;
   try {

@@ -1,4 +1,5 @@
 import { gitLabAuthHeaders } from './gitlab-auth';
+import { fetchWithTimeout } from './fetch-with-timeout';
 
 export interface GitLabProjectHook {
   id: number;
@@ -11,7 +12,7 @@ export async function listGitLabProjectHooks(input: {
   token: string;
   externalProjectId: string;
 }): Promise<GitLabProjectHook[]> {
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${input.baseUrl}/api/v4/projects/${encodeURIComponent(input.externalProjectId)}/hooks`,
     { headers: gitLabAuthHeaders(input.token) }
   );
@@ -40,7 +41,7 @@ export async function ensureGitLabProjectIssueWebhook(input: {
     return { created: false as const, hookId: existing.id };
   }
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${input.baseUrl}/api/v4/projects/${encodeURIComponent(input.externalProjectId)}/hooks`,
     {
       method: 'POST',

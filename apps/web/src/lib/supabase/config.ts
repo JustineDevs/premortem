@@ -3,11 +3,14 @@ export interface SupabaseRuntimeConfig {
   anonKey: string;
 }
 
-export function resolveSupabaseRuntimeConfig(): SupabaseRuntimeConfig | null {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
+export function readSupabaseRuntimeConfig(env: Record<string, unknown> | undefined): SupabaseRuntimeConfig | null {
+  if (!env) {
+    return null;
+  }
 
-  if (!url || !anonKey) {
+  const url = env.NEXT_PUBLIC_SUPABASE_URL ?? env.SUPABASE_URL;
+  const anonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? env.SUPABASE_ANON_KEY;
+  if (typeof url !== 'string' || typeof anonKey !== 'string' || !url || !anonKey) {
     return null;
   }
 
@@ -15,6 +18,10 @@ export function resolveSupabaseRuntimeConfig(): SupabaseRuntimeConfig | null {
     url: url.replace(/\/$/, ''),
     anonKey
   };
+}
+
+export function resolveSupabaseRuntimeConfig(): SupabaseRuntimeConfig | null {
+  return readSupabaseRuntimeConfig(process.env as Record<string, unknown>);
 }
 
 export function isSupabaseAuthConfigured() {

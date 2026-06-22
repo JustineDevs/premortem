@@ -1,4 +1,4 @@
-# Product flows still added
+# Product flows
 
 - Onboarding and personal org creation
 - Org switching and invitations

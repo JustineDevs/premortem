@@ -1,24 +1,18 @@
-import { NextResponse } from 'next/server';
-
-import { getApiBaseUrl } from '@/lib/runtime-config';
 import { bffErrorResponse } from '@/lib/server/bff-errors';
-import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
+import { proxyPremortemApi } from '@/lib/server/proxy-api';
 
 export async function POST(request: Request) {
   try {
-    const context = await resolveRequestActorContext(request);
     const body = await request.json();
-    const response = await fetch(`${getApiBaseUrl()}/api/workspace/api-keys`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
-        ...actorHeaders(context)
+    return proxyPremortemApi(
+      '/api/workspace/api-keys',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body)
       },
-      body: JSON.stringify(body),
-      cache: 'no-store'
-    });
-    return NextResponse.json(await response.json(), { status: response.status });
+      request
+    );
   } catch (error) {
     return bffErrorResponse(error, 'Failed to create API key');
   }

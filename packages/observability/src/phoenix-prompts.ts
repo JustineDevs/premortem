@@ -1,6 +1,7 @@
 import { createPrompt, getPrompt, promptVersion } from '@arizeai/phoenix-client/prompts';
-
 import { createPremortemPhoenixClient, isPhoenixClientConfigured } from './phoenix-client-config';
+
+const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
 
 export const PREMORTEM_PHOENIX_AUDIT_JUDGE_PROMPT_NAME = 'premortem-audit-llm-judge';
 
@@ -18,7 +19,7 @@ export function isPhoenixPromptSyncEnabled() {
   return process.env.PHOENIX_SYNC_PROMPTS === '1' && isPhoenixClientConfigured();
 }
 
-export async function ensurePremortemAuditJudgePrompt(modelName = 'gemini-2.0-flash') {
+export async function ensurePremortemAuditJudgePrompt(modelName = DEFAULT_GEMINI_MODEL) {
   const client = createPremortemPhoenixClient();
 
   return createPrompt({

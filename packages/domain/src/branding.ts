@@ -5,6 +5,7 @@ export const PREMORTEM_API_HOST = 'api.jstn.site';
 export const DEFAULT_PREMORTEM_SITE_URL = `https://${PREMORTEM_SITE_HOST}`;
 export const DEFAULT_PREMORTEM_API_URL = `https://${PREMORTEM_API_HOST}`;
 export const PREMORTEM_LOGO_MARK_PATH = '/logo/svg/premortem-mark.svg';
+export const PREMORTEM_PUBLISH_ATTRIBUTION_LOGO_PATH = '/logo/svg/premortem_header(white).svg';
 
 export function resolvePremortemSiteUrl(): string {
   return resolvePremortemPublishSiteUrl();
@@ -40,21 +41,29 @@ export function premortemLogoCdnUrl(siteUrl = resolvePremortemPublishSiteUrl()):
   return `${siteUrl}${PREMORTEM_LOGO_MARK_PATH}`;
 }
 
+export function premortemPublishAttributionLogoCdnUrl(
+  siteUrl = resolvePremortemPublishSiteUrl()
+): string {
+  return `${siteUrl}${PREMORTEM_PUBLISH_ATTRIBUTION_LOGO_PATH}`;
+}
+
 export interface PremortemPublishAttributionOptions {
   siteUrl?: string;
   logoUrl?: string;
   productName?: string;
+  logoWidth?: number;
 }
 
 /**
- * Markdown attribution for published findings: CDN logo and brand name link to the public site.
+ * Markdown attribution for published findings: CDN header logo at a medium size and brand name link to the public site.
  */
 export function renderPremortemPublishAttribution(
   options: PremortemPublishAttributionOptions = {}
 ): string {
   const siteUrl = options.siteUrl ?? resolvePremortemPublishSiteUrl();
-  const logoUrl = options.logoUrl ?? premortemLogoCdnUrl(siteUrl);
+  const logoUrl = options.logoUrl ?? premortemPublishAttributionLogoCdnUrl(siteUrl);
   const productName = options.productName ?? PREMORTEM_PRODUCT_NAME;
+  const logoWidth = options.logoWidth ?? 120;
 
-  return `_Automated by [![${productName}](${logoUrl})](${siteUrl}) [${productName}](${siteUrl}). Labels organize audit findings for triage, filtering, and reconciliation._`;
+  return `_Automated by <a href="${siteUrl}"><img src="${logoUrl}" alt="${productName}" width="${logoWidth}" /></a> <a href="${siteUrl}">${productName}</a>. Labels organize audit findings for triage, filtering, and reconciliation._`;
 }

@@ -1,13 +1,28 @@
+/**
+ * GitLab publish adapter for approved issue candidates.
+ *
+ * This module formats reviewer-approved issue data into GitLab issue bodies,
+ * applies work-item metadata, creates the remote issue, and records the publish result.
+ */
 import { prisma, resolveGitLabCredentialsForProject } from '@premortem/db';
-import { createOrganizationNotifications } from '@premortem/db';
+import { createOrganizationNotifications } from '@premortem/db/notifications';
 import { recordUsageEvent } from '@premortem/db';
 import { resolvePremortemPublishSiteUrl } from '@premortem/domain';
 import { createGitLabIssue, ensureGitLabLabels, ensureGitLabProjectIssueWebhook, updateGitLabIssueTimeEstimate } from '@premortem/integrations';
 import type { FindingSeverity } from '@premortem/agent-kit';
-import { renderGitLabIssue } from '@premortem/orchestrator';
+import type { EvidenceRefLike } from '@premortem/domain';
+import { captureServerException } from '@premortem/observability/server';
+import { renderPublishedIssueBody } from '@premortem/orchestrator/render-gitlab-issue';
 
 import { buildPublishWorkItemAttributes, resolveWorkItemAttributeConfig } from './resolve-work-item-attributes';
 
+/**
+ * Internal publish payload normalized from the issue candidate read model.
+ *
+ * Several fields remain `unknown` because they are validated and narrowed by the
+ * caller before publish formatting, and the publish path only needs them as
+ * structured pass-through data for the GitLab body renderer.
+ */
 interface PublishableIssue {
   id: string;
   organizationId: string;
@@ -32,8 +47,19 @@ interface PublishableIssue {
   project: { externalProjectId: string; provider: string; repoUrl?: string | null };
   publishedIssue: { id: string; url: string | null } | null;
   auditRun?: { branch: string; commitSha: string | null } | null;
+  createdAt?: string | Date | null;
 }
 
+type PublishableEvidence = EvidenceRefLike;
+
+/**
+ * Publish one approved issue candidate to GitLab and persist the resulting
+ * published-issue row for reconciliation and notification fan-out.
+ *
+ * @param issue - Approved issue candidate plus project and audit context.
+ * @returns The persisted published issue and whether the item was already published.
+ * @throws When the issue is not approved, credentials are missing, or the GitLab API fails.
+ */
 export async function publishIssueCandidateToGitLab(issue: PublishableIssue) {
   if (issue.reviewerStatus !== 'approved' && issue.reviewerStatus !== 'edited') {
     throw new Error('Issue candidate must be approved before publish');
@@ -65,7 +91,7 @@ export async function publishIssueCandidateToGitLab(issue: PublishableIssue) {
   });
 
   const description =
-    renderGitLabIssue(
+    renderPublishedIssueBody(
       {
         title: issue.title,
         category: issue.category,
@@ -74,7 +100,7 @@ export async function publishIssueCandidateToGitLab(issue: PublishableIssue) {
         predicted_failure_summary: issue.predictedFailureSummary,
         why_it_matters: issue.whyItMatters,
         trigger_conditions: issue.triggerConditions as string[],
-        evidence: issue.evidence as Array<{ kind: string; ref: string; reason: string }>,
+        evidence: issue.evidence as PublishableEvidence[],
         recommended_action_summary: issue.recommendedActionSummary,
         implementation_steps: issue.implementationSteps as string[],
         done_criteria: issue.doneCriteria as string[],
@@ -88,6 +114,7 @@ export async function publishIssueCandidateToGitLab(issue: PublishableIssue) {
         branch: issue.auditRun?.branch,
         commitSha: issue.auditRun?.commitSha,
         projectPath: issue.project.repoUrl ?? issue.project.externalProjectId,
+        createdAt: issue.createdAt ? new Date(issue.createdAt).toISOString() : null,
         reviewerStatus: issue.reviewerStatus,
         priority: issue.priority,
         assignee: attributes.gitlabScheduling.assigneeUsername ?? null,
@@ -108,10 +135,12 @@ export async function publishIssueCandidateToGitLab(issue: PublishableIssue) {
         attributes.labelDefinitions
       );
     } catch (error) {
-      console.warn(
-        '[publish-to-gitlab] label ensure failed; continuing without new labels:',
-        error instanceof Error ? error.message : error
-      );
+      captureServerException(error, {
+        surface: 'publish-to-gitlab.ensure-labels',
+        organizationId: issue.organizationId,
+        projectId: issue.projectId,
+        externalProjectId: issue.project.externalProjectId
+      });
     }
   }
 
@@ -136,10 +165,13 @@ export async function publishIssueCandidateToGitLab(issue: PublishableIssue) {
         attributes.gitlabScheduling.timeEstimate
       );
     } catch (error) {
-      console.warn(
-        '[publish-to-gitlab] time estimate update failed:',
-        error instanceof Error ? error.message : error
-      );
+      captureServerException(error, {
+        surface: 'publish-to-gitlab.time-estimate',
+        organizationId: issue.organizationId,
+        projectId: issue.projectId,
+        externalProjectId: issue.project.externalProjectId,
+        issueIid: created.iid
+      });
     }
   }
 
@@ -175,10 +207,13 @@ export async function publishIssueCandidateToGitLab(issue: PublishableIssue) {
       publishedIssueId: publishedIssue.id
     }
   }).catch((error) => {
-    console.warn(
-      '[publish-to-gitlab] notification fanout failed:',
-      error instanceof Error ? error.message : error
-    );
+    captureServerException(error, {
+      surface: 'publish-to-gitlab.notification-fanout',
+      organizationId: issue.organizationId,
+      projectId: issue.projectId,
+      externalProjectId: issue.project.externalProjectId,
+      issueCandidateId: issue.id
+    });
   });
 
   await recordUsageEvent({
@@ -206,10 +241,12 @@ export async function publishIssueCandidateToGitLab(issue: PublishableIssue) {
         secretToken: webhookSecret
       });
     } catch (error) {
-      console.warn(
-        '[publish-to-gitlab] issue webhook ensure failed; reconciliation still works via polling:',
-        error instanceof Error ? error.message : error
-      );
+      captureServerException(error, {
+        surface: 'publish-to-gitlab.ensure-webhook',
+        organizationId: issue.organizationId,
+        projectId: issue.projectId,
+        externalProjectId: issue.project.externalProjectId
+      });
     }
   }
 

@@ -3,10 +3,15 @@ import fs from 'node:fs';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ensureLocalDevelopmentFixture } from '@premortem/db';
+import {
+  ensureLocalDevelopmentFixture,
+  getWorkspaceBundle,
+  listOrganizationProjects,
+  listRecentAuditRunsForOrganization,
+  listReconciliationEvents
+} from '@premortem/db';
 import { isLocalAuthBypassEnabled, LOCAL_DEV_FIXTURE } from '@premortem/domain';
-import { initServerObservability } from '@premortem/observability';
-import { executeAuditJob } from '@premortem/orchestrator';
+import { initServerObservability } from '@premortem/observability/server';
 import type { AuditJob } from '@premortem/workflow';
 import { appRouter } from './lib/router';
 import type { AppEnv } from './lib/types';
@@ -41,92 +46,119 @@ async function readBody(request: import('node:http').IncomingMessage) {
   return Buffer.concat(chunks);
 }
 
+let startupPromise: Promise<void> | null = null;
+
 async function main() {
-  const repoRoot = resolveRepoRoot();
-  initServerObservability('premortem-api-local');
+  if (startupPromise) return startupPromise;
 
-  await ensureLocalDevelopmentFixture();
+  startupPromise = (async () => {
+    const repoRoot = resolveRepoRoot();
+    initServerObservability('premortem-api-local');
 
-  const host = process.env.PREMORTEM_API_HOST ?? '127.0.0.1';
-  const port = Number.parseInt(process.env.PREMORTEM_API_PORT ?? process.env.PORT ?? '18787', 10);
+    await ensureLocalDevelopmentFixture();
 
-  const env: AppEnv = {
-    AUDIT_QUEUE: {
-      async send(job: AuditJob) {
-        void executeAuditJob({
-          job,
-          rootDir: repoRoot
-        }).catch((error) => {
-          console.error('local-audit-queue.execution-error', {
-            auditRunId: job.id,
-            error: error instanceof Error ? error.message : String(error)
-          });
-        });
-      }
+    if (isLocalAuthBypassEnabled()) {
+      await Promise.all([
+        getWorkspaceBundle({
+          organizationId: LOCAL_DEV_FIXTURE.organizationId,
+          profileId: LOCAL_DEV_FIXTURE.profileId
+        }),
+        listOrganizationProjects(LOCAL_DEV_FIXTURE.organizationId),
+        listRecentAuditRunsForOrganization(LOCAL_DEV_FIXTURE.organizationId, 12),
+        listReconciliationEvents(LOCAL_DEV_FIXTURE.organizationId, 25)
+      ]).catch((error) => {
+        console.error('local-api.warmup-error', error);
+      });
     }
-  };
 
-  const server = createServer(async (request, response) => {
-    try {
-      const requestUrl = new URL(
-        request.url ?? '/',
-        `http://${request.headers.host ?? `${host}:${port}`}`
-      );
+    const host = process.env.PREMORTEM_API_HOST ?? '127.0.0.1';
+    const port = Number.parseInt(process.env.PREMORTEM_API_PORT ?? process.env.PORT ?? '18787', 10);
 
-      if (request.method === 'GET' && requestUrl.pathname === '/health') {
-        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    const env: AppEnv = {
+      AUDIT_QUEUE: {
+        async send(job: AuditJob) {
+          const { executeAuditJob } = await import('@premortem/orchestrator');
+          void executeAuditJob({
+            job,
+            rootDir: repoRoot
+          }).catch((error) => {
+            console.error('local-audit-queue.execution-error', {
+              auditRunId: job.id,
+              error: 'audit_job_failed'
+            });
+          });
+        }
+      }
+    };
+
+    const server = createServer(async (request, response) => {
+      try {
+        const requestUrl = new URL(
+          request.url ?? '/',
+          `http://${request.headers.host ?? `${host}:${port}`}`
+        );
+
+        if (request.method === 'GET' && requestUrl.pathname === '/health') {
+          response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+          response.end(
+            JSON.stringify({
+              ok: true,
+              service: 'premortem-local-api',
+              mode: isLocalAuthBypassEnabled() ? 'auth-bypass' : 'supabase',
+              ...(isLocalAuthBypassEnabled() ? { fixture: LOCAL_DEV_FIXTURE } : {})
+            })
+          );
+          return;
+        }
+
+        const body = await readBody(request);
+        const upstreamResponse = await appRouter(
+          new Request(requestUrl, {
+            method: request.method,
+            headers: request.headers as Record<string, string>,
+            body
+          }),
+          env,
+          {
+            waitUntil(promise) {
+              void promise.catch((error) => {
+                console.error('local-api.waitUntil-error', error);
+              });
+            }
+          }
+        );
+
+        response.statusCode = upstreamResponse.status;
+        upstreamResponse.headers.forEach((value, key) => response.setHeader(key, value));
+        const payload = Buffer.from(await upstreamResponse.arrayBuffer());
+        response.end(payload);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('local-api.request-error', { message, error });
+        response.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
         response.end(
           JSON.stringify({
-            ok: true,
-            service: 'premortem-local-api',
-            mode: isLocalAuthBypassEnabled() ? 'auth-bypass' : 'supabase',
-            ...(isLocalAuthBypassEnabled() ? { fixture: LOCAL_DEV_FIXTURE } : {})
+            error: message || 'Unknown local API error'
           })
         );
-        return;
       }
+    });
 
-      const body = await readBody(request);
-      const upstreamResponse = await appRouter(
-        new Request(requestUrl, {
-          method: request.method,
-          headers: request.headers as Record<string, string>,
-          body
-        }),
-        env,
-        {
-          waitUntil(promise) {
-            void promise.catch((error) => {
-              console.error('local-api.waitUntil-error', error);
-            });
-          }
-        }
-      );
+    await new Promise<void>((resolve) => {
+      server.listen(port, host, () => {
+        console.log(
+          JSON.stringify({
+            service: 'premortem-local-api',
+            url: `http://${host}:${port}`,
+            auth: isLocalAuthBypassEnabled() ? 'bypass' : 'supabase'
+          })
+        );
+        resolve();
+      });
+    });
+  })();
 
-      response.statusCode = upstreamResponse.status;
-      upstreamResponse.headers.forEach((value, key) => response.setHeader(key, value));
-      const payload = Buffer.from(await upstreamResponse.arrayBuffer());
-      response.end(payload);
-    } catch (error) {
-      console.error('local-api.request-error', error);
-      response.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
-      response.end(
-        JSON.stringify({
-          error: error instanceof Error ? error.message : 'Unknown local API error'
-        })
-      );
-    }
-  });
-
-  server.listen(port, host, () => {
-    console.log(
-      JSON.stringify({
-        service: 'premortem-local-api',
-        url: `http://${host}:${port}`,
-        auth: isLocalAuthBypassEnabled() ? 'bypass' : 'supabase'
-      })
-    );
-  });
+  return startupPromise;
 }
 
 void main().catch((error) => {

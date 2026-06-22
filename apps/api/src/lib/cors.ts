@@ -20,7 +20,7 @@ export function resolveAllowedOrigin(request: Request): string | null {
 }
 
 const CORS_ALLOW_HEADERS =
-  'content-type, accept, authorization, x-premortem-actor-id, x-premortem-organization-id, x-premortem-user-email';
+  'content-type, accept, authorization, x-user-id, x-user-id-sig, x-premortem-context-sig, x-premortem-role, x-premortem-actor-id, x-premortem-organization-id, x-premortem-user-email';
 
 export function applyCorsHeaders(response: Response, request: Request): Response {
   const allowedOrigin = resolveAllowedOrigin(request);

@@ -1,10 +1,13 @@
-import { DEFAULT_GEMINI_MODEL } from '../../packages/domain/src/index.ts';
 import {
   PREMORTEM_GEMINI_SAFETY_SETTINGS,
   buildPremortemRootAgent,
   resolveAgentBuilderCredentials
 } from '../../services/agent-builder/dist/services/agent-builder/src/index.js';
 import { startAgentBuilderServer } from '../../services/agent-builder/dist/services/agent-builder/src/server.js';
+import { SMOKE_GEMINI_MODEL as DEFAULT_SMOKE_GEMINI_MODEL } from '../../packages/domain/dist/index.js';
+
+const SMOKE_GEMINI_MODEL = process.env.LLM_MODEL?.trim() || DEFAULT_SMOKE_GEMINI_MODEL;
+process.env.LLM_MODEL = SMOKE_GEMINI_MODEL;
 
 function fail(label, detail) {
   console.error(`FAIL ${label}${detail ? `: ${detail}` : ''}`);
@@ -18,7 +21,7 @@ function pass(label) {
 const config = resolveAgentBuilderCredentials({
   gitlabBaseUrl: 'https://gitlab.com',
   gitlabToken: 'smoke-token',
-  model: DEFAULT_GEMINI_MODEL,
+  model: SMOKE_GEMINI_MODEL,
   geminiApiKey: 'smoke-gemini-key',
   vertexai: true,
   project: 'premortem-smoke',
@@ -35,7 +38,7 @@ if (!config.vertexai || config.project !== 'premortem-smoke' || config.location 
 const agent = buildPremortemRootAgent({
   gitlabBaseUrl: 'https://gitlab.com',
   gitlabToken: 'smoke-token',
-  model: DEFAULT_GEMINI_MODEL,
+  model: SMOKE_GEMINI_MODEL,
   geminiApiKey: 'smoke-gemini-key',
   vertexai: true,
   project: 'premortem-smoke',

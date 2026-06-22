@@ -1,9 +1,22 @@
-export type { AuditRunSnapshot as RuntimeAuditSnapshot } from '@premortem/orchestrator';
+export type { AuditRunSnapshot as RuntimeAuditSnapshot } from '@premortem/orchestrator/read-model';
 
-import type { AuditRunSnapshot } from '@premortem/orchestrator';
+import type { AuditRunSnapshot } from '@premortem/orchestrator/read-model';
 import { getApiBaseUrl } from '@/lib/runtime-config';
+import type { Project } from '@/lib/premortem-os/types';
 
 export type RuntimeApiHeaders = Record<string, string>;
+
+export class RuntimeApiError extends Error {
+  status: number;
+  responseBody: string;
+
+  constructor(path: string, status: number, responseBody: string) {
+    super(`API ${path} failed (${status}): ${responseBody}`);
+    this.name = 'RuntimeApiError';
+    this.status = status;
+    this.responseBody = responseBody;
+  }
+}
 
 async function apiFetch(path: string, init?: RequestInit, actorHeaders?: RuntimeApiHeaders) {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
@@ -18,15 +31,19 @@ async function apiFetch(path: string, init?: RequestInit, actorHeaders?: Runtime
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`API ${path} failed (${response.status}): ${text}`);
+    throw new RuntimeApiError(path, response.status, text);
   }
 
   return response.json();
 }
 
 export async function fetchRuntimeProjects(actorHeaders?: RuntimeApiHeaders) {
-  const payload = (await apiFetch('/api/projects', undefined, actorHeaders)) as { projects: unknown[] };
-  return payload.projects;
+  const payload = await apiFetch('/api/projects', undefined, actorHeaders);
+  if (Array.isArray(payload)) return payload as Project[];
+  if (payload && typeof payload === 'object' && Array.isArray((payload as { projects?: unknown }).projects)) {
+    return (payload as { projects: Project[] }).projects;
+  }
+  return [];
 }
 
 export async function fetchRuntimeAudits(limit = 12, actorHeaders?: RuntimeApiHeaders) {
@@ -34,6 +51,7 @@ export async function fetchRuntimeAudits(limit = 12, actorHeaders?: RuntimeApiHe
     auditRuns: Array<{
       auditRunId: string;
       projectId: string;
+      projectName: string;
       branch: string;
       runStatus: string;
       createdAt: string;
@@ -47,12 +65,19 @@ export async function fetchRuntimeAudits(limit = 12, actorHeaders?: RuntimeApiHe
 
 export async function fetchRuntimeAuditSnapshot(
   auditRunId: string,
-  actorHeaders?: RuntimeApiHeaders
+  actorHeaders?: RuntimeApiHeaders,
+  options?: { hydrate?: boolean }
 ): Promise<AuditRunSnapshot> {
-  const payload = (await apiFetch(`/api/audits/${auditRunId}`, undefined, actorHeaders)) as {
-    auditRun: AuditRunSnapshot;
+  const hydrateQuery = options?.hydrate === false ? '?hydrate=0' : '';
+  const payload = (await apiFetch(`/api/audits/${auditRunId}${hydrateQuery}`, undefined, actorHeaders)) as {
+    snapshot?: AuditRunSnapshot;
+    auditRun?: AuditRunSnapshot;
   };
-  return payload.auditRun;
+  const snapshot = payload.snapshot ?? payload.auditRun;
+  if (!snapshot) {
+    throw new Error(`Audit ${auditRunId} snapshot payload was empty`);
+  }
+  return snapshot;
 }
 
 export async function submitRuntimeAudit(input: {
@@ -152,6 +177,41 @@ export async function publishRuntimeIssue(issueCandidateId: string, actorHeaders
   }>;
 }
 
+export async function recordPublishedIssueOutcome(
+  publishedIssueId: string,
+  input: {
+    outcomeType: 'true_positive' | 'false_positive' | 'not_applicable' | 'wont_fix';
+    outcomeNotes?: string;
+  },
+  actorHeaders?: RuntimeApiHeaders
+) {
+  return apiFetch(
+    `/api/issues/${publishedIssueId}/outcome`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input)
+    },
+    actorHeaders
+  );
+}
+
+export async function fetchProjectAccuracy(projectId: string, actorHeaders?: RuntimeApiHeaders) {
+  return apiFetch(`/api/projects/${projectId}/accuracy`, undefined, actorHeaders) as Promise<{
+    ok: true;
+    accuracy: {
+      totalPublishedIssues: number;
+      classifiedPublishedIssues: number;
+      truePositives: number;
+      falsePositives: number;
+      notApplicable: number;
+      wontFix: number;
+      precision: number | null;
+      coverage: number | null;
+    };
+  }>;
+}
+
 export async function mergeRuntimeIssue(
   issueCandidateId: string,
   input: { mergedIntoIssueCandidateId: string; notes?: string },
@@ -199,7 +259,7 @@ export async function pollRuntimeAuditUntilComplete(
 ) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const snapshot = await fetchRuntimeAuditSnapshot(auditRunId, actorHeaders);
+    const snapshot = await fetchRuntimeAuditSnapshot(auditRunId, actorHeaders, { hydrate: false });
     if (snapshot.runStatus === 'completed') return snapshot;
     if (snapshot.runStatus === 'failed') {
       throw new Error(`Audit ${auditRunId} failed`);

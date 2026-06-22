@@ -1,14 +1,19 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { authLinks } from '@/lib/auth-links';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { getPublicAppOrigin, getRequestOrigin } from '@/lib/runtime-config';
+import { createRouteHandlerSupabaseClient } from '@/lib/supabase/route-handler';
 
 export async function POST(request: NextRequest) {
-  const supabase = await createSupabaseServerClient();
+  const authClient = await createRouteHandlerSupabaseClient(request);
 
-  if (supabase) {
-    await supabase.auth.signOut();
+  if (authClient) {
+    await authClient.supabase.auth.signOut();
   }
 
-  return NextResponse.redirect(new URL(authLinks.login, request.url));
+  const redirect = NextResponse.redirect(
+    new URL(authLinks.login, getPublicAppOrigin(getRequestOrigin(request))),
+    303
+  );
+  return authClient ? authClient.attachCookies(redirect) : redirect;
 }

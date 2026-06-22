@@ -1,10 +1,13 @@
+/**
+ * Workspace read-model helpers for org metadata, integrations, billing, and runtime settings.
+ */
 import type { Prisma } from '@prisma/client';
 import { DEFAULT_GEMINI_MODEL, normalizeWorkItemAttributeConfig } from '@premortem/domain';
 
 import { auditQuotaForPlan, PLAN_LIMITS } from './entitlements';
 import { prisma } from './client';
 import { encodeStoredToken, ensureGitLabAccessTokenForConnection } from './provider-tokens';
-import { getUsageEventTotalsForOrganization } from './usage-metering';
+import { listStripeInvoicesForCustomer } from './stripe-invoices';
 import { isStripeBillingConfigured, isStripeTestMode, shouldUseStripeCheckout } from './stripe-env';
 
 export const DEFAULT_WORKSPACE_POLICIES = [
@@ -38,6 +41,7 @@ export const DEFAULT_WORKSPACE_POLICIES = [
   }
 ] as const;
 
+/** Narrow arbitrary Prisma JSON to a plain object when the caller expects keyed fields. */
 function asObject(value: Prisma.JsonValue | null | undefined): Record<string, unknown> {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -45,6 +49,7 @@ function asObject(value: Prisma.JsonValue | null | undefined): Record<string, un
   return {};
 }
 
+/** Convert stored OAuth scope metadata into a user-facing summary string. */
 function formatScope(accessScope: Prisma.JsonValue | null | undefined): string {
   const scope = asObject(accessScope);
   if (typeof scope.summary === 'string') return scope.summary;
@@ -52,6 +57,7 @@ function formatScope(accessScope: Prisma.JsonValue | null | undefined): string {
   return values.length > 0 ? values.join(', ') : 'read_user';
 }
 
+/** Map provider connection statuses to the console-friendly status labels. */
 function connectionStatusLabel(status: string): 'connected' | 'active_check' | 'disconnected' {
   if (status === 'active') return 'connected';
   if (status === 'pending') return 'active_check';
@@ -68,13 +74,14 @@ export async function hasActiveProviderConnection(
       organizationId,
       provider,
       status: 'active',
-      encryptedAccessToken: { not: null }
+      OR: [{ encryptedAccessToken: { not: null } }, { nangoConnectionId: { not: null } }]
     },
     select: { id: true }
   });
   return Boolean(connection);
 }
 
+/** Read workspace security policies from the organization metadata blob. */
 function readPolicies(metadata: Prisma.JsonValue) {
   const policies = asObject(metadata).policies;
   if (!Array.isArray(policies) || policies.length === 0) {
@@ -83,7 +90,8 @@ function readPolicies(metadata: Prisma.JsonValue) {
   return policies as Array<{ id: string; name: string; description: string; active: boolean }>;
 }
 
-function readNotifications(metadata: Prisma.JsonValue) {
+/** Read workspace notification settings from the organization metadata blob. */
+export function readNotifications(metadata: Prisma.JsonValue) {
   const notifications = asObject(metadata).notifications;
   const row = asObject(notifications as Prisma.JsonValue);
   return {
@@ -91,7 +99,11 @@ function readNotifications(metadata: Prisma.JsonValue) {
     slackChannel: typeof row.slackChannel === 'string' ? row.slackChannel : '',
     isSlackConnected: Boolean(row.isSlackConnected),
     alertEmails: typeof row.alertEmails === 'string' ? row.alertEmails : '',
-    alertSeverity: typeof row.alertSeverity === 'string' ? row.alertSeverity : 'HIGH'
+    alertSeverity: typeof row.alertSeverity === 'string' ? row.alertSeverity : 'HIGH',
+    slackNangoConnectionId:
+      typeof row.slackNangoConnectionId === 'string' ? row.slackNangoConnectionId : '',
+    slackNangoProviderKey:
+      typeof row.slackNangoProviderKey === 'string' ? row.slackNangoProviderKey : ''
   };
 }
 
@@ -134,24 +146,24 @@ function readLlm(metadata: Prisma.JsonValue) {
 const DEFAULT_VENDOR_ROUTING = [
   {
     id: 'boost',
-    label: 'Boost Tier',
-    description: 'Low-latency custom endpoint for fast specialist passes.',
+    label: 'Named Custom Provider',
+    description: 'Route to a specific saved local or proxy provider by name.',
     kind: 'custom' as const,
     providerRef: '',
     enabled: false
   },
   {
     id: 'primary',
-    label: 'Primary Tier',
-    description: 'Managed Gemini models for synthesis and deep reasoning.',
+    label: 'Managed Primary',
+    description: 'Use the workspace managed model first for audited specialist calls.',
     kind: 'managed' as const,
     providerRef: 'gemini',
     enabled: true
   },
   {
     id: 'fallback',
-    label: 'Auto-Discover',
-    description: 'Probe local Ollama, LM Studio, and compatible OpenAI proxies.',
+    label: 'Local Discovery',
+    description: 'Try active local or hybrid providers registered in workspace settings.',
     kind: 'auto_discover' as const,
     providerRef: 'local',
     enabled: true
@@ -252,7 +264,8 @@ export async function createPersonalWorkspaceForProfile(
     email: profile.email,
     fullName: profile.fullName,
     username: profile.username,
-    organizationId: organization.id
+    organizationId: organization.id,
+    role: 'owner'
   });
 
   return organization.id;
@@ -264,37 +277,78 @@ export async function ensureProfileMembership(input: {
   fullName?: string | null;
   username?: string | null;
   organizationId: string;
+  role?: 'owner' | 'admin' | 'member' | 'viewer' | 'billing';
 }) {
-  await prisma.profile.upsert({
+  const existingProfile = await prisma.profile.findUnique({
     where: { id: input.profileId },
-    update: {
-      email: input.email ?? undefined,
-      fullName: input.fullName ?? undefined,
-      username: input.username ?? undefined,
-      defaultOrgId: input.organizationId
-    },
-    create: {
-      id: input.profileId,
-      email: input.email ?? undefined,
-      fullName: input.fullName ?? undefined,
-      username: input.username ?? undefined,
-      defaultOrgId: input.organizationId
-    }
+    select: { id: true, email: true, fullName: true, username: true, defaultOrgId: true }
   });
 
-  await prisma.organizationMembership.upsert({
+  if (!existingProfile) {
+    await prisma.profile.create({
+      data: {
+        id: input.profileId,
+        email: input.email ?? undefined,
+        fullName: input.fullName ?? undefined,
+        username: input.username ?? undefined,
+        defaultOrgId: input.organizationId
+      }
+    });
+  } else if (
+    existingProfile.email !== (input.email ?? null) ||
+    existingProfile.fullName !== (input.fullName ?? null) ||
+    existingProfile.username !== (input.username ?? null) ||
+    existingProfile.defaultOrgId !== input.organizationId
+  ) {
+    await prisma.profile.update({
+      where: { id: input.profileId },
+      data: {
+        email: input.email ?? undefined,
+        fullName: input.fullName ?? undefined,
+        username: input.username ?? undefined,
+        defaultOrgId: input.organizationId
+      }
+    });
+  }
+
+  const existingMembership = await prisma.organizationMembership.findUnique({
     where: {
       organizationId_userId: {
         organizationId: input.organizationId,
         userId: input.profileId
       }
     },
-    update: {},
-    create: {
-      organizationId: input.organizationId,
-      userId: input.profileId,
-      role: 'member'
-    }
+    select: { role: true }
+  });
+
+  if (!existingMembership) {
+    await prisma.organizationMembership.create({
+      data: {
+        organizationId: input.organizationId,
+        userId: input.profileId,
+        role: input.role ?? 'member'
+      }
+    });
+    return;
+  }
+
+  if (input.role && existingMembership.role !== input.role) {
+    await prisma.organizationMembership.update({
+      where: {
+        organizationId_userId: {
+          organizationId: input.organizationId,
+          userId: input.profileId
+        }
+      },
+      data: { role: input.role }
+    });
+  }
+}
+
+export async function markProfileOnboardingCompleted(profileId: string) {
+  return prisma.profile.update({
+    where: { id: profileId },
+    data: { onboardingCompleted: true }
   });
 }
 
@@ -314,7 +368,9 @@ export async function ensureOrganizationDefaults(organizationId: string) {
       slackChannel: '',
       isSlackConnected: false,
       alertEmails: organization.billingEmail ?? '',
-      alertSeverity: 'HIGH'
+      alertSeverity: 'HIGH',
+      slackNangoConnectionId: '',
+      slackNangoProviderKey: ''
     };
   }
   if (!metadata.llm) {
@@ -340,95 +396,175 @@ export async function ensureOrganizationDefaults(organizationId: string) {
     });
   }
 
-  await prisma.organizationBillingAccount.upsert({
-    where: { organizationId },
-    update: {},
-    create: {
-      organizationId,
-      plan: organization.plan,
-      auditQuotaMonthly: auditQuotaForPlan(organization.plan)
+  try {
+    const existingBilling = await prisma.organizationBillingAccount.findUnique({
+      where: { organizationId },
+      select: { organizationId: true }
+    });
+    if (!existingBilling) {
+      await prisma.organizationBillingAccount.create({
+        data: {
+          organizationId,
+          plan: organization.plan,
+          auditQuotaMonthly: auditQuotaForPlan(organization.plan)
+        }
+      });
     }
-  });
+  } catch {
+    // Keep workspace rendering even if a stale billing row is malformed or missing.
+  }
 }
 
-export async function getWorkspaceBundle(input: {
+const WORKSPACE_BUNDLE_CACHE_TTL_MS = 120_000;
+const workspaceBundleCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    promise?: Promise<Awaited<ReturnType<typeof buildWorkspaceBundle>>>;
+    value?: Awaited<ReturnType<typeof buildWorkspaceBundle>>;
+  }
+>();
+
+async function buildWorkspaceBundle(input: {
   organizationId: string;
   profileId: string;
 }) {
-  await ensureOrganizationDefaults(input.organizationId);
+  let organizationId = input.organizationId;
+  const [organizationExists, profileExists, membershipExists] = await Promise.all([
+    prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { id: true }
+    }),
+    prisma.profile.findUnique({
+      where: { id: input.profileId },
+      select: { id: true }
+    }),
+    prisma.organizationMembership.findUnique({
+      where: {
+        organizationId_userId: {
+          organizationId,
+          userId: input.profileId
+        }
+      },
+      select: { organizationId: true }
+    })
+  ]);
+
+  if (!organizationExists || !profileExists || !membershipExists) {
+    organizationId = await createPersonalWorkspaceForProfile(input.profileId);
+  }
 
   const monthStart = new Date();
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
 
-  const [
-    organization,
-    profile,
-    membership,
-    memberships,
-    connections,
-    projects,
-    billing,
-    apiKeys,
-    auditsThisMonth,
-    publishedIssues,
-    usageTotals,
-    activityEvents,
-    runningAudits
-  ] = await Promise.all([
+  const [organization, profile, membership, memberships, connections, projects, apiKeys, auditsThisMonth, publishedIssues, usageTotals, activityEvents, runningAudits] = await prisma.$transaction([
     prisma.organization.findUniqueOrThrow({
-      where: { id: input.organizationId },
+      where: { id: organizationId },
       include: { billingAccount: true }
     }),
     prisma.profile.findUniqueOrThrow({ where: { id: input.profileId } }),
     prisma.organizationMembership.findUnique({
       where: {
         organizationId_userId: {
-          organizationId: input.organizationId,
+          organizationId,
           userId: input.profileId
         }
       }
     }),
-    prisma.organizationMembership.count({ where: { organizationId: input.organizationId } }),
+    prisma.organizationMembership.count({ where: { organizationId } }),
     prisma.providerConnection.findMany({
-      where: { organizationId: input.organizationId },
-      include: { projects: true },
+      where: { organizationId },
+      select: {
+        id: true,
+        provider: true,
+        externalAccountName: true,
+        externalAccountId: true,
+        accessScope: true,
+        lastSyncedAt: true,
+        status: true,
+        _count: {
+          select: { projects: true }
+        }
+      },
       orderBy: { updatedAt: 'desc' }
     }),
     prisma.project.findMany({
-      where: { organizationId: input.organizationId },
+      where: { organizationId },
+      select: {
+        id: true,
+        name: true,
+        provider: true,
+        status: true,
+        repoUrl: true,
+        externalProjectId: true,
+        connectionId: true,
+        updatedAt: true
+      },
       orderBy: { updatedAt: 'desc' }
     }),
-    prisma.organizationBillingAccount.findUnique({
-      where: { organizationId: input.organizationId }
-    }),
     prisma.organizationApiKey.findMany({
-      where: { organizationId: input.organizationId },
+      where: { organizationId },
+      select: {
+        id: true,
+        label: true,
+        keyPrefix: true,
+        lastUsedAt: true,
+        revokedAt: true,
+        createdAt: true
+      },
       orderBy: { createdAt: 'desc' }
     }),
     prisma.auditRun.count({
       where: {
-        organizationId: input.organizationId,
+        organizationId,
         createdAt: { gte: monthStart }
       }
     }),
     prisma.publishedIssue.count({
-      where: { organizationId: input.organizationId }
+      where: { organizationId }
     }),
-    getUsageEventTotalsForOrganization(input.organizationId, monthStart),
+    prisma.usageEvent.groupBy({
+      by: ['eventType'],
+      where: {
+        organizationId,
+        createdAt: { gte: monthStart }
+      },
+      orderBy: { eventType: 'asc' },
+      _sum: {
+        quantity: true
+      }
+    }),
     prisma.activityEvent.findMany({
-      where: { organizationId: input.organizationId },
+      where: { organizationId },
       orderBy: { createdAt: 'desc' },
       take: 12,
-      include: { actor: true }
+      select: {
+        id: true,
+        summary: true,
+        eventType: true,
+        createdAt: true,
+        actor: {
+          select: {
+            email: true,
+            fullName: true
+          }
+        }
+      }
     }),
     prisma.auditRun.count({
       where: {
-        organizationId: input.organizationId,
-        runStatus: { in: ['queued', 'running', 'paused'] }
+        organizationId,
+        runStatus: { in: ['queued', 'running'] }
       }
     })
   ]);
+
+  const billing = organization.billingAccount;
+  const invoicesPromise = billing?.stripeCustomerId
+    ? listStripeInvoicesForCustomer(billing.stripeCustomerId, 10).catch(() => [])
+    : Promise.resolve([]);
+  const invoices = await invoicesPromise;
 
   const integrationsFromConnections = connections.map((connection) => ({
     id: connection.id,
@@ -440,7 +576,7 @@ export async function getWorkspaceBundle(input: {
       ? connection.lastSyncedAt.toISOString()
       : null,
     vcsOwner: connection.externalAccountName ?? connection.externalAccountId ?? connection.provider,
-    projectCount: connection.projects.length
+    projectCount: connection._count.projects
   }));
 
   const integrationsFromProjects = projects
@@ -497,7 +633,7 @@ export async function getWorkspaceBundle(input: {
       stripeBillingConfigured: isStripeBillingConfigured(),
       canPublish: PLAN_LIMITS[billing?.plan ?? organization.plan].canPublish,
       maxRepos: PLAN_LIMITS[billing?.plan ?? organization.plan].maxRepos,
-      invoices: []
+      invoices
     },
     apiKeys: apiKeys.map((key) => ({
       id: key.id,
@@ -510,7 +646,15 @@ export async function getWorkspaceBundle(input: {
     usage: {
       scans: { used: auditsThisMonth, limit: auditQuota },
       repos: { used: projects.length, limit: PLAN_LIMITS[billing?.plan ?? organization.plan].maxRepos },
-      tokens: { used: usageTotals.tokensUsed, limit: 50 },
+      tokens: {
+        used: usageTotals.reduce((total, event) => {
+          const quantity = Number(event._sum?.quantity ?? 0);
+          return event.eventType === 'tokens_in' || event.eventType === 'tokens_out'
+            ? total + quantity
+            : total;
+        }, 0),
+        limit: 50
+      },
       patches: { used: publishedIssues, limit: Math.max(publishedIssues, 50) }
     },
     activity: activityEvents.map((event) => ({
@@ -524,6 +668,53 @@ export async function getWorkspaceBundle(input: {
       ...readRuntime(metadata)
     }
   };
+}
+
+export async function getWorkspaceBundle(input: {
+  organizationId: string;
+  profileId: string;
+}) {
+  const cacheKey = `${input.organizationId}:${input.profileId}`;
+  const now = Date.now();
+  const cached = workspaceBundleCache.get(cacheKey);
+  if (cached?.value && cached.expiresAt > now) {
+    return cached.value;
+  }
+  if (cached?.promise) {
+    return cached.promise;
+  }
+
+  const promise = buildWorkspaceBundle(input)
+    .then((workspace) => {
+      workspaceBundleCache.set(cacheKey, {
+        expiresAt: Date.now() + WORKSPACE_BUNDLE_CACHE_TTL_MS,
+        value: workspace
+      });
+      return workspace;
+    })
+    .finally(() => {
+      const current = workspaceBundleCache.get(cacheKey);
+      if (current?.promise === promise) {
+        delete current.promise;
+      }
+    });
+
+  workspaceBundleCache.set(cacheKey, { expiresAt: 0, promise });
+  return promise;
+}
+
+export function invalidateWorkspaceBundleCache(organizationId?: string, profileId?: string) {
+  if (!organizationId && !profileId) {
+    workspaceBundleCache.clear();
+    return;
+  }
+
+  for (const key of workspaceBundleCache.keys()) {
+    const [cachedOrganizationId, cachedProfileId] = key.split(':');
+    if (organizationId && cachedOrganizationId !== organizationId) continue;
+    if (profileId && cachedProfileId !== profileId) continue;
+    workspaceBundleCache.delete(key);
+  }
 }
 
 export async function updateWorkspaceProfile(input: {
@@ -662,6 +853,8 @@ export async function stopAllAuditRuntime(
     }
   }
 
+  invalidateWorkspaceBundleCache(organizationId);
+
   return {
     continuousAuditEnabled: false,
     cancelledCount,
@@ -677,6 +870,8 @@ export async function updateWorkspaceNotifications(input: {
     isSlackConnected?: boolean;
     alertEmails?: string;
     alertSeverity?: string;
+    slackNangoConnectionId?: string;
+    slackNangoProviderKey?: string;
   };
 }) {
   const organization = await prisma.organization.findUniqueOrThrow({
@@ -722,9 +917,10 @@ export async function createProviderConnection(input: {
   externalAccountId?: string;
   accessScope?: Record<string, unknown>;
   accessToken?: string;
+  nangoConnectionId?: string;
+  nangoProviderKey?: string;
 }) {
-  const connection = await prisma.providerConnection.create({
-    data: {
+  const data = {
       organizationId: input.organizationId,
       provider: input.provider,
       externalAccountName: input.externalAccountName,
@@ -733,9 +929,11 @@ export async function createProviderConnection(input: {
       status: input.accessToken ? 'active' : 'pending',
       createdById: input.createdById,
       encryptedAccessToken: input.accessToken ? encodeStoredToken(input.accessToken) : undefined,
-      lastSyncedAt: input.accessToken ? new Date() : undefined
-    }
-  });
+      lastSyncedAt: input.accessToken ? new Date() : undefined,
+      nangoConnectionId: input.nangoConnectionId,
+      nangoProviderKey: input.nangoProviderKey
+  } satisfies Prisma.ProviderConnectionUncheckedCreateInput;
+  const connection = await prisma.providerConnection.create({ data });
   return connection;
 }
 
@@ -749,11 +947,41 @@ export async function upsertProviderConnectionFromOAuth(input: {
   refreshToken?: string;
   accessScope?: Record<string, unknown>;
   expiresInSeconds?: number;
+  nangoConnectionId?: string;
+  nangoProviderKey?: string;
 }) {
   const tokenExpiresAt =
     typeof input.expiresInSeconds === 'number' && input.expiresInSeconds > 0
       ? new Date(Date.now() + input.expiresInSeconds * 1000)
       : undefined;
+
+  const update = {
+    externalAccountName: input.externalAccountName,
+    encryptedAccessToken: encodeStoredToken(input.accessToken),
+    encryptedRefreshToken: input.refreshToken ? encodeStoredToken(input.refreshToken) : undefined,
+    accessScope: (input.accessScope ?? { summary: 'read_user, api, read_repository' }) as Prisma.JsonObject,
+    status: 'active',
+    lastSyncedAt: new Date(),
+    tokenExpiresAt,
+    nangoConnectionId: input.nangoConnectionId,
+    nangoProviderKey: input.nangoProviderKey
+  } satisfies Prisma.ProviderConnectionUncheckedUpdateInput;
+
+  const create = {
+    organizationId: input.organizationId,
+    provider: input.provider,
+    externalAccountId: input.externalAccountId,
+    externalAccountName: input.externalAccountName,
+    encryptedAccessToken: encodeStoredToken(input.accessToken),
+    encryptedRefreshToken: input.refreshToken ? encodeStoredToken(input.refreshToken) : undefined,
+    accessScope: (input.accessScope ?? { summary: 'read_user, api, read_repository' }) as Prisma.JsonObject,
+    status: 'active',
+    createdById: input.createdById,
+    lastSyncedAt: new Date(),
+    tokenExpiresAt,
+    nangoConnectionId: input.nangoConnectionId,
+    nangoProviderKey: input.nangoProviderKey
+  } satisfies Prisma.ProviderConnectionUncheckedCreateInput;
 
   return prisma.providerConnection.upsert({
     where: {
@@ -763,28 +991,8 @@ export async function upsertProviderConnectionFromOAuth(input: {
         externalAccountId: input.externalAccountId
       }
     },
-    update: {
-      externalAccountName: input.externalAccountName,
-      encryptedAccessToken: encodeStoredToken(input.accessToken),
-      encryptedRefreshToken: input.refreshToken ? encodeStoredToken(input.refreshToken) : undefined,
-      accessScope: (input.accessScope ?? { summary: 'read_user, api, read_repository' }) as Prisma.JsonObject,
-      status: 'active',
-      lastSyncedAt: new Date(),
-      tokenExpiresAt
-    },
-    create: {
-      organizationId: input.organizationId,
-      provider: input.provider,
-      externalAccountId: input.externalAccountId,
-      externalAccountName: input.externalAccountName,
-      encryptedAccessToken: encodeStoredToken(input.accessToken),
-      encryptedRefreshToken: input.refreshToken ? encodeStoredToken(input.refreshToken) : undefined,
-      accessScope: (input.accessScope ?? { summary: 'read_user, api, read_repository' }) as Prisma.JsonObject,
-      status: 'active',
-      createdById: input.createdById,
-      lastSyncedAt: new Date(),
-      tokenExpiresAt
-    }
+    update,
+    create
   });
 }
 
@@ -793,7 +1001,8 @@ export async function syncProviderConnection(connectionId: string) {
     where: { id: connectionId }
   });
 
-  if (connection.provider === 'gitlab' && connection.encryptedAccessToken) {
+  const hasManagedToken = Boolean(connection.nangoConnectionId && connection.nangoProviderKey);
+  if (connection.provider === 'gitlab' && (connection.encryptedAccessToken || hasManagedToken)) {
     try {
       await ensureGitLabAccessTokenForConnection(connection.id);
     } catch {
@@ -820,11 +1029,11 @@ export async function updateBillingPlan(input: {
   organizationId: string;
   plan: 'free' | 'pro' | 'team' | 'enterprise';
 }) {
-  const billing = await prisma.organizationBillingAccount.findUnique({
+  const existingBilling = await prisma.organizationBillingAccount.findUnique({
     where: { organizationId: input.organizationId }
   });
   const checkoutRequired =
-    shouldUseStripeCheckout() && Boolean(billing?.stripeCustomerId);
+    shouldUseStripeCheckout() && Boolean(existingBilling?.stripeCustomerId);
 
   if (checkoutRequired && (input.plan === 'pro' || input.plan === 'team')) {
     throw new Error('Paid plan changes must go through Stripe checkout.');
@@ -834,15 +1043,44 @@ export async function updateBillingPlan(input: {
     where: { id: input.organizationId },
     data: { plan: input.plan }
   });
-  return prisma.organizationBillingAccount.upsert({
+  const billing = await prisma.organizationBillingAccount.upsert({
     where: { organizationId: input.organizationId },
-    update: { plan: input.plan },
+    update: {
+      plan: input.plan,
+      auditQuotaMonthly: auditQuotaForPlan(input.plan)
+    },
     create: {
       organizationId: input.organizationId,
       plan: input.plan,
       auditQuotaMonthly: auditQuotaForPlan(input.plan)
     }
   });
+
+  if (input.plan === 'free') {
+    await archiveProjectsOverLimit(input.organizationId, PLAN_LIMITS.free.maxRepos);
+  }
+
+  return billing;
+}
+
+export async function archiveProjectsOverLimit(organizationId: string, maxRepos: number) {
+  const activeProjects = await prisma.project.findMany({
+    where: { organizationId, status: 'active' },
+    orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+    select: { id: true }
+  });
+
+  const projectsToArchive = activeProjects.slice(maxRepos);
+  if (projectsToArchive.length === 0) {
+    return { archivedCount: 0 };
+  }
+
+  await prisma.project.updateMany({
+    where: { id: { in: projectsToArchive.map((project) => project.id) } },
+    data: { status: 'archived' }
+  });
+
+  return { archivedCount: projectsToArchive.length };
 }
 
 export async function recordActivityEvent(input: {

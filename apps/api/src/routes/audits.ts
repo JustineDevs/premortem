@@ -2,20 +2,17 @@ import {
   AuditReadinessError,
   EntitlementError,
   cancelAuditRun,
+  prisma,
   pauseAuditRun,
   recordActivityEvent
 } from '@premortem/db';
 import { recordUsageEvent } from '@premortem/db';
-import { fetchPhoenixSemanticGraphForAudit } from '@premortem/observability';
-import { downloadArtifact } from '@premortem/storage';
-import {
-  getAuditRunSnapshot,
-  getRecentAuditRuns,
-  resolveGraphSnapshotPayload,
-  resumeAudit,
-  submitAudit
-} from '@premortem/orchestrator';
+import { fetchPhoenixSemanticGraphForAudit } from '@premortem/observability/phoenix-semantic-graph';
+import { getAuditRunSnapshot, getRecentAuditRuns, resolveGraphSnapshotPayload } from '@premortem/orchestrator/read-model';
 
+import { apiErrorResponse } from '../lib/error-response';
+import { ORG_WRITE_ROLES, requireApiRole } from '../lib/authorization';
+import { readJsonRecord, readOptionalString, readRequiredString } from '../lib/request-body';
 import { resolveApiActorContext } from '../lib/request-context';
 import type { AppEnv } from '../lib/types';
 
@@ -28,26 +25,35 @@ export async function handleAuditCreate(request: Request, env: AppEnv = {}) {
   }
 
   const actor = await resolveApiActorContext(request);
-  const body = (await request.json()) as {
-    organizationId?: string;
-    projectId: string;
-    branch: string;
-    commitSha?: string;
-    triggeredById?: string;
-  };
+  requireApiRole(actor, ORG_WRITE_ROLES);
+  const body = (await readJsonRecord(request)) ?? {};
+  const projectId = readRequiredString(body, 'projectId');
+  const branch = readRequiredString(body, 'branch');
+  const commitSha = readOptionalString(body, 'commitSha');
+  const triggeredById = readOptionalString(body, 'triggeredById');
 
-  if (body.organizationId && body.organizationId !== actor.organizationId) {
+  if (!projectId) {
+    return Response.json({ error: 'projectId is required' }, { status: 400 });
+  }
+
+  if (!branch) {
+    return Response.json({ error: 'branch is required' }, { status: 400 });
+  }
+
+  const organizationId = readOptionalString(body, 'organizationId');
+  if (organizationId && organizationId !== actor.organizationId) {
     return Response.json({ error: 'organizationId is not allowed for this session.' }, { status: 403 });
   }
-  const organizationId = actor.organizationId;
+  const resolvedOrganizationId = actor.organizationId;
 
   try {
+    const { submitAudit } = await import('@premortem/orchestrator');
     const result = await submitAudit({
-      organizationId,
-      projectId: body.projectId,
-      branch: body.branch,
-      commitSha: body.commitSha,
-      triggeredById: body.triggeredById ?? actor.profileId,
+      organizationId: resolvedOrganizationId,
+      projectId,
+      branch,
+      commitSha: commitSha ?? undefined,
+      triggeredById: triggeredById ?? actor.profileId,
       triggerSource: 'api'
     });
 
@@ -56,33 +62,36 @@ export async function handleAuditCreate(request: Request, env: AppEnv = {}) {
     }
 
     await recordActivityEvent({
-      organizationId,
+      organizationId: resolvedOrganizationId,
       actorId: actor.profileId,
       eventType: 'audit.submitted',
       objectType: 'audit_run',
       objectId: result.auditRunId,
-      projectId: body.projectId,
-      summary: `Queued audit for branch ${body.branch} on project ${body.projectId}`
+      projectId,
+      summary: `Queued audit for branch ${branch} on project ${projectId}`
     });
     await recordUsageEvent({
-      organizationId,
-      projectId: body.projectId,
+      organizationId: resolvedOrganizationId,
+      projectId,
       auditRunId: result.auditRunId,
       eventType: 'audit_run',
       quantity: 1,
       unit: 'run',
-      metadata: { triggerSource: 'api', branch: body.branch }
+      metadata: { triggerSource: 'api', branch }
     });
 
     return Response.json(result, { status: result.reusedActiveRun ? 200 : 202 });
   } catch (error) {
     if (error instanceof EntitlementError) {
-      return Response.json({ error: error.message, code: error.code }, { status: error.status });
+      return Response.json(
+        { error: 'Monthly audit quota reached.', code: error.code },
+        { status: error.status }
+      );
     }
     if (error instanceof AuditReadinessError) {
       return Response.json(
         {
-          error: error.message,
+          error: 'Audit target is not ready.',
           code: error.code,
           field: error.field,
           system: error.system
@@ -94,25 +103,44 @@ export async function handleAuditCreate(request: Request, env: AppEnv = {}) {
   }
 }
 
-async function resolveAuthorizedAuditRun(request: Request, auditRunId: string) {
+async function resolveAuthorizedAuditRun(
+  request: Request,
+  auditRunId: string,
+  options?: {
+    includeEvidenceSnippets?: boolean;
+    includeGraphPayload?: boolean;
+  }
+) {
   const actor = await resolveApiActorContext(request);
-  const auditRun = await getAuditRunSnapshot(auditRunId);
-  if (!auditRun || auditRun.organizationId !== actor.organizationId) {
+  const access = await prisma.auditRun.findUnique({
+    where: { id: auditRunId },
+    select: { organizationId: true }
+  });
+
+  if (!access || access.organizationId !== actor.organizationId) {
+    return null;
+  }
+
+  const auditRun = await getAuditRunSnapshot(auditRunId, options);
+  if (!auditRun) {
     return null;
   }
   return auditRun;
 }
 
 export async function handleAuditRead(request: Request, auditRunId: string) {
-  const auditRun = await resolveAuthorizedAuditRun(request, auditRunId);
+  const url = new URL(request.url);
+  const hydrate = url.searchParams.get('hydrate');
+  const includeHydration = hydrate !== '0' && hydrate !== 'false';
+  const auditRun = await resolveAuthorizedAuditRun(request, auditRunId, {
+    includeEvidenceSnippets: includeHydration,
+    includeGraphPayload: includeHydration
+  });
   if (!auditRun) {
     return Response.json({ error: 'Audit run not found' }, { status: 404 });
   }
 
-  return Response.json({
-    auditRun,
-    snapshot: auditRun
-  });
+  return Response.json({ snapshot: auditRun });
 }
 
 export async function handleAuditGraphRead(request: Request, auditRunId: string) {
@@ -129,10 +157,9 @@ export async function handleAuditGraphRead(request: Request, auditRunId: string)
   const payload = await resolveGraphSnapshotPayload({
     auditRunId,
     projectId: auditRun.projectId,
-    storageRef: graphSnapshot.storageRef,
     metadata: graphSnapshot.metadata as Record<string, unknown>,
     payload: graphSnapshot.payload,
-    download: downloadArtifact
+    storageRef: graphSnapshot.storageRef
   });
 
   if (!payload) {
@@ -148,11 +175,7 @@ export async function handleAuditGraphRead(request: Request, auditRunId: string)
     nodeCount: graphSnapshot.nodeCount,
     edgeCount: graphSnapshot.edgeCount,
     payload,
-    source: graphSnapshot.storageRef?.startsWith('neo4j://')
-      ? 'neo4j'
-      : graphSnapshot.storageRef?.startsWith('supabase://')
-        ? 'storage'
-        : 'inline-or-metadata'
+    source: graphSnapshot.storageRef?.startsWith('neo4j://') ? 'neo4j' : 'inline-or-metadata'
   });
 }
 
@@ -195,44 +218,54 @@ export async function handleAuditList(request: Request) {
 export async function handleAuditCancel(request: Request, auditRunId: string) {
   try {
     const actor = await resolveApiActorContext(request);
-    const auditRun = await cancelAuditRun(auditRunId);
+    requireApiRole(actor, ORG_WRITE_ROLES);
+    const auditRun = await resolveAuthorizedAuditRun(request, auditRunId, {
+      includeEvidenceSnippets: false,
+      includeGraphPayload: false
+    });
+    if (!auditRun) {
+      return Response.json({ error: 'Audit run not found' }, { status: 404 });
+    }
+    const cancelled = await cancelAuditRun(auditRunId);
     await recordActivityEvent({
       organizationId: actor.organizationId,
       actorId: actor.profileId,
       eventType: 'audit.cancelled',
       objectType: 'audit_run',
       objectId: auditRunId,
-      projectId: auditRun.projectId,
+      projectId: cancelled.projectId,
       summary: `Cancelled audit ${auditRunId}`
     });
-    return Response.json({ ok: true, auditRun });
+    return Response.json({ ok: true, auditRun: cancelled });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to cancel audit run' },
-      { status: 400 }
-    );
+    return apiErrorResponse(error, 'Failed to cancel audit run', { fallbackStatus: 400 });
   }
 }
 
 export async function handleAuditPause(request: Request, auditRunId: string) {
   try {
     const actor = await resolveApiActorContext(request);
-    const auditRun = await pauseAuditRun(auditRunId);
+    requireApiRole(actor, ORG_WRITE_ROLES);
+    const auditRun = await resolveAuthorizedAuditRun(request, auditRunId, {
+      includeEvidenceSnippets: false,
+      includeGraphPayload: false
+    });
+    if (!auditRun) {
+      return Response.json({ error: 'Audit run not found' }, { status: 404 });
+    }
+    const paused = await pauseAuditRun(auditRunId);
     await recordActivityEvent({
       organizationId: actor.organizationId,
       actorId: actor.profileId,
       eventType: 'audit.paused',
       objectType: 'audit_run',
       objectId: auditRunId,
-      projectId: auditRun.projectId,
+      projectId: paused.projectId,
       summary: `Paused audit ${auditRunId}`
     });
-    return Response.json({ ok: true, auditRun });
+    return Response.json({ ok: true, auditRun: paused });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to pause audit run' },
-      { status: 400 }
-    );
+    return apiErrorResponse(error, 'Failed to pause audit run', { fallbackStatus: 400 });
   }
 }
 
@@ -246,7 +279,16 @@ export async function handleAuditResume(request: Request, auditRunId: string, en
 
   try {
     const actor = await resolveApiActorContext(request);
-    const { auditRun, job } = await resumeAudit(auditRunId);
+    requireApiRole(actor, ORG_WRITE_ROLES);
+    const auditRun = await resolveAuthorizedAuditRun(request, auditRunId, {
+      includeEvidenceSnippets: false,
+      includeGraphPayload: false
+    });
+    if (!auditRun) {
+      return Response.json({ error: 'Audit run not found' }, { status: 404 });
+    }
+    const { resumeAudit } = await import('@premortem/orchestrator');
+    const { job } = await resumeAudit(auditRunId);
     await env.AUDIT_QUEUE.send(job);
     await recordActivityEvent({
       organizationId: actor.organizationId,
@@ -259,9 +301,6 @@ export async function handleAuditResume(request: Request, auditRunId: string, en
     });
     return Response.json({ ok: true, auditRun, job }, { status: 202 });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Failed to resume audit run' },
-      { status: 400 }
-    );
+    return apiErrorResponse(error, 'Failed to resume audit run', { fallbackStatus: 400 });
   }
 }

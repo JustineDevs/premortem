@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: Premortem prompt-floor regression for every specialist prompt surface.
+prompts:
+  - file://prompt-loader.mjs
+providers:
+  - echo
+defaultTest:
+  threshold: 1
+tests:
+  - file://tests-specialist-floor.mjs

@@ -1,6 +1,5 @@
-import { NextResponse } from 'next/server';
-
 import { CanonicalEvents } from '@/lib/canonical/events';
+import { bffErrorResponse } from '@/lib/server/bff-errors';
 import { proxyPremortemApi } from '@/lib/server/proxy-api';
 import { bffRateLimitKey, bffRateLimitResponse, checkBffRateLimit } from '@/lib/server/bff-rate-limit';
 import { resolveRequestActorContext } from '@/lib/server/request-context';
@@ -26,7 +25,7 @@ export async function POST(
       },
       request
     );
-    const payload = (await response.json().catch(() => ({}))) as {
+    const payload = (await response.clone().json().catch(() => ({}))) as {
       dryRun?: boolean;
       ok?: boolean;
     };
@@ -38,9 +37,8 @@ export async function POST(
       });
     }
 
-    return NextResponse.json(payload, { status: response.status });
+    return new Response(response.body, { status: response.status, headers: response.headers });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Publish failed';
-    return NextResponse.json({ error: message }, { status: 502 });
+    return bffErrorResponse(error, 'Publish failed');
   }
 }

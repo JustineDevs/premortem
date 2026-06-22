@@ -90,8 +90,8 @@ export function MarketingDocArticle({
         <div className="landing-doc-article__related">
           <MarketingSectionHeading>Related links</MarketingSectionHeading>
           <ul className="landing-doc-article__related-list">
-            {relatedLinks.map((link) => (
-              <li key={link.href}>
+            {relatedLinks.map((link, index) => (
+              <li key={`${link.href}:${link.label}:${index}`}>
                 <MarketingTextLink href={link.href} external={link.href.startsWith('http')}>
                   {link.label}
                 </MarketingTextLink>

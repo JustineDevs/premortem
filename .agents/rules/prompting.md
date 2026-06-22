@@ -8,6 +8,8 @@ Parent: [CORE-BEHAVIOR.md](CORE-BEHAVIOR.md)
 
 Prompts are operational contracts, not roleplay.
 
+For remediation and integration prompts, also follow the canonical contract in [../../TA.md](../../TA.md).
+
 Use:
 
 - precise role definition

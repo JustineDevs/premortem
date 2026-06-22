@@ -5,7 +5,11 @@
     "rootDir": "src",
     "declaration": true,
     "declarationMap": true,
-    "paths": {}
+    "paths": {
+      "@premortem/security": [
+        "packages/security/dist"
+      ]
+    }
   },
   "include": ["src/**/*"]
 }

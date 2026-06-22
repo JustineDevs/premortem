@@ -61,8 +61,8 @@ export function normalizeTransactionPoolerUrl(raw: string, env: NodeJS.ProcessEn
   if (configuredLimit) {
     url.searchParams.set('connection_limit', configuredLimit);
   } else if (!url.searchParams.has('connection_limit')) {
-    // Supabase pooler (free tier): keep one Prisma connection per process.
-    url.searchParams.set('connection_limit', isPoolerHost(url.hostname) ? '1' : '5');
+    // Keep a small pool so read-heavy routes can progress without exhausting the pooler.
+    url.searchParams.set('connection_limit', '5');
   }
 
   return fromUrl(url);

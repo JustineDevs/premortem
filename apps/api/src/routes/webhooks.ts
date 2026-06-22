@@ -1,7 +1,8 @@
 import { prisma, recordActivityEvent } from '@premortem/db';
-import { submitAudit } from '@premortem/orchestrator';
 import { handleGitLabIssueWebhook } from '@premortem/gitlab-sync';
+import { verifySharedSecretToken } from '@premortem/security';
 
+import { apiErrorResponse } from '../lib/error-response';
 import type { AppEnv } from '../lib/types';
 
 export interface GitLabPushWebhookPayload {
@@ -20,6 +21,10 @@ export interface GitLabPushWebhookPayload {
 function normalizeBranchRef(ref?: string) {
   if (!ref) return null;
   return ref.replace(/^refs\/heads\//, '').trim() || null;
+}
+
+function isValidWebhookToken(provided: string | null, expected: string) {
+  return verifySharedSecretToken(provided, expected);
 }
 
 async function handleGitLabPushWebhookPost(payload: GitLabPushWebhookPayload, env: AppEnv) {
@@ -72,6 +77,7 @@ async function handleGitLabPushWebhookPost(payload: GitLabPushWebhookPayload, en
     }
   }
 
+  const { submitAudit } = await import('@premortem/orchestrator');
   const submission = await submitAudit({
     organizationId: project.organizationId,
     projectId: project.id,
@@ -110,7 +116,7 @@ export async function handleGitLabIssueWebhookPost(request: Request, env: AppEnv
   }
 
   const token = request.headers.get('x-gitlab-token');
-  if (!token || token !== secret) {
+  if (!isValidWebhookToken(token, secret)) {
     return Response.json({ error: 'Invalid GitLab webhook token' }, { status: 401 });
   }
 
@@ -129,9 +135,6 @@ export async function handleGitLabIssueWebhookPost(request: Request, env: AppEnv
     const result = await handleGitLabIssueWebhook(payload);
     return Response.json(result);
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'GitLab webhook handling failed' },
-      { status: 502 }
-    );
+    return apiErrorResponse(error, 'GitLab webhook handling failed', { fallbackStatus: 502 });
   }
 }

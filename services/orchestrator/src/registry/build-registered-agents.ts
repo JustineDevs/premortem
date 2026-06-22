@@ -1,4 +1,5 @@
 import { createRegisteredAgents } from '@premortem/agent-kit';
+import { hasConfiguredRuntimeCredentials } from '@premortem/domain';
 import { createDefaultExecutors } from '../executors/default-executors';
 import { buildWorkerRegisteredAgents } from './build-worker-registered-agents';
 import type { LlmExecutorConfig } from '../executors/llm-executors';
@@ -7,7 +8,7 @@ function resolveExecutorMode() {
   if (process.env.PREMORTEM_EXECUTOR) {
     return process.env.PREMORTEM_EXECUTOR;
   }
-  if (process.env.GEMINI_API_KEY || process.env.AZURE_OPENAI_API_KEY) {
+  if (hasConfiguredRuntimeCredentials()) {
     return 'llm';
   }
   return 'mock';

@@ -6,7 +6,7 @@ import { authLinks } from '@/lib/auth-links';
 import { buildSeoMetadata, canonicalSupportKeywords } from '@/lib/seo-metadata';
 
 export const metadata: Metadata = buildSeoMetadata({
-  title: 'Reset password | Premortem',
+  title: 'Forgot password | Premortem',
   description: 'Request a password reset link for your Premortem account.',
   canonical: '/forgot-password',
   keywords: canonicalSupportKeywords,

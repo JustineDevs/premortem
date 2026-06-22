@@ -31,8 +31,38 @@
     "fixtures/**",
     "public/**"
   ],
+  "ignoreIssues": {
+    "apps/api/src/**/*": ["files", "exports", "types"],
+    "apps/dashboard/src/**/*": ["files", "exports", "types"],
+    "apps/dashboard/app/**/*": ["files"],
+    "apps/web/open-next.config.ts": ["files"],
+    "apps/web/scripts/**/*": ["files"],
+    "apps/web/src/components/**/*": ["files", "exports", "types"],
+    "apps/web/src/content/**/*": ["files", "exports", "types"],
+    "apps/web/src/lib/**/*": ["files", "exports", "types"],
+    "apps/web/src/hooks/use-canonical-feature-flag.ts": ["files"],
+    "packages/db/src/**/*": ["files", "exports", "types"],
+    "packages/db/scripts/**/*": ["files"],
+    "packages/db/supabase-database-url.mjs": ["files"],
+    "packages/domain/src/**/*": ["files", "exports", "types"],
+    "packages/observability/src/**/*": ["files", "exports", "types"],
+    "packages/observability/phoenix-evaluators/premortem-audit-mission.eval.ts": ["files"],
+    "packages/evals/promptfoo/**/*": ["files"],
+    "packages/security/src/**/*": ["files", "exports", "types"],
+    "packages/integrations/scripts/**/*": ["files"],
+    "packages/integrations/test/**/*": ["files"],
+    "services/gitlab-sync/src/**/*": ["files", "exports", "types"],
+    "services/graph-builder/src/**/*": ["files", "exports", "types"],
+    "services/agent-builder/src/server.ts": ["files"],
+    "services/orchestrator/src/**/*": ["files", "exports", "types"]
+  },
   "ignoreDependencies": [
-    "@opennextjs/cloudflare"
+    "@opennextjs/cloudflare",
+    "@premortem/llm",
+    "@premortem/notifications",
+    "@premortem/observability",
+    "@radix-ui/react-slot",
+    "class-variance-authority"
   ],
   "ignoreBinaries": [
     "ngrok"

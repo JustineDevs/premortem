@@ -12,7 +12,8 @@ import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { ConsoleReviewAction, LOCAL_DEV_FIXTURE } from '@premortem/domain';
+import { ConsoleReviewAction, LOCAL_DEV_FIXTURE, SMOKE_GEMINI_MODEL } from '@premortem/domain';
+import { identityHeadersForActorContext } from '@premortem/security';
 
 import { loadSmokeEnv } from './load-smoke-env.mjs';
 import { createSupabaseSmokeSession } from './smoke-supabase-session.mjs';
@@ -28,6 +29,9 @@ if (process.env.PREMORTEM_PRODUCTION_MODE !== '1') {
 }
 
 const { productionMode, fixtureMode } = loadSmokeEnv();
+if (!process.env.LLM_MODEL?.trim()) {
+  process.env.LLM_MODEL = SMOKE_GEMINI_MODEL;
+}
 
 const WEB_PORT = process.env.PREMORTEM_WEB_PORT ?? '13000';
 const API_PORT = process.env.PREMORTEM_API_PORT ?? '18787';
@@ -73,6 +77,28 @@ function authHeaders(token) {
         accept: 'application/json'
       }
     : { accept: 'application/json' };
+}
+
+function signedAuthHeaders(
+  token,
+  userId,
+  organizationId = LOCAL_DEV_FIXTURE.organizationId,
+  role = 'owner'
+) {
+  const headers = authHeaders(token);
+  const secret = process.env.IDENTITY_HMAC_SECRET?.trim();
+  if (secret && userId) {
+    Object.assign(
+      headers,
+      identityHeadersForActorContext({
+        profileId: userId,
+        organizationId,
+        role,
+        secret
+      })
+    );
+  }
+  return headers;
 }
 
 async function expectHtml(pathname, label, allowedStatuses = [200]) {
@@ -138,6 +164,8 @@ await ensureLocalDevelopmentFixture();
 
 /** @type {string | null} */
 let bearerToken = null;
+/** @type {string | null} */
+let smokeUserId = null;
 
 const workspaceProbe = await fetch(`${WEB_BASE}/api/workspace`);
 const needsBearer =
@@ -156,6 +184,7 @@ if (needsBearer || productionMode) {
       username: 'stress-smoke'
     });
     bearerToken = session.accessToken;
+    smokeUserId = session.userId;
     pass('auth: minted Supabase bearer for BFF');
   } catch (error) {
     if (workspaceProbe.ok) {
@@ -170,7 +199,7 @@ if (needsBearer || productionMode) {
   fail('auth: workspace probe', `status ${workspaceProbe.status}`);
 }
 
-const headers = authHeaders(bearerToken);
+const headers = signedAuthHeaders(bearerToken, smokeUserId);
 
 const marketingRoutes = [
   '/',
@@ -230,7 +259,7 @@ if (appResponse.status === 200) {
 
 await expectRedirect('/api/auth/gitlab?mode=login&next=/app', 'auth GitLab OAuth');
 await expectRedirect('/api/auth/github?mode=signup&next=/app', 'auth GitHub OAuth');
-await expectJson('GET', '/api/auth/status', 'auth status');
+await expectJson('GET', '/api/auth/status', 'auth status', { headers });
 
 const logoutRes = await fetch(`${WEB_BASE}/api/auth/logout`, {
   method: 'POST',
@@ -389,7 +418,7 @@ await expectJson('POST', '/api/billing/checkout', 'billing checkout', {
   allowedStatuses: [200, 400, 502, 503]
 });
 
-const stripeWebhook = await fetch(`${WEB_BASE}/api/webhooks/stripe`, {
+const stripeWebhook = await fetch(`${WEB_BASE}/api/stripe/webhook`, {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({ type: 'ping' })

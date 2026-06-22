@@ -12,6 +12,7 @@ export * from './review';
 export * from './status';
 export * from './severity';
 export * from './evidence-projection';
+export * from './issue-body';
 export * from './console-projection';
 export * from './work-item-attributes';
 export * from './branding';

@@ -61,7 +61,7 @@ export function normalizeTransactionPoolerUrl(raw, env = process.env) {
   if (configuredLimit) {
     url.searchParams.set('connection_limit', configuredLimit);
   } else if (!url.searchParams.has('connection_limit')) {
-    url.searchParams.set('connection_limit', isPoolerHost(url.hostname) ? '1' : '5');
+    url.searchParams.set('connection_limit', '5');
   }
 
   return fromUrl(url);

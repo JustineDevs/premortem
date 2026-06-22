@@ -38,7 +38,7 @@ async function githubRequest<T>(
   path: string,
   init?: RequestInit
 ): Promise<T> {
-  const response = await fetch(`https://api.github.com${path}`, {
+  const response = await fetchWithTimeout(`https://api.github.com${path}`, {
     ...init,
     headers: {
       accept: 'application/vnd.github+json',
@@ -110,3 +110,4 @@ export async function fetchGitHubIssue(
     html_url: string;
   }>(token, `/repos/${repo.owner}/${repo.repo}/issues/${issueNumber}`);
 }
+import { fetchWithTimeout } from './fetch-with-timeout';

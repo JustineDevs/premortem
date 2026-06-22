@@ -1,4 +1,5 @@
 import { gitLabAuthHeaders } from './gitlab-auth';
+import { fetchWithTimeout } from './fetch-with-timeout';
 
 export interface GitLabJobSummary {
   id: number;
@@ -48,7 +49,7 @@ export const EMPTY_CI_HISTORY: GitLabCiHistorySummary = {
 };
 
 async function gitlabRequest(baseUrl: string, token: string, apiPath: string) {
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/v4${apiPath}`, {
+  const response = await fetchWithTimeout(`${baseUrl.replace(/\/$/, '')}/api/v4${apiPath}`, {
     headers: gitLabAuthHeaders(token)
   });
 

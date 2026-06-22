@@ -5,9 +5,10 @@
  */
 
 import net from 'node:net';
+import { SMOKE_GEMINI_MODEL } from '../../packages/domain/dist/index.js';
 import { loadPremortemLocalEnv } from '../load-local-env.mjs';
 import { hasConfiguredRuntimeCredentials } from '../lib/configured-env.mjs';
-import { probePhoenixEndpoint } from '../../packages/observability/dist/index.js';
+import { probePhoenixEndpoint } from '../../packages/observability/src/index.ts';
 
 const ROOT = loadPremortemLocalEnv();
 const DEFAULT_GITLAB_EXTERNAL_PROJECT_ID = 'jstn-studio/meta-architect';
@@ -39,61 +40,26 @@ async function tcpReachable(host, port, timeoutMs = 2500) {
   });
 }
 
-async function checkGemini() {
-  const key = env('GEMINI_API_KEY');
-  if (!key) return row('Gemini API', 'MISSING', 'GEMINI_API_KEY');
-  const model = env('LLM_MODEL') || 'gemini-3-flash-preview';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}?key=${key}`;
+async function checkLlm() {
+  const provider = env('LLM_PROVIDER').toLowerCase();
+  const googleKey = env('GEMINI_API_KEY');
+  const openaiKey = env('OPENAI_API_KEY');
+  const anthropicKey = env('ANTHROPIC_API_KEY');
+
+  if (provider === 'openai' || (!provider && openaiKey)) {
+    return row('OpenAI API', openaiKey ? 'OK' : 'MISSING', openaiKey ? 'set' : 'OPENAI_API_KEY');
+  }
+
+  if (provider === 'anthropic' || (!provider && anthropicKey)) {
+    return row('Anthropic API', anthropicKey ? 'OK' : 'MISSING', anthropicKey ? 'set' : 'ANTHROPIC_API_KEY');
+  }
+
+  if (!googleKey) return row('Gemini API', 'MISSING', 'GEMINI_API_KEY');
+  const model = env('LLM_MODEL') || SMOKE_GEMINI_MODEL;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}?key=${googleKey}`;
   const res = await fetch(url);
   if (res.ok) return row('Gemini API', 'OK', `model ${model}`);
   return row('Gemini API', 'FAIL', `${res.status} ${(await res.text()).slice(0, 120)}`);
-}
-
-async function checkAzureOpenAI() {
-  const endpoint = env('AZURE_OPENAI_ENDPOINT');
-  const apiKey = env('AZURE_OPENAI_API_KEY');
-  const deployment = env('AZURE_OPENAI_DEPLOYMENT') || env('AZURE_OPENAI_MODEL');
-  if (!endpoint || !apiKey) {
-    return row('Azure OpenAI', 'SKIP', 'AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_KEY not set');
-  }
-  if (!deployment) {
-    return row('Azure OpenAI', 'WARN', 'Set AZURE_OPENAI_DEPLOYMENT or AZURE_OPENAI_MODEL');
-  }
-  const base = endpoint.replace(/\/$/, '');
-  const url = base.endsWith('/openai/v1')
-    ? `${base}/chat/completions`
-    : `${base.replace(/\/openai\/v1$/, '')}/openai/deployments/${deployment}/chat/completions?api-version=2025-01-01-preview`;
-  const body = base.endsWith('/openai/v1')
-    ? {
-        model: deployment,
-        messages: [{ role: 'user', content: 'Reply with {"ok":true} only.' }],
-        max_tokens: 16,
-        response_format: { type: 'json_object' }
-      }
-    : {
-        messages: [{ role: 'user', content: 'Reply with {"ok":true} only.' }],
-        max_tokens: 16,
-        response_format: { type: 'json_object' }
-      };
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'api-key': apiKey },
-    body: JSON.stringify(body)
-  });
-  if (res.ok) return row('Azure OpenAI', 'OK', `deployment ${deployment}`);
-  const errText = await res.text();
-  const geminiPrimary = Boolean(env('GEMINI_API_KEY'));
-  if (
-    geminiPrimary &&
-    (res.status === 404 || /DeploymentNotFound|ResourceNotFound/i.test(errText))
-  ) {
-    return row(
-      'Azure OpenAI',
-      'SKIP',
-      'No deployment on resource (optional; Gemini is primary LLM)'
-    );
-  }
-  return row('Azure OpenAI', 'FAIL', `${res.status} ${errText.slice(0, 120)}`);
 }
 
 async function checkGitLabMcpServer() {
@@ -294,20 +260,19 @@ async function main() {
       process.env.PREMORTEM_PRODUCTION_MODE === '1'
         ? 'production'
         : hasConfiguredRuntimeCredentials()
-          ? 'configured (.env.local drives real GitLab + LLM)'
+          ? 'configured (.env.local drives real GitLab + Gemini)'
           : 'fixture (mocks)'
     }\n`
   );
 
   const results = [];
   results.push(row('DATABASE_URL', env('DATABASE_URL') ? 'OK' : 'MISSING', env('DATABASE_URL') ? 'set' : ''));
-  results.push(row('Configured credentials bundle', hasConfiguredRuntimeCredentials() ? 'OK' : 'WARN', 'DATABASE_URL + GITLAB_TOKEN + LLM key'));
+  results.push(row('Configured credentials bundle', hasConfiguredRuntimeCredentials() ? 'OK' : 'WARN', 'DATABASE_URL + GITLAB_TOKEN + supported LLM key'));
   results.push(await checkSupabase());
   results.push(await checkNeo4j());
   results.push(await checkGitLab());
   results.push(await checkGitLabMcpServer());
-  results.push(await checkGemini());
-  results.push(await checkAzureOpenAI());
+  results.push(await checkLlm());
   results.push(await checkPhoenix());
   results.push(await checkLangfuse());
   results.push(await checkPostHog());
@@ -320,7 +285,7 @@ async function main() {
   console.log(`\nSummary: ${fails} fail/missing, ${warns} warnings`);
   console.log('\nNext: pnpm run dev (configured mode) → pnpm run smoke:audit-flow');
   const hardFail = results.filter((s) => s === 'FAIL' || s === 'MISSING').length;
-  const hasLlm = env('GEMINI_API_KEY') || (env('AZURE_OPENAI_API_KEY') && env('AZURE_OPENAI_ENDPOINT'));
+  const hasLlm = env('GEMINI_API_KEY') || env('OPENAI_API_KEY') || env('ANTHROPIC_API_KEY');
   process.exit(hardFail > 0 && !hasLlm ? 1 : hardFail > 1 ? 1 : 0);
 }
 

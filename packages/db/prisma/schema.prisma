@@ -135,6 +135,7 @@ enum NotificationKind {
   audit_failed
   issues_ready
   issue_published
+  critical_finding
   member_invited
   billing_notice
 }
@@ -283,6 +284,8 @@ model ProviderConnection {
   encryptedAccessToken String?
   encryptedRefreshToken String?
   tokenExpiresAt     DateTime?         @db.Timestamptz(6)
+  nangoConnectionId  String?
+  nangoProviderKey   String?
   status             ConnectionStatus  @default(pending)
   createdById        String            @db.Uuid
   lastSyncedAt       DateTime?         @db.Timestamptz(6)
@@ -296,6 +299,8 @@ model ProviderConnection {
 
   @@unique([organizationId, provider, externalAccountId])
   @@index([organizationId])
+  @@index([organizationId, updatedAt(sort: Desc)])
+  @@index([nangoConnectionId])
   @@map("provider_connections")
 }
 
@@ -355,6 +360,7 @@ model Project {
   @@unique([provider, externalProjectId])
   @@unique([organizationId, slug])
   @@index([organizationId])
+  @@index([organizationId, createdAt(sort: Desc)])
   @@index([connectionId])
   @@map("projects")
 }
@@ -425,6 +431,7 @@ model AuditRun {
   usageEvents      UsageEvent[]
 
   @@index([organizationId])
+  @@index([organizationId, createdAt(sort: Desc)])
   @@index([projectId])
   @@index([runStatus])
   @@index([createdAt(sort: Desc)])
@@ -713,6 +720,9 @@ model PublishedIssue {
   publishedAt      DateTime?         @db.Timestamptz(6)
   lastSyncedAt     DateTime?         @db.Timestamptz(6)
   closedAt         DateTime?         @db.Timestamptz(6)
+  outcomeType      String?
+  outcomeNotes     String?
+  outcomeAt        DateTime?         @db.Timestamptz(6)
   createdAt        DateTime          @default(now()) @db.Timestamptz(6)
   updatedAt        DateTime          @updatedAt @db.Timestamptz(6)
 
@@ -724,6 +734,7 @@ model PublishedIssue {
   syncLogs         IssueSyncLog[]
   reconciliationEvents ReconciliationEvent[]
 
+  @@index([organizationId])
   @@index([projectId])
   @@index([syncStatus])
   @@map("published_issues")
@@ -801,6 +812,7 @@ model AuditRunEvent {
 
   auditRun     AuditRun  @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
 
+  @@index([auditRunId, createdAt(sort: Desc)])
   @@map("audit_run_events")
 }
 
@@ -843,6 +855,7 @@ model ActivityEvent {
   actor          Profile?      @relation(fields: [actorId], references: [id])
 
   @@index([organizationId])
+  @@index([organizationId, createdAt(sort: Desc)])
   @@index([projectId])
   @@map("activity_events")
 }
@@ -861,6 +874,7 @@ model OrganizationApiKey {
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdBy      Profile       @relation(fields: [createdById], references: [id])
 
+  @@index([organizationId, createdAt(sort: Desc)])
   @@map("organization_api_keys")
 }
 
@@ -879,5 +893,6 @@ model UsageEvent {
   project        Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
   auditRun       AuditRun?     @relation(fields: [auditRunId], references: [id], onDelete: SetNull)
 
+  @@index([organizationId, createdAt(sort: Desc)])
   @@map("usage_events")
 }

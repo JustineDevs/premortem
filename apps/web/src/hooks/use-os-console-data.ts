@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { WorkspaceBundle } from '@/hooks/workspace-types';
 import { bffFetchJson, isUnauthorizedBffError, readBffErrorMessage } from '@/lib/bff-client';
@@ -8,17 +8,32 @@ import type { AuditRun, Project, ProviderType } from '@/lib/premortem-os/types';
 import { CanonicalEvents, trackOsEvent } from '@/providers/posthog-provider';
 import type { ConsoleReviewActionValue } from '@premortem/domain';
 
+function normalizeProjectList(payload: unknown): Project[] {
+  if (Array.isArray(payload)) return payload as Project[];
+  if (payload && typeof payload === 'object' && Array.isArray((payload as { projects?: unknown }).projects)) {
+    return (payload as { projects: Project[] }).projects;
+  }
+  return [];
+}
+
 export function useOsConsoleData() {
+  const authStatusQuery = useAuthStatusQuery();
+  const canLoadConsole = authStatusQuery.data?.authenticated === true || authStatusQuery.data?.mode === 'local_fixture';
+
   const projectsQuery = useQuery({
     queryKey: ['os', 'projects'],
-    queryFn: () => bffFetchJson<Project[]>('/api/projects')
+    queryFn: async () => normalizeProjectList(await bffFetchJson<unknown>('/api/projects')),
+    placeholderData: keepPreviousData,
+    staleTime: 15_000,
+    refetchOnWindowFocus: false,
+    enabled: canLoadConsole
   });
 
   const auditsQuery = useQuery({
     queryKey: ['os', 'audits'],
     queryFn: async () => {
       const payload = await bffFetchJson<{ audits?: AuditRun[]; riskClusters?: unknown[] } | AuditRun[]>(
-        '/api/audits?hydrate=1&limit=12'
+        '/api/audits?hydrate=0&limit=12'
       );
       if (Array.isArray(payload)) {
         return { audits: payload, riskClusters: [] as unknown[] };
@@ -28,6 +43,10 @@ export function useOsConsoleData() {
         riskClusters: payload.riskClusters ?? []
       };
     },
+    placeholderData: keepPreviousData,
+    staleTime: 15_000,
+    refetchOnWindowFocus: false,
+    enabled: canLoadConsole,
     refetchInterval: (query) => {
       const audits = query.state.data?.audits ?? [];
       const hasActive = audits.some(
@@ -40,15 +59,22 @@ export function useOsConsoleData() {
   const healthQuery = useQuery({
     queryKey: ['os', 'health'],
     queryFn: () => bffFetchJson<{ apiHealthy?: boolean }>('/api/health'),
-    staleTime: 60_000
+    staleTime: 60_000,
+    refetchOnWindowFocus: false
   });
+
+  const authError = canLoadConsole
+    ? null
+    : authStatusQuery.data?.authenticated === false
+      ? new Error('Sign in to use the reviewer console.')
+      : authStatusQuery.error instanceof Error
+        ? authStatusQuery.error
+        : authStatusQuery.error
+          ? new Error('Unable to resolve authentication state.')
+          : null;
 
   const projectsError = projectsQuery.error;
   const auditsError = auditsQuery.error;
-  const authError =
-    isUnauthorizedBffError(projectsError) || isUnauthorizedBffError(auditsError)
-      ? projectsError ?? auditsError
-      : null;
   const loadError =
     projectsError && !isUnauthorizedBffError(projectsError)
       ? projectsError
@@ -57,11 +83,11 @@ export function useOsConsoleData() {
         : null;
 
   return {
-    projects: projectsQuery.data ?? [],
+    projects: Array.isArray(projectsQuery.data) ? projectsQuery.data : [],
     audits: auditsQuery.data?.audits ?? [],
     riskClusters: auditsQuery.data?.riskClusters ?? [],
-    isLoading: projectsQuery.isLoading,
-    isAuditsLoading: auditsQuery.isLoading,
+    isLoading: authStatusQuery.isLoading || projectsQuery.isLoading,
+    isAuditsLoading: authStatusQuery.isLoading || auditsQuery.isLoading,
     error: authError ?? loadError,
     authError,
     loadError,
@@ -71,13 +97,29 @@ export function useOsConsoleData() {
   };
 }
 
+export function useAuthStatusQuery() {
+  return useQuery({
+    queryKey: ['os', 'auth-status'],
+    queryFn: () => bffFetchJson<{ authenticated?: boolean; mode?: string }>('/api/auth/status'),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false
+  });
+}
+
 export function useWorkspaceQuery() {
+  const authStatusQuery = useAuthStatusQuery();
+  const canLoadWorkspace =
+    authStatusQuery.data?.authenticated === true || authStatusQuery.data?.mode === 'local_fixture';
+
   return useQuery({
     queryKey: ['os', 'workspace'],
     queryFn: async () => {
       const payload = await bffFetchJson<{ workspace: WorkspaceBundle }>('/api/workspace');
       return payload.workspace;
-    }
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    enabled: canLoadWorkspace
   });
 }
 
@@ -86,6 +128,13 @@ export function useWorkspaceMutations() {
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['os', 'workspace'] });
+  };
+
+  const trackMutationError = (scope: string) => (error: unknown) => {
+    trackOsEvent('mutation_error', {
+      scope,
+      message: error instanceof Error ? error.message : String(error)
+    });
   };
 
   const patch = async (path: string, body: unknown) => {
@@ -180,6 +229,21 @@ export function useWorkspaceMutations() {
         window.location.href = payload.url;
       }
     },
+    startBillingPortal: async () => {
+      const response = await fetch('/api/billing/portal', {
+        method: 'POST'
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(
+          typeof payload.error === 'string' ? payload.error : 'Failed to open billing portal.'
+        );
+      }
+      const payload = (await response.json()) as { url?: string };
+      if (payload.url) {
+        window.location.href = payload.url;
+      }
+    },
     reconcileIssues: useMutation({
       mutationFn: async () => {
         const response = await fetch('/api/issues/reconcile', { method: 'POST' });
@@ -191,7 +255,8 @@ export function useWorkspaceMutations() {
       onSuccess: (result) => {
         trackOsEvent(CanonicalEvents.issuesReconciled, result);
         void queryClient.invalidateQueries({ queryKey: ['os', 'reconciliation'] });
-      }
+      },
+      onError: trackMutationError('reconcileIssues')
     }),
     cancelAudit: useMutation({
       mutationFn: async (auditRunId: string) => {
@@ -204,7 +269,8 @@ export function useWorkspaceMutations() {
       onSuccess: () => {
         trackOsEvent(CanonicalEvents.auditCancelled);
         void queryClient.invalidateQueries({ queryKey: ['os', 'audits'] });
-      }
+      },
+      onError: trackMutationError('cancelAudit')
     }),
     pauseAudit: useMutation({
       mutationFn: async (auditRunId: string) => {
@@ -217,7 +283,8 @@ export function useWorkspaceMutations() {
       onSuccess: () => {
         trackOsEvent(CanonicalEvents.auditPaused);
         void queryClient.invalidateQueries({ queryKey: ['os', 'audits'] });
-      }
+      },
+      onError: trackMutationError('pauseAudit')
     }),
     resumeAudit: useMutation({
       mutationFn: async (auditRunId: string) => {
@@ -230,7 +297,8 @@ export function useWorkspaceMutations() {
       onSuccess: () => {
         trackOsEvent(CanonicalEvents.auditResumed);
         void queryClient.invalidateQueries({ queryKey: ['os', 'audits'] });
-      }
+      },
+      onError: trackMutationError('resumeAudit')
     }),
     stopAllRuntime: useMutation({
       mutationFn: async () => {
@@ -243,12 +311,13 @@ export function useWorkspaceMutations() {
       onSuccess: () => {
         void queryClient.invalidateQueries({ queryKey: ['os', 'workspace'] });
         void queryClient.invalidateQueries({ queryKey: ['os', 'audits'] });
-      }
+      },
+      onError: trackMutationError('stopAllRuntime')
     })
   };
 }
 
-export function useReconciliationEvents() {
+export function useReconciliationEvents(enabled = true) {
   return useQuery({
     queryKey: ['os', 'reconciliation'],
     queryFn: () =>
@@ -259,6 +328,11 @@ export function useReconciliationEvents() {
         createdAt: string;
         publishedIssue?: { publishedTitle?: string; url?: string | null; syncStatus?: string };
       }> }>('/api/reconciliation')
+    ,
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+    refetchOnWindowFocus: false,
+    enabled
   });
 }
 
@@ -268,6 +342,13 @@ export function useRepositoryDiscoveryMutations() {
   const invalidateProjects = () => {
     void queryClient.invalidateQueries({ queryKey: ['os', 'projects'] });
     void queryClient.invalidateQueries({ queryKey: ['os', 'workspace'] });
+  };
+
+  const trackMutationError = (scope: string) => (error: unknown) => {
+    trackOsEvent('mutation_error', {
+      scope,
+      message: error instanceof Error ? error.message : String(error)
+    });
   };
 
   return {
@@ -291,7 +372,8 @@ export function useRepositoryDiscoveryMutations() {
           }>;
           lastSyncedAt: string | null;
         }>;
-      }
+      },
+      onError: trackMutationError('discoverRepositories')
     }),
     enableRepositories: useMutation({
       mutationFn: async (input: { integrationId: string; externalProjectIds: string[] }) => {
@@ -318,7 +400,8 @@ export function useRepositoryDiscoveryMutations() {
       onSuccess: () => {
         trackOsEvent(CanonicalEvents.projectRegistered);
         invalidateProjects();
-      }
+      },
+      onError: trackMutationError('enableRepositories')
     }),
     disableRepository: useMutation({
       mutationFn: async (input: { integrationId: string; projectId: string }) => {
@@ -336,7 +419,8 @@ export function useRepositoryDiscoveryMutations() {
         }
         return response.json();
       },
-      onSuccess: () => invalidateProjects()
+      onSuccess: () => invalidateProjects(),
+      onError: trackMutationError('disableRepository')
     }),
     registerPublicRepository: useMutation({
       mutationFn: async (reference: string) => {
@@ -354,7 +438,8 @@ export function useRepositoryDiscoveryMutations() {
       onSuccess: () => {
         trackOsEvent(CanonicalEvents.projectRegistered);
         invalidateProjects();
-      }
+      },
+      onError: trackMutationError('registerPublicRepository')
     })
   };
 }
@@ -364,10 +449,30 @@ export function useAuditMutations() {
 
   const invalidateAudits = () => {
     void queryClient.invalidateQueries({ queryKey: ['os', 'audits'] });
+    void queryClient.invalidateQueries({ queryKey: ['os', 'audit-detail'] });
   };
 
   const invalidateProjects = () => {
     void queryClient.invalidateQueries({ queryKey: ['os', 'projects'] });
+  };
+
+  const trackMutationError = (scope: string) => (error: unknown) => {
+    trackOsEvent('mutation_error', {
+      scope,
+      message: error instanceof Error ? error.message : String(error)
+    });
+  };
+
+  const fetchAuditDetail = async (auditId: string) => {
+    return queryClient.fetchQuery<AuditRun | null>({
+      queryKey: ['os', 'audit-detail', auditId],
+      queryFn: async () => {
+        const response = await fetch(`/api/audits/${auditId}`);
+        if (!response.ok) return null;
+        return response.json() as Promise<AuditRun>;
+      },
+      staleTime: 30_000
+    });
   };
 
   return {
@@ -393,7 +498,8 @@ export function useAuditMutations() {
         trackOsEvent(CanonicalEvents.projectRegistered);
         trackOsEvent(CanonicalEvents.configValidated, { step: 'project_registered' });
         invalidateProjects();
-      }
+      },
+      onError: trackMutationError('registerProject')
     }),
     triggerAudit: useMutation({
       mutationFn: async (input: { projectId?: string; customSnippet?: string }) => {
@@ -413,7 +519,8 @@ export function useAuditMutations() {
         if (variables.customSnippet?.trim()) return;
         invalidateAudits();
         invalidateProjects();
-      }
+      },
+      onError: trackMutationError('triggerAudit')
     }),
     reviewIssue: useMutation({
       mutationFn: async (input: {
@@ -434,7 +541,8 @@ export function useAuditMutations() {
       onSuccess: (_result, variables) => {
         trackOsEvent(CanonicalEvents.issueReviewed, variables);
         invalidateAudits();
-      }
+      },
+      onError: trackMutationError('reviewIssue')
     }),
     persistFindingFields: useMutation({
       mutationFn: async (input: {
@@ -465,6 +573,8 @@ export function useAuditMutations() {
         return response.json();
       },
       onSuccess: () => invalidateAudits()
+      ,
+      onError: trackMutationError('persistFindingFields')
     }),
     deployPatch: useMutation({
       mutationFn: async (input: { auditId: string; issueId: string }) => {
@@ -479,11 +589,9 @@ export function useAuditMutations() {
         return response.json();
       },
       onSuccess: () => invalidateAudits()
+      ,
+      onError: trackMutationError('deployPatch')
     }),
-    fetchAuditDetail: async (auditId: string) => {
-      const response = await fetch(`/api/audits/${auditId}`);
-      if (!response.ok) return null;
-      return response.json();
-    }
+    fetchAuditDetail
   };
 }

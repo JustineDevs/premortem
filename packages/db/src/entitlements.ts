@@ -1,8 +1,12 @@
+/**
+ * Organization entitlement helpers for plan limits, quota enforcement, and
+ * monthly usage resets.
+ */
 import type { OrgPlan } from '@prisma/client';
 
 import { prisma } from './client';
 
-/** Business-model tier limits (ADR v0.1.0 + Business_model.md). */
+/** Business-model tier limits used across audit, publish, and workspace gating. */
 export const PLAN_LIMITS: Record<
   OrgPlan,
   { maxRepos: number; auditsPerMonth: number; canPublish: boolean; label: string }
@@ -14,7 +18,9 @@ export const PLAN_LIMITS: Record<
 };
 
 export class EntitlementError extends Error {
+  /** Stable machine-readable entitlement failure code. */
   readonly code: 'quota_exceeded' | 'feature_locked' | 'repo_limit';
+  /** HTTP status returned by callers when entitlement checks fail. */
   readonly status: number;
 
   constructor(code: EntitlementError['code'], message: string, status = 403) {
@@ -29,6 +35,12 @@ export function auditQuotaForPlan(plan: OrgPlan): number {
   return PLAN_LIMITS[plan].auditsPerMonth;
 }
 
+/**
+ * Read the current entitlement state for an organization.
+ *
+ * @param organizationId - Organization to inspect.
+ * @returns Current plan, project count, and monthly audit usage.
+ */
 export async function getOrganizationEntitlements(organizationId: string) {
   const [organization, billing, projectCount, auditsThisMonth] = await Promise.all([
     prisma.organization.findUniqueOrThrow({ where: { id: organizationId } }),
@@ -62,6 +74,12 @@ function startOfUtcMonth() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
+/**
+ * Block repository registration when the organization already reached plan capacity.
+ *
+ * @param organizationId - Organization that wants to connect another repository.
+ * @throws EntitlementError when the plan quota is exhausted.
+ */
 export async function assertCanRegisterProject(organizationId: string) {
   const entitlements = await getOrganizationEntitlements(organizationId);
   if (entitlements.projectCount >= entitlements.limits.maxRepos) {
@@ -72,6 +90,12 @@ export async function assertCanRegisterProject(organizationId: string) {
   }
 }
 
+/**
+ * Block audit submission when the organization has exhausted its monthly quota.
+ *
+ * @param organizationId - Organization that wants to run an audit.
+ * @throws EntitlementError when the monthly audit limit is exhausted.
+ */
 export async function assertCanRunAudit(organizationId: string) {
   const entitlements = await getOrganizationEntitlements(organizationId);
   if (entitlements.auditsUsed >= entitlements.auditLimit) {
@@ -83,6 +107,12 @@ export async function assertCanRunAudit(organizationId: string) {
   }
 }
 
+/**
+ * Block GitLab publish when the organization is on a plan that does not permit publishing.
+ *
+ * @param organizationId - Organization that wants to publish approved issues.
+ * @throws EntitlementError when the plan does not allow publish access.
+ */
 export async function assertCanPublish(organizationId: string) {
   const entitlements = await getOrganizationEntitlements(organizationId);
   if (!entitlements.canPublish) {
@@ -93,6 +123,11 @@ export async function assertCanPublish(organizationId: string) {
   }
 }
 
+/**
+ * Increment monthly audit usage after a submission is accepted.
+ *
+ * @param organizationId - Organization that submitted the audit.
+ */
 export async function recordAuditSubmitted(organizationId: string) {
   await prisma.organizationBillingAccount.upsert({
     where: { organizationId },
@@ -115,6 +150,24 @@ export async function recordAuditSubmitted(organizationId: string) {
   });
 }
 
+/**
+ * Reset monthly audit counters so the next billing period starts from zero.
+ *
+ * @returns The Prisma bulk-update result for all organizations that had non-zero usage.
+ */
+export async function resetMonthlyAuditUsage() {
+  return prisma.organizationBillingAccount.updateMany({
+    where: { auditsUsedMonth: { gt: 0 } },
+    data: { auditsUsedMonth: 0 }
+  });
+}
+
+/**
+ * Find the most recent active audit run for a project branch.
+ *
+ * @param input - Organization, project, and branch scope for the lookup.
+ * @returns The most recent active audit run or null when no active run exists.
+ */
 export async function findActiveAuditRun(input: {
   organizationId: string;
   projectId: string;

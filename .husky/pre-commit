@@ -1,1 +1,3 @@
 pnpm lint
+pnpm exec promptfoo validate config -c packages/evals/promptfoo/promptfooconfig.yaml
+pnpm exec promptfoo validate config -c packages/evals/promptfoo/promptfooconfig.validator.yaml

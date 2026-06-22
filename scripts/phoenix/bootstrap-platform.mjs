@@ -17,6 +17,7 @@ import { loadPremortemLocalEnv } from '../load-local-env.mjs';
 loadPremortemLocalEnv();
 
 import {
+  DEFAULT_GEMINI_MODEL,
   PREMORTEM_PHOENIX_CODE_EVALUATOR_PATH,
   appendAuditMissionToPhoenixDataset,
   ensurePremortemAuditDataset,
@@ -102,7 +103,7 @@ try {
   pass('appended bootstrap audit example');
 
   await ensurePremortemAuditJudgePrompt(
-    process.env.LLM_MODEL?.trim() || 'gemini-2.0-flash'
+    process.env.LLM_MODEL?.trim() || DEFAULT_GEMINI_MODEL
   );
   pass('prompt premortem-audit-llm-judge');
 

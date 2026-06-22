@@ -25,7 +25,7 @@ function sourceLabel(node: WorkflowGraphNode): string {
   if (node.source === 'phoenix') return 'Phoenix trace span';
   if (node.lane === 'semantic') return 'Semantic trace';
   if (node.lane === 'runtime') return 'Runtime graph';
-  return 'Repository graph';
+  return 'Graph';
 }
 
 export function WorkflowGraphInspectPanel({
@@ -55,7 +55,7 @@ export function WorkflowGraphInspectPanel({
           Graph inspect
         </p>
         <p className="mt-2 text-[11px] leading-relaxed text-[#717A75]">
-          Click a repository or trace node to inspect properties, graph links, and audit runtime
+          Click a graph or trace node to inspect properties, graph links, and audit runtime
           context.
         </p>
       </div>

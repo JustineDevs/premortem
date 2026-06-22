@@ -1,16 +1,8 @@
 import { NextResponse } from 'next/server';
 
 import { bffErrorResponse } from '@/lib/server/bff-errors';
-import {
-  fetchRuntimeAudits,
-  fetchRuntimeProjects
-} from '@/lib/premortem-api/client';
-import {
-  hydrateAuditRunsFromSnapshots,
-  mapAuditListItemToAuditRun,
-  projectNameMapFromProjects
-} from '@/lib/premortem-api/hydrate-audits';
-import { mapRuntimeProject } from '@/lib/premortem-api/map-runtime-to-console';
+import { fetchRuntimeAudits } from '@/lib/premortem-api/client';
+import { hydrateAuditRunsFromSnapshots, mapAuditListItemToAuditRun } from '@/lib/premortem-api/hydrate-audits';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
 
 export async function GET(request: Request) {
@@ -21,16 +13,9 @@ export async function GET(request: Request) {
   try {
     const context = await resolveRequestActorContext(request);
     const headers = actorHeaders(context);
-    const [auditRuns, projects] = await Promise.all([
-      fetchRuntimeAudits(limit, headers),
-      fetchRuntimeProjects(headers)
-    ]);
-    const projectNameById = projectNameMapFromProjects(
-      projects.map((project) => mapRuntimeProject(project as Record<string, unknown>))
-    );
-
+    const auditRuns = await fetchRuntimeAudits(limit, headers);
     const audits = auditRuns.map((audit) =>
-      mapAuditListItemToAuditRun(audit, projectNameById.get(audit.projectId) ?? audit.projectId)
+      mapAuditListItemToAuditRun(audit, audit.projectName ?? audit.projectId)
     );
 
     if (!hydrate) {
@@ -39,8 +24,7 @@ export async function GET(request: Request) {
 
     const hydrated = await hydrateAuditRunsFromSnapshots(
       audits,
-      projectNameById,
-      Math.min(limit, 12),
+      Math.min(limit, 1),
       headers
     );
     return NextResponse.json({

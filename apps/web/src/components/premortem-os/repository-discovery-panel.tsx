@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Globe, Loader2, RefreshCw, Search } from 'lucide-react';
 
 import type { WorkspaceIntegration } from '@/hooks/workspace-types';
@@ -45,6 +45,34 @@ export function RepositoryDiscoveryPanel({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const autoDiscoverAttemptedRef = useRef(false);
+  const lastIntegrationIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const nextIntegrationId = gitlabIntegration?.id ?? null;
+    if (lastIntegrationIdRef.current === nextIntegrationId) return;
+    lastIntegrationIdRef.current = nextIntegrationId;
+    autoDiscoverAttemptedRef.current = false;
+  }, [gitlabIntegration?.id]);
+
+  const applyCatalog = useCallback((repositories: DiscoveredRow[], lastSyncedAt: string | null) => {
+    setCatalog(repositories);
+    setSelectedIds(new Set());
+    setStatusMessage(
+      lastSyncedAt
+        ? `Found ${repositories.length} accessible repositories.`
+        : 'Discovery complete.'
+    );
+  }, []);
+
+  const discoverCatalog = useCallback(async () => {
+    if (!gitlabIntegration?.id) return null;
+    const payload = await discoverRepositories.mutateAsync(gitlabIntegration.id);
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem(`premortem:catalog:${gitlabIntegration.id}`, '1');
+    }
+    applyCatalog(payload.repositories, payload.lastSyncedAt);
+    return payload;
+  }, [applyCatalog, discoverRepositories, gitlabIntegration?.id]);
 
   const filteredCatalog = useMemo(() => {
     const q = catalogQuery.trim().toLowerCase();
@@ -57,26 +85,23 @@ export function RepositoryDiscoveryPanel({
     );
   }, [catalog, catalogQuery]);
 
-  const handleDiscover = async () => {
+  const handleDiscover = useCallback(async () => {
     if (!gitlabIntegration?.id) return;
     setErrorMessage(null);
     setStatusMessage(null);
     try {
-      const payload = await discoverRepositories.mutateAsync(gitlabIntegration.id);
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem(`premortem:catalog:${gitlabIntegration.id}`, '1');
+      const payload = await discoverCatalog();
+      if (payload) {
+        setStatusMessage(
+          payload.repositories.some((row) => !row.enabled)
+            ? 'Catalog loaded. Select repositories to enable them in Projects.'
+            : 'Catalog loaded. All accessible repositories are already enabled.'
+        );
       }
-      setCatalog(payload.repositories);
-      setSelectedIds(new Set());
-      setStatusMessage(
-        payload.lastSyncedAt
-          ? `Found ${payload.repositories.length} accessible repositories.`
-          : 'Discovery complete.'
-      );
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Discovery failed.');
     }
-  };
+  }, [discoverCatalog, gitlabIntegration?.id]);
 
   useEffect(() => {
     if (!autoDiscoverOnMount || !gitlabIntegration?.id || autoDiscoverAttemptedRef.current) {
@@ -95,25 +120,12 @@ export function RepositoryDiscoveryPanel({
     autoDiscoverAttemptedRef.current = true;
     setErrorMessage(null);
     setStatusMessage(null);
-    void discoverRepositories
-      .mutateAsync(gitlabIntegration.id)
-      .then((payload) => {
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem(sessionKey, '1');
-        }
-        setCatalog(payload.repositories);
-        setSelectedIds(new Set());
-        setStatusMessage(
-          payload.lastSyncedAt
-            ? `Found ${payload.repositories.length} accessible repositories.`
-            : 'Discovery complete.'
-        );
-      })
+    void handleDiscover()
       .catch((error: unknown) => {
         autoDiscoverAttemptedRef.current = false;
         setErrorMessage(error instanceof Error ? error.message : 'Discovery failed.');
       });
-  }, [autoDiscoverOnMount, gitlabIntegration?.id, discoverRepositories, skipDiscoverSessionCache]);
+  }, [autoDiscoverOnMount, gitlabIntegration?.id, handleDiscover, skipDiscoverSessionCache]);
 
   const toggleSelection = (externalProjectId: string) => {
     setSelectedIds((prev) => {
@@ -175,7 +187,8 @@ export function RepositoryDiscoveryPanel({
             Add repositories
           </h3>
           <p className="text-xs text-[#5C6560] mt-1">
-            After GitLab repository access is granted, catalogs load automatically. Public repos need no OAuth.
+            Load a catalog when you explicitly request discovery. Discovered repositories stay disabled
+            until you explicitly enable them. Public repos need no OAuth.
           </p>
         </div>
         <div className="flex gap-1 text-[10px] font-mono uppercase">

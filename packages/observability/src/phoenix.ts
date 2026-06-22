@@ -1,24 +1,81 @@
-import {
-  getLLMAttributes,
-  register,
-  trace,
-  traceAgent,
-  traceChain,
-  traceTool,
-  withSpan
-} from '@arizeai/phoenix-otel';
+import { scoreAuditMissionOutput } from './phoenix-code-evaluator';
+import { scrubOutput } from '@premortem/security';
 
-export {
-  getLLMAttributes,
-  trace,
-  traceAgent,
-  traceChain,
-  traceTool,
-  withSpan
-};
+const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
 
-let provider: ReturnType<typeof register> | undefined;
+type PhoenixOtelModule = typeof import('@arizeai/phoenix-otel');
+
+let phoenixOtelModulePromise: Promise<PhoenixOtelModule> | undefined;
+let phoenixOtelLoadFailed = false;
+let phoenixOtelLoadFailureLogged = false;
+let provider: { shutdown: () => Promise<void> } | undefined;
 let initialized = false;
+
+function shouldLogPhoenixOtelFailure() {
+  return process.env.PHOENIX_OTEL_DEBUG === '1';
+}
+
+function shouldLoadPhoenixOtel() {
+  return process.env.PHOENIX_OTEL_ENABLED === '1';
+}
+
+function dynamicImportPhoenixOtel(): Promise<PhoenixOtelModule> {
+  const loader = new Function('specifier', 'return import(specifier)') as (
+    specifier: string
+  ) => Promise<PhoenixOtelModule>;
+  return loader('@arizeai/phoenix-otel');
+}
+
+async function loadPhoenixOtel() {
+  if (!shouldLoadPhoenixOtel()) return null;
+  if (phoenixOtelLoadFailed) return null;
+  phoenixOtelModulePromise ??= dynamicImportPhoenixOtel();
+  try {
+    return await phoenixOtelModulePromise;
+  } catch (error) {
+    phoenixOtelLoadFailed = true;
+    if (!phoenixOtelLoadFailureLogged && shouldLogPhoenixOtelFailure()) {
+      phoenixOtelLoadFailureLogged = true;
+      console.warn(
+        'phoenix-tracing-disabled',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    return null;
+  }
+}
+
+export async function getLLMAttributes(...args: any[]): Promise<any> {
+  const mod = await loadPhoenixOtel();
+  if (!mod) return undefined;
+  return (mod.getLLMAttributes as (...inner: any[]) => any)(...args);
+}
+
+export const trace: any = undefined;
+
+async function traceAgent(...args: any[]): Promise<any> {
+  const mod = await loadPhoenixOtel();
+  if (!mod) return args[0];
+  return (mod.traceAgent as (...inner: any[]) => any)(...args);
+}
+
+async function traceChain(...args: any[]): Promise<any> {
+  const mod = await loadPhoenixOtel();
+  if (!mod) return args[0];
+  return (mod.traceChain as (...inner: any[]) => any)(...args);
+}
+
+async function traceTool(...args: any[]): Promise<any> {
+  const mod = await loadPhoenixOtel();
+  if (!mod) return args[0];
+  return (mod.traceTool as (...inner: any[]) => any)(...args);
+}
+
+export async function withSpan(...args: any[]): Promise<any> {
+  const mod = await loadPhoenixOtel();
+  if (!mod) return args[0];
+  return (mod.withSpan as (...inner: any[]) => any)(...args);
+}
 
 export function resolvePhoenixUrl() {
   const raw =
@@ -94,21 +151,28 @@ export function isPhoenixEnabled() {
 }
 
 export function initPhoenixTracing(serviceName: string) {
-  if (initialized || process.env.PHOENIX_OTEL_ENABLED === '0') return provider;
-
+  if (initialized || !shouldLoadPhoenixOtel()) return provider;
   if (!isPhoenixEnabled()) return undefined;
 
-  provider = register({
-    projectName: process.env.PHOENIX_PROJECT_NAME?.trim() || 'premortem',
-    url: resolvePhoenixUrl(),
-    apiKey: process.env.PHOENIX_API_KEY?.trim(),
-    batch: process.env.NODE_ENV === 'production',
-    headers: {
-      'x-premortem-service': serviceName
-    }
-  });
+  void loadPhoenixOtel()
+    .then((mod) => {
+      if (!mod) return;
+      const register = (mod as NonNullable<typeof mod>).register;
+      provider = register({
+        projectName: process.env.PHOENIX_PROJECT_NAME?.trim() || 'premortem',
+        url: resolvePhoenixUrl(),
+        apiKey: process.env.PHOENIX_API_KEY?.trim(),
+        batch: process.env.NODE_ENV === 'production',
+        headers: {
+          'x-premortem-service': serviceName
+        }
+      }) as { shutdown: () => Promise<void> };
+      initialized = true;
+    })
+    .catch((error) => {
+      console.error('initPhoenixTracing.phoenix-load-failed', error);
+    });
 
-  initialized = true;
   return provider;
 }
 
@@ -126,8 +190,18 @@ export const tracePremortemToolCall = traceTool;
 export interface PhoenixLlmSpanInput {
   model: string;
   provider?: string;
+  spanName?: string;
   messages: Array<{ role: string; content: string }>;
   temperature?: number;
+}
+
+function resolveLlmSpanName(input: PhoenixLlmSpanInput) {
+  const explicit = input.spanName?.trim();
+  if (explicit) return explicit;
+
+  const provider = input.provider?.trim() || 'google';
+  const model = input.model.trim().replace(/[^a-zA-Z0-9._-]+/g, '-');
+  return `premortem.llm.generate.${provider}.${model}`;
 }
 
 export async function tracePremortemLlmGenerate<T>(
@@ -136,11 +210,13 @@ export async function tracePremortemLlmGenerate<T>(
 ): Promise<T> {
   if (!isPhoenixEnabled()) return fn();
 
-  const traced = withSpan(async () => fn(), {
-    name: 'gemini.generateContent',
+  const mod = await loadPhoenixOtel();
+  if (!mod) return fn();
+  const traced = mod.withSpan(async () => fn(), {
+    name: resolveLlmSpanName(input),
     kind: 'LLM',
     processInput: () =>
-      getLLMAttributes({
+      mod.getLLMAttributes({
         provider: input.provider ?? 'google',
         modelName: input.model,
         inputMessages: input.messages.map((message) => ({
@@ -154,9 +230,9 @@ export async function tracePremortemLlmGenerate<T>(
     processOutput: (result: T) => {
       const text =
         result && typeof result === 'object' && 'text' in result
-          ? String((result as { text?: unknown }).text ?? '')
-          : JSON.stringify(result);
-      return getLLMAttributes({
+          ? scrubOutput(String((result as { text?: unknown }).text ?? ''))
+          : scrubOutput(JSON.stringify(result));
+      return mod.getLLMAttributes({
         provider: input.provider ?? 'google',
         modelName: input.model,
         outputMessages: [{ role: 'assistant', content: text.slice(0, 4000) }]
@@ -167,13 +243,14 @@ export async function tracePremortemLlmGenerate<T>(
   return traced();
 }
 
-import { scoreAuditMissionOutput } from './phoenix-code-evaluator';
-
 export interface AuditFindingEvalInput {
   auditRunId: string;
   findingCount: number;
   issueCandidateCount: number;
   hasHumanReviewGate: boolean;
+  findingConfidenceAvg?: number;
+  evidenceCountMin?: number;
+  refusalRate?: number;
 }
 
 export function evaluateAuditMissionQuality(input: AuditFindingEvalInput) {
@@ -181,7 +258,10 @@ export function evaluateAuditMissionQuality(input: AuditFindingEvalInput) {
     {
       findingCount: input.findingCount,
       issueCandidateCount: input.issueCandidateCount,
-      hasHumanReviewGate: input.hasHumanReviewGate
+      hasHumanReviewGate: input.hasHumanReviewGate,
+      findingConfidenceAvg: input.findingConfidenceAvg,
+      evidenceCountMin: input.evidenceCountMin,
+      refusalRate: input.refusalRate
     },
     { minFindingCount: 1, minScore: 0.66 }
   );
@@ -216,7 +296,7 @@ export interface AuditMissionLlmJudgeResult {
 }
 
 function resolveGeminiJudgeModel(model?: string) {
-  return model?.trim() || process.env.LLM_MODEL?.trim() || 'gemini-2.0-flash';
+  return model?.trim() || process.env.LLM_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
 }
 
 export async function evaluateAuditMissionWithLlmJudge(
@@ -259,15 +339,10 @@ export async function evaluateAuditMissionWithLlmJudge(
   const text =
     raw.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('\n') ?? '{}';
 
-  let parsed: { label?: string; explanation?: string };
-  try {
-    parsed = JSON.parse(text) as { label?: string; explanation?: string };
-  } catch {
-    parsed = { label: 'needs_improvement', explanation: text.slice(0, 500) };
-  }
-
+  const parsed = JSON.parse(text) as { label?: string; explanation?: string };
   const label = parsed.label === 'acceptable' ? 'acceptable' : 'needs_improvement';
-  const score = label === 'acceptable' ? 1 : 0.35;
+  const explanation = parsed.explanation?.trim() || 'No explanation returned.';
+  const score = label === 'acceptable' ? 1 : 0;
 
   return {
     evaluator: 'premortem-llm-judge',
@@ -275,10 +350,6 @@ export async function evaluateAuditMissionWithLlmJudge(
     label,
     score,
     passed: label === 'acceptable',
-    explanation: String(parsed.explanation ?? '').slice(0, 2000)
+    explanation
   };
-}
-
-export function isPhoenixLlmEvalEnabled() {
-  return process.env.PHOENIX_LLM_EVAL === '1';
 }

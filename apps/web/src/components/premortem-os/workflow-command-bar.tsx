@@ -4,6 +4,7 @@ import React from 'react';
 import { Play, Workflow } from 'lucide-react';
 import type { Project } from '@/lib/premortem-os/types';
 import type { WorkflowCanvasViewMode } from '@premortem/domain';
+import type { CanvasEdge } from './workflow-canvas.types';
 
 import { WorkflowCanvasControls } from './workflow-canvas-board';
 import { WorkflowViewModeToggle } from './workflow-view-mode-toggle';
@@ -19,6 +20,7 @@ interface WorkflowCommandBarProps {
   selectedProjectId: string;
   onProjectChange: (projectId: string) => void;
   selectedProject: Project;
+  selectedEdge?: CanvasEdge | null;
   hasProjects?: boolean;
   onExecuteStream: () => void;
 }
@@ -34,9 +36,11 @@ export function WorkflowCommandBar({
   selectedProjectId,
   onProjectChange,
   selectedProject,
+  selectedEdge = null,
   hasProjects = true,
   onExecuteStream
 }: WorkflowCommandBarProps) {
+  const safeProjects = Array.isArray(projects) ? projects : [];
   return (
     <div className="z-20 flex shrink-0 flex-col items-stretch justify-between gap-4 border-b border-[#EAE6DF] bg-white p-4 sm:flex-row sm:items-center">
       <div className="space-y-0.5">
@@ -45,8 +49,17 @@ export function WorkflowCommandBar({
           Open Audit Trace Canvas
         </h2>
         <p className="text-[11px] text-[#717A75]">
-          Graph and Workbench views share one pipeline: repository graph on the left, active step on the right.
+          Graph and Workbench views share one pipeline: graph nodes and links on the left, active step on the right.
         </p>
+        {selectedEdge ? (
+          <div className="mt-2 inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded border border-emerald-200 bg-emerald-50 px-3 py-1.5 font-mono text-[10px] text-emerald-950">
+            <span className="font-bold uppercase tracking-wider text-emerald-700">Path translator</span>
+            <span className="font-semibold text-emerald-950">
+              {selectedEdge.from} → {selectedEdge.to}
+            </span>
+            <span className="text-emerald-800/80">({selectedEdge.label})</span>
+          </div>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap items-center gap-3.5 select-none">
@@ -78,7 +91,7 @@ export function WorkflowCommandBar({
           aria-label="Select project"
           className="rounded border border-[#EAE6DF] bg-white p-1 px-2.5 font-display text-xs font-bold text-[#1E2522] focus:border-emerald-950 focus:outline-none"
         >
-          {projects.map((project) => (
+          {safeProjects.map((project) => (
             <option key={project.id} value={project.id}>
               {project.name}
             </option>

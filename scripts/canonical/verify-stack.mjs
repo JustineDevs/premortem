@@ -46,7 +46,7 @@ const checks = [
   },
   {
     name: 'Supabase Postgres + Prisma',
-    status: () => (hasEnv('DATABASE_URL') ? 'OK' : 'MISSING'),
+    status: () => (hasEnv('DATABASE_URL', 'DIRECT_URL') ? 'OK' : 'MISSING'),
     detail: 'DATABASE_URL (+ DIRECT_URL for migrations)'
   },
   {
@@ -69,13 +69,13 @@ const checks = [
   },
   {
     name: 'Sentry',
-    status: () => (hasEnv('NEXT_PUBLIC_SENTRY_DSN', 'SENTRY_DSN') ? 'OK' : 'MISSING'),
-    detail: 'NEXT_PUBLIC_SENTRY_DSN, SENTRY_DSN'
+    status: () => (hasEnv('SENTRY_DSN') ? 'OK' : 'MISSING'),
+    detail: 'SENTRY_DSN'
   },
   {
     name: 'PostHog',
-    status: () => (hasEnv('NEXT_PUBLIC_POSTHOG_KEY', 'POSTHOG_API_KEY') ? 'OK' : 'MISSING'),
-    detail: 'NEXT_PUBLIC_POSTHOG_KEY (client), POSTHOG_API_KEY (server)'
+    status: () => (hasEnv('NEXT_PUBLIC_POSTHOG_KEY') ? 'OK' : 'MISSING'),
+    detail: 'NEXT_PUBLIC_POSTHOG_KEY (client)'
   },
   {
     name: 'Stripe',

@@ -4,18 +4,20 @@ import {
   exchangeGitLabCode,
   integrationOAuthCookieNames
 } from '@/lib/gitlab-oauth';
-import { gitlabOAuthRedirectUri } from '@/lib/runtime-config';
+import { getPublicAppOrigin, getRequestOrigin, gitlabOAuthRedirectUri } from '@/lib/runtime-config';
 import { persistGitLabConnection } from '@/lib/server/persist-gitlab-connection';
 import { resolveRequestActorContext } from '@/lib/server/request-context';
 
 function redirectWithNotice(request: NextRequest, next: string, notice: string, detail?: string) {
-  const redirectUrl = new URL(next, request.url);
+  const redirectUrl = new URL(next, getPublicAppOrigin(getRequestOrigin(request)));
   redirectUrl.searchParams.set('integration_notice', notice);
   if (detail) redirectUrl.searchParams.set('integration_detail', detail);
   return NextResponse.redirect(redirectUrl);
 }
 
 export async function GET(request: NextRequest) {
+  const origin = getPublicAppOrigin(getRequestOrigin(request));
+
   const cookies = integrationOAuthCookieNames();
   const savedState = request.cookies.get(cookies.state)?.value;
   const next = request.cookies.get(cookies.next)?.value ?? '/app?tab=settings';
@@ -44,7 +46,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const redirectUri = gitlabOAuthRedirectUri(request.nextUrl.origin);
+    const redirectUri = gitlabOAuthRedirectUri(origin);
     const baseUrl = process.env.GITLAB_BASE_URL ?? 'https://gitlab.com';
     const tokenPayload = await exchangeGitLabCode({
       code,
@@ -53,7 +55,7 @@ export async function GET(request: NextRequest) {
       redirectUri,
       baseUrl
     });
-    const context = await resolveRequestActorContext();
+    const context = await resolveRequestActorContext(request);
     const persisted = await persistGitLabConnection({
       context,
       accessToken: tokenPayload.access_token,
@@ -62,20 +64,13 @@ export async function GET(request: NextRequest) {
     });
 
     if (!persisted.ok) {
-      return clearCookies(
-        redirectWithNotice(request, next, 'persist_failed', persisted.error)
-      );
+      return clearCookies(redirectWithNotice(request, next, persisted.error));
     }
 
     return clearCookies(redirectWithNotice(request, next, 'gitlab_connected'));
   } catch (error) {
     return clearCookies(
-      redirectWithNotice(
-        request,
-        next,
-        'oauth_failed',
-        error instanceof Error ? error.message : undefined
-      )
+      redirectWithNotice(request, next, 'oauth_failed')
     );
   }
 }

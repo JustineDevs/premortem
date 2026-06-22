@@ -1,4 +1,4 @@
-import { fetchRepositoryFileRaw } from '@premortem/integrations';
+import { gitLabAuthHeaders } from '@premortem/integrations';
 import {
   isLikelyRepositoryFilePath,
   isSourceFileEvidence,
@@ -8,6 +8,8 @@ import {
 } from '@premortem/domain';
 
 const MAX_SNIPPET_FETCHES = 8;
+const MAX_CONCURRENT_SNIPPET_FETCHES = 4;
+const SNIPPET_FETCH_TIMEOUT_MS = 4_000;
 const CONTEXT_LINES = 4;
 const MAX_SNIPPET_LINES = 18;
 
@@ -40,17 +42,47 @@ async function fetchSnippetForRef(input: {
   if (!parsed || !isLikelyRepositoryFilePath(parsed.filePath)) return null;
 
   try {
-    const raw = await fetchRepositoryFileRaw({
-      baseUrl: input.baseUrl,
-      token: input.token,
-      externalProjectId: input.externalProjectId,
-      ref: input.branch,
-      filePath: parsed.filePath
-    });
-    return sliceFileWindow(raw, parsed.startLine, parsed.endLine);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SNIPPET_FETCH_TIMEOUT_MS);
+    try {
+      const response = await fetch(
+        `${input.baseUrl.replace(/\/$/, '')}/api/v4/projects/${encodeURIComponent(input.externalProjectId)}/repository/files/${encodeURIComponent(parsed.filePath)}/raw?ref=${encodeURIComponent(input.branch)}`,
+        {
+          headers: gitLabAuthHeaders(input.token),
+          signal: controller.signal
+        }
+      );
+      if (!response.ok) return null;
+      const raw = await response.text();
+      return sliceFileWindow(raw, parsed.startLine, parsed.endLine);
+    } finally {
+      clearTimeout(timer);
+    }
   } catch {
     return null;
   }
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return [];
+
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex]!, currentIndex);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
 }
 
 export async function enrichEvidenceWithSourceSnippets(input: {
@@ -63,26 +95,43 @@ export async function enrichEvidenceWithSourceSnippets(input: {
   const normalized = normalizeEvidenceRefs(input.evidence);
   if (normalized.length === 0) return normalized;
 
-  let fetchBudget = MAX_SNIPPET_FETCHES;
-  const enriched: EvidenceRefLike[] = [];
+  const fetchBudget = Math.min(MAX_SNIPPET_FETCHES, normalized.length);
+  const cache = new Map<string, Promise<string | null>>();
+  const fetchableItems = normalized
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !item.codeSnippet && isSourceFileEvidence(item));
 
-  for (const item of normalized) {
-    if (item.codeSnippet || !isSourceFileEvidence(item) || fetchBudget <= 0) {
-      enriched.push(item);
-      continue;
+  const budgetedItems = fetchableItems.slice(0, fetchBudget);
+  const resolvedSnippets = new Map<string, string | null>();
+
+  await mapWithConcurrency(
+    budgetedItems,
+    MAX_CONCURRENT_SNIPPET_FETCHES,
+    async ({ item }) => {
+      const cacheKey = item.ref;
+      if (!cache.has(cacheKey)) {
+        cache.set(
+          cacheKey,
+          fetchSnippetForRef({
+            baseUrl: input.baseUrl,
+            token: input.token,
+            externalProjectId: input.externalProjectId,
+            branch: input.branch,
+            ref: item.ref
+          })
+        );
+      }
+
+      resolvedSnippets.set(cacheKey, await cache.get(cacheKey)!);
+    }
+  );
+
+  return normalized.map((item) => {
+    if (item.codeSnippet || !isSourceFileEvidence(item)) {
+      return item;
     }
 
-    const snippet = await fetchSnippetForRef({
-      baseUrl: input.baseUrl,
-      token: input.token,
-      externalProjectId: input.externalProjectId,
-      branch: input.branch,
-      ref: item.ref
-    });
-
-    fetchBudget -= 1;
-    enriched.push(snippet ? { ...item, codeSnippet: snippet } : item);
-  }
-
-  return enriched;
+    const snippet = resolvedSnippets.get(item.ref);
+    return snippet ? { ...item, codeSnippet: snippet } : item;
+  });
 }

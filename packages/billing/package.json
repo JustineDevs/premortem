@@ -8,9 +8,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
-  "dependencies": {
-    "@premortem/db": "workspace:*"
-  },
+  "dependencies": {},
   "devDependencies": {
     "typescript": "^5.6.3"
   }

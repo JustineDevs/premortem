@@ -69,21 +69,28 @@ function ConnectScene() {
   return (
     <div className="landing-os-demo__panel landing-os-demo__panel--connect">
       <header className="landing-os-demo__panel-head">
-        <h4>Projects Inventory</h4>
-        <p>Connect GitLab and enable repositories for audit.</p>
+        <h4>Trigger surfaces</h4>
+        <p>MR comment, Duo sidebar, pipeline/job, or the Run audit button all feed the same project + branch input.</p>
       </header>
       <div className="landing-os-demo__connect-card landing-os-demo__connect-card--hot">
-        <span className="landing-os-demo__badge landing-os-demo__badge--gitlab">GitLab</span>
+        <span className="landing-os-demo__badge landing-os-demo__badge--gitlab">Input</span>
         <div>
-          <strong>premortem</strong>
-          <p>Repository access · main branch</p>
+          <strong>premortem / main</strong>
+          <p>Or project + MR IID when the trigger comes from review context</p>
         </div>
         <button type="button" className="landing-os-demo__btn landing-os-demo__btn--primary" tabIndex={-1}>
-          Connect repository
+          Run audit
         </button>
       </div>
+      <div className="landing-os-demo__trigger-grid">
+        {['MR comment', 'Duo sidebar', 'pipeline/job', 'button'].map((label) => (
+          <span key={label} className="landing-os-demo__trigger-pill">
+            {label}
+          </span>
+        ))}
+      </div>
       <div className="landing-os-demo__toast landing-os-demo__toast--connect">
-        OAuth complete · repo tree ingested
+        Orbit loaded · owners, services, pipelines, related MRs/issues
       </div>
     </div>
   );
@@ -180,9 +187,20 @@ function ReviewScene() {
             <div className="landing-os-demo__detail-field">
               Predicted failure under burst load before production rollout.
             </div>
-            <button type="button" className="landing-os-demo__btn landing-os-demo__btn--approve" tabIndex={-1}>
-              Approve &amp; create GitLab issue
-            </button>
+            <div className="landing-os-demo__action-row">
+              <button type="button" className="landing-os-demo__btn landing-os-demo__btn--ghost" tabIndex={-1}>
+                View Evidence
+              </button>
+              <button type="button" className="landing-os-demo__btn landing-os-demo__btn--ghost" tabIndex={-1}>
+                Refine
+              </button>
+              <button type="button" className="landing-os-demo__btn landing-os-demo__btn--ghost" tabIndex={-1}>
+                Open in GitLab
+              </button>
+              <button type="button" className="landing-os-demo__btn landing-os-demo__btn--approve" tabIndex={-1}>
+                Create issue
+              </button>
+            </div>
           </div>
         </div>
       </div>

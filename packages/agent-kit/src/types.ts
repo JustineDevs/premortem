@@ -1,5 +1,7 @@
 export type AgentRunMode = 'always' | 'conditional';
 
+export type AgentAnalysisRole = 'auditor' | 'critic' | 'synthesizer';
+
 export type FindingSeverity = 'low' | 'medium' | 'high' | 'critical';
 
 export interface EvidenceRef {
@@ -44,4 +46,40 @@ export interface IssueCandidate {
   affected_assets: string[];
   source_agents: string[];
   source_findings: string[];
+}
+
+export function resolveAgentAnalysisRole(agentName: string): AgentAnalysisRole {
+  if (agentName === 'finding_synthesizer_agent') {
+    return 'synthesizer';
+  }
+
+  if (agentName === 'issue_validator_agent') {
+    return 'critic';
+  }
+
+  return 'auditor';
+}
+
+export function isCanonicalFinding(
+  value: CanonicalFinding | IssueCandidate
+): value is CanonicalFinding {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'finding_id' in value &&
+    'agent' in value &&
+    'predicted_failure' in value
+  );
+}
+
+export function isIssueCandidate(
+  value: CanonicalFinding | IssueCandidate
+): value is IssueCandidate {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'source_findings' in value &&
+    'title' in value &&
+    'recommended_action_summary' in value
+  );
 }

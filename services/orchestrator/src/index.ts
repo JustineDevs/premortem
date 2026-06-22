@@ -1,3 +1,7 @@
+import { initPhoenixTracing } from '@premortem/observability/phoenix';
+
+void initPhoenixTracing('orchestrator');
+
 export * from './scheduler/run-audit';
 export * from './graph/resolve-graph-payload';
 export * from './graph/build-graph-snapshot';

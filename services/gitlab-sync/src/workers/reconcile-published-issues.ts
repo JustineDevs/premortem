@@ -47,6 +47,8 @@ type PublishedIssueWithProject = {
   project: { externalProjectId: string };
 };
 
+const RECONCILIATION_BATCH_SIZE = 5;
+
 async function reconcilePublishedIssueRecord(item: PublishedIssueWithProject) {
   if (!item.externalIssueIid) {
     return { skipped: true as const, reason: 'missing_external_iid' as const };
@@ -102,11 +104,13 @@ async function reconcilePublishedIssueRecord(item: PublishedIssueWithProject) {
       driftFields,
       localSnapshot: {
         title: item.publishedTitle,
+        publishedBodyMd: item.publishedBodyMd,
         labels: item.labels as unknown,
         syncStatus: item.syncStatus
       },
       remoteSnapshot: {
         title: remote.title,
+        description: remote.description,
         labels: remote.labels,
         state: remote.state
       }
@@ -125,28 +129,61 @@ async function reconcilePublishedIssueRecord(item: PublishedIssueWithProject) {
 }
 
 export async function reconcilePublishedIssues(input?: { organizationId?: string }) {
-  const publishedIssues = await prisma.publishedIssue.findMany({
-    where: input?.organizationId ? { organizationId: input.organizationId } : undefined,
-    include: { project: true },
-    take: 50,
-    orderBy: { updatedAt: 'desc' }
-  });
-
   let reconciledCount = 0;
   let driftedCount = 0;
   let failedCount = 0;
 
-  for (const item of publishedIssues) {
-    const result = await reconcilePublishedIssueRecord(item);
-    if ('failed' in result && result.failed) {
-      failedCount += 1;
-      continue;
+  let cursor: { id: string } | undefined;
+  while (true) {
+    const publishedIssues = await prisma.publishedIssue.findMany({
+      where: input?.organizationId ? { organizationId: input.organizationId } : undefined,
+      select: {
+        id: true,
+        organizationId: true,
+        projectId: true,
+        externalIssueIid: true,
+        publishedTitle: true,
+        publishedBodyMd: true,
+        labels: true,
+        syncStatus: true,
+        url: true,
+        project: {
+          select: {
+            externalProjectId: true
+          }
+        }
+      },
+      take: 50,
+      ...(cursor ? { cursor, skip: 1 } : {}),
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }]
+    });
+
+    if (publishedIssues.length === 0) {
+      break;
     }
-    if ('skipped' in result && result.skipped) continue;
-    if ('reconciled' in result && result.reconciled) {
-      reconciledCount += 1;
-      if (result.drifted) driftedCount += 1;
+
+    for (let index = 0; index < publishedIssues.length; index += RECONCILIATION_BATCH_SIZE) {
+      const batch = publishedIssues.slice(index, index + RECONCILIATION_BATCH_SIZE);
+      const results = await Promise.all(batch.map((item) => reconcilePublishedIssueRecord(item)));
+
+      for (const result of results) {
+        if ('failed' in result && result.failed) {
+          failedCount += 1;
+          continue;
+        }
+        if ('skipped' in result && result.skipped) continue;
+        if ('reconciled' in result && result.reconciled) {
+          reconciledCount += 1;
+          if (result.drifted) driftedCount += 1;
+        }
+      }
     }
+
+    if (publishedIssues.length < 50) {
+      break;
+    }
+
+    cursor = { id: publishedIssues.at(-1)!.id };
   }
 
   return { reconciledCount, driftedCount, failedCount };
@@ -161,7 +198,22 @@ export async function reconcilePublishedIssuesByGitLabRef(input: {
       externalIssueIid: input.externalIssueIid,
       project: { externalProjectId: input.externalProjectId }
     },
-    include: { project: true },
+    select: {
+      id: true,
+      organizationId: true,
+      projectId: true,
+      externalIssueIid: true,
+      publishedTitle: true,
+      publishedBodyMd: true,
+      labels: true,
+      syncStatus: true,
+      url: true,
+      project: {
+        select: {
+          externalProjectId: true
+        }
+      }
+    },
     take: 10
   });
 

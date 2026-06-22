@@ -12,24 +12,24 @@ export interface VendorRoutingTier {
 export const DEFAULT_VENDOR_ROUTING: VendorRoutingTier[] = [
   {
     id: 'boost',
-    label: 'Boost Tier',
-    description: 'Low-latency custom endpoint for fast specialist passes.',
+    label: 'Named Custom Provider',
+    description: 'Route to a specific saved local or proxy provider by name.',
     kind: 'custom',
     providerRef: '',
     enabled: false
   },
   {
     id: 'primary',
-    label: 'Primary Tier',
-    description: 'Managed Gemini models for synthesis and deep reasoning.',
+    label: 'Managed Primary',
+    description: 'Use the workspace managed model first for audited specialist calls.',
     kind: 'managed',
     providerRef: 'gemini',
     enabled: true
   },
   {
     id: 'fallback',
-    label: 'Auto-Discover',
-    description: 'Probe local Ollama, LM Studio, and compatible OpenAI proxies.',
+    label: 'Local Discovery',
+    description: 'Try active local or hybrid providers registered in workspace settings.',
     kind: 'auto_discover',
     providerRef: 'local',
     enabled: true

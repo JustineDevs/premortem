@@ -3,7 +3,7 @@ import { workspaceSettingsGuideDoc } from '@/content/marketing/docs-additional-c
 
 import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
 export const metadata = buildSeoMetadata({
-  title: 'Workspace settings | Premortem Docs',
+  title: 'Workspace settings',
   description: workspaceSettingsGuideDoc.lead,
   canonical: '/docs/guides/workspace-settings',
   keywords: canonicalDocsKeywords

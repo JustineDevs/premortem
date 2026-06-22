@@ -58,6 +58,7 @@ export interface WorkflowAuditSnapshot {
     severity: string;
     findingCount: number;
   }>;
+  summary?: unknown;
   graphSnapshot?: { nodeCount: number; edgeCount: number } | null;
   counts?: { findings: number; agentRuns: number; clusters: number; events: number };
   runStatus: string;

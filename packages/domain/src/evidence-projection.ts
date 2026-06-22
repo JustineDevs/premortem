@@ -21,7 +21,14 @@ export function normalizeEvidenceRefs(raw: unknown): EvidenceRefLike[] {
     if (!entry || typeof entry !== 'object') continue;
     const row = entry as Record<string, unknown>;
     const kind = typeof row.kind === 'string' ? row.kind.trim() : 'evidence';
-    const ref = typeof row.ref === 'string' ? row.ref.trim() : '';
+    const ref =
+      typeof row.ref === 'string' && row.ref.trim().length > 0
+        ? row.ref.trim()
+        : typeof row.path === 'string' && row.path.trim().length > 0
+          ? row.path.trim()
+          : typeof row.filePath === 'string' && row.filePath.trim().length > 0
+            ? row.filePath.trim()
+            : '';
     const reason = typeof row.reason === 'string' ? row.reason.trim() : '';
     const codeSnippet = typeof row.codeSnippet === 'string' ? row.codeSnippet.trim() : undefined;
     if (!ref && !reason && !codeSnippet) continue;

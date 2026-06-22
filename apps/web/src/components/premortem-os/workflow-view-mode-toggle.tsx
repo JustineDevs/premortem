@@ -45,9 +45,12 @@ export function WorkflowViewModeToggle({ mode, onChange }: WorkflowViewModeToggl
 }
 
 const PANEL_BASE =
-  'h-full shrink-0 overflow-hidden transition-[opacity,transform,width] duration-200 ease-out';
+  'flex h-full min-w-0 shrink-0 overflow-hidden transition-[opacity,transform,width] duration-200 ease-out';
 
-export function panelClassForMode(side: 'left' | 'right', mode: WorkflowCanvasViewMode): string {
+export function panelClassForMode(
+  side: 'left' | 'right',
+  mode: WorkflowCanvasViewMode
+): string {
   if (mode === 'split') {
     return `${PANEL_BASE} w-1/2 opacity-100 translate-x-0`;
   }

@@ -2,16 +2,21 @@
   "name": "@premortem/db",
   "private": true,
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/db/src/index.js",
+  "types": "./dist/db/src/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "types": "./dist/db/src/index.d.ts",
+      "default": "./dist/db/src/index.js"
+    },
+    "./notifications": {
+      "types": "./dist/db/src/notifications.d.ts",
+      "default": "./dist/db/src/notifications.js"
     }
   },
   "scripts": {
     "build": "prisma generate && tsc -p tsconfig.json",
+    "postbuild": "node scripts/fix-dist-imports.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prisma": "prisma",
     "generate": "prisma generate"
@@ -19,6 +24,9 @@
   "dependencies": {
     "@premortem/domain": "workspace:*",
     "@premortem/integrations": "workspace:*",
+    "@premortem/llm": "workspace:*",
+    "@premortem/notifications": "workspace:*",
+    "@premortem/observability": "workspace:*",
     "@prisma/client": "^5.20.0"
   },
   "devDependencies": {

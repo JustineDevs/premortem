@@ -1,5 +1,6 @@
 import { allowsLocalIngestBypass, allowsMockExecutor, isProductionMode } from '@premortem/domain';
-import { gitLabAuthHeaders } from '@premortem/integrations';
+import { isLlmProviderTargetUsable, resolveLlmProviderTargets } from '@premortem/llm';
+import { gitLabAuthHeaders, getNangoToken } from '@premortem/integrations';
 
 import { prisma } from './client';
 import { fetchWithTimeout } from './fetch-with-timeout';
@@ -24,62 +25,42 @@ export class AuditReadinessError extends Error {
   }
 }
 
-async function verifyAzureDeploymentReachable() {
-  const endpoint = process.env.AZURE_OPENAI_ENDPOINT?.trim();
-  const apiKey = process.env.AZURE_OPENAI_API_KEY?.trim();
-  const deployment = process.env.AZURE_OPENAI_DEPLOYMENT?.trim();
-  if (!endpoint || !apiKey || !deployment) return;
-
-  const url = `${endpoint.replace(/\/$/, '')}/openai/deployments/${deployment}/chat/completions?api-version=2025-01-01-preview`;
-  const response = await fetchWithTimeout(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'api-key': apiKey
-    },
-    body: JSON.stringify({
-      messages: [{ role: 'user', content: 'ping' }],
-      max_tokens: 1
-    })
-  });
-
-  if (!response.ok) {
-    throw new AuditReadinessError(
-      `Azure OpenAI deployment "${deployment}" is unreachable (${response.status}). Verify AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and AZURE_OPENAI_DEPLOYMENT.`,
-      'azure_deployment_unreachable',
-      'AZURE_OPENAI_DEPLOYMENT',
-      'azure-openai'
-    );
+async function resolveGitLabTokenFromConnection(connection: {
+  encryptedAccessToken: string | null;
+  nangoConnectionId: string | null;
+  nangoProviderKey: string | null;
+}) {
+  if (connection.nangoConnectionId && connection.nangoProviderKey) {
+    try {
+      return await getNangoToken(connection.nangoConnectionId, connection.nangoProviderKey);
+    } catch {
+      return null;
+    }
   }
+
+  if (!connection.encryptedAccessToken) {
+    return null;
+  }
+
+  return decodeStoredToken(connection.encryptedAccessToken);
 }
 
 async function verifyLlmConfiguration(organizationId: string) {
   if (allowsMockExecutor()) return;
+  const llmSettings = await getOrganizationLlmSettings(organizationId);
+  const targets = resolveLlmProviderTargets({
+    model: llmSettings.selectedGeminiModel,
+    vendorRouting: llmSettings.vendorRouting,
+    customProviders: llmSettings.customProviders
+  });
 
-  const hasGemini = Boolean(process.env.GEMINI_API_KEY?.trim());
-  const hasAzure = Boolean(
-    process.env.AZURE_OPENAI_ENDPOINT?.trim() &&
-      process.env.AZURE_OPENAI_API_KEY?.trim() &&
-      process.env.AZURE_OPENAI_DEPLOYMENT?.trim()
-  );
-
-  if (!hasGemini && !hasAzure) {
+  if (!targets.some((target) => isLlmProviderTargetUsable(target))) {
     throw new AuditReadinessError(
-      'Configure GEMINI_API_KEY or Azure OpenAI (AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT) before running audits.',
+      'Configure at least one enabled managed or local model route before running audits.',
       'llm_not_configured',
       'llm',
       'llm'
     );
-  }
-
-  await getOrganizationLlmSettings(organizationId);
-
-  if (hasGemini) {
-    return;
-  }
-
-  if (hasAzure) {
-    await verifyAzureDeploymentReachable();
   }
 }
 
@@ -164,10 +145,6 @@ export async function verifyGitLabIssueWriteAccess(input: {
   }
 
   return project;
-}
-
-function decodeStoredProviderToken(value: string) {
-  return decodeStoredToken(value);
 }
 
 async function readGitLabPatScopes(baseUrl: string, token: string): Promise<string[] | null> {
@@ -261,14 +238,18 @@ export async function canCreateGitLabIssues(input: {
 export async function findPublishCapableGitLabTokenFromConnections(externalProjectId: string) {
   const baseUrl = (process.env.GITLAB_BASE_URL ?? 'https://gitlab.com').replace(/\/$/, '');
   const connections = await prisma.providerConnection.findMany({
-    where: { provider: 'gitlab', status: 'active', encryptedAccessToken: { not: null } },
+    where: {
+      provider: 'gitlab',
+      status: 'active',
+      OR: [{ encryptedAccessToken: { not: null } }, { nangoConnectionId: { not: null } }]
+    },
     orderBy: { updatedAt: 'desc' },
     take: 12
   });
 
   for (const connection of connections) {
-    if (!connection.encryptedAccessToken) continue;
-    const token = decodeStoredProviderToken(connection.encryptedAccessToken);
+    const token = await resolveGitLabTokenFromConnection(connection);
+    if (!token) continue;
     if (!(await canCreateGitLabIssues({ baseUrl, token, externalProjectId }))) continue;
     return { token, connectionId: connection.id, externalAccountName: connection.externalAccountName };
   }

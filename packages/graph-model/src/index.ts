@@ -7,6 +7,7 @@ export type GraphNodeKind =
   | 'ci_job'
   | 'issue'
   | 'file'
+  | 'symbol'
   | 'owner'
   | 'artifact';
 

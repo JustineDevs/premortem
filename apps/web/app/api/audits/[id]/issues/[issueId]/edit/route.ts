@@ -1,26 +1,22 @@
 import { NextResponse } from 'next/server';
 
 import { editRuntimeIssue } from '@/lib/premortem-api/client';
+import { bffErrorResponse } from '@/lib/server/bff-errors';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
+import { readJsonRecord, readOptionalString } from '@/lib/server/request-body';
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string; issueId: string }> }
 ) {
   const { id, issueId } = await params;
-  const body = (await request.json()) as {
-    title?: string;
-    whyItMatters?: string;
-    recommendedActionSummary?: string;
-    description?: string;
-    notes?: string;
-  };
+  const body = (await readJsonRecord(request)) ?? {};
 
   const fields = {
-    title: body.title,
-    whyItMatters: body.whyItMatters,
-    recommendedActionSummary: body.recommendedActionSummary ?? body.description,
-    notes: body.notes
+    title: readOptionalString(body, 'title'),
+    whyItMatters: readOptionalString(body, 'whyItMatters'),
+    recommendedActionSummary: readOptionalString(body, 'recommendedActionSummary') ?? readOptionalString(body, 'description'),
+    notes: readOptionalString(body, 'notes')
   };
 
   const hasFields = Object.values(fields).some((value) => typeof value === 'string' && value.length > 0);
@@ -37,9 +33,6 @@ export async function POST(
       issueId
     });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Edit failed' },
-      { status: 502 }
-    );
+    return bffErrorResponse(error, 'Edit failed');
   }
 }

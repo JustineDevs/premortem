@@ -1,25 +1,14 @@
-import { NextResponse } from 'next/server';
-
-import { getApiBaseUrl } from '@/lib/runtime-config';
-import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
+import { bffErrorResponse } from '@/lib/server/bff-errors';
+import { proxyPremortemApi } from '@/lib/server/proxy-api';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const context = await resolveRequestActorContext();
-    const response = await fetch(`${getApiBaseUrl()}/api/audits/${id}/pause`, {
-      method: 'POST',
-      headers: {
-        accept: 'application/json',
-        ...actorHeaders(context)
-      },
-      cache: 'no-store'
-    });
-    return NextResponse.json(await response.json(), { status: response.status });
+    return proxyPremortemApi(`/api/audits/${id}/pause`, { method: 'POST' }, request);
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed' }, { status: 502 });
+    return bffErrorResponse(error, 'Failed to pause audit');
   }
 }

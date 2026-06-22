@@ -44,6 +44,7 @@ export function ProjectsView({
   onTriggerScan,
   onRegisterProject
 }: ProjectsViewProps) {
+  const safeProjects = Array.isArray(projects) ? projects : [];
   const [filterType, setFilterType] = useState<'all' | ProviderType>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAdvancedForm, setShowAdvancedForm] = useState(false);
@@ -65,18 +66,9 @@ export function ProjectsView({
   const [newProjBranch, setNewProjBranch] = useState('main');
   const [newProjProvider, setNewProjProvider] = useState<ProviderType>('gitlab');
   const [formErrors, setFormErrors] = useState<{ name?: string; url?: string }>({});
-  const [newProjSnippet, setNewProjSnippet] = useState(`// Configure your custom vulnerable code here
-import express from 'express';
-const app = express();
+  const [newProjSnippet, setNewProjSnippet] = useState('');
 
-app.get('/unsecured-route', (req, res) => {
-  const { paramToken } = req.query;
-  // Threat: Raw concatenation risks SQL injection
-  const q = "SELECT * FROM users WHERE token = '" + paramToken + "'";
-  res.json({ debugKey: "HMAC_SECRET_FALLBACK_1234" });
-});`);
-
-  const filteredProjects = projects.filter(p => {
+  const filteredProjects = safeProjects.filter((p) => {
     const matchesProvider = filterType === 'all' || p.provider === filterType;
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           p.repoUrl.toLowerCase().includes(searchQuery.toLowerCase());
@@ -107,7 +99,7 @@ app.get('/unsecured-route', (req, res) => {
       repoUrl: newProjUrl.trim(),
       branch: newProjBranch,
       provider: newProjProvider,
-      scanCodeSnippet: newProjSnippet
+      scanCodeSnippet: newProjSnippet.trim() ? newProjSnippet.trim() : undefined
     });
 
     setNewProjName('');
@@ -146,7 +138,7 @@ app.get('/unsecured-route', (req, res) => {
       <RepositoryDiscoveryPanel
         gitlabIntegration={gitlabIntegration}
         gitlabAccessPhase={gitlabAccessPhase}
-        autoDiscoverOnMount={autoDiscoverCatalog || gitlabAccessPhase === 'repository_access'}
+        autoDiscoverOnMount={autoDiscoverCatalog}
         skipDiscoverSessionCache={autoDiscoverCatalog}
         onProjectsChanged={onProjectsChanged}
       />
@@ -155,14 +147,14 @@ app.get('/unsecured-route', (req, res) => {
       {showAdvancedForm && (
         <div className="bg-[#FAF8F5] border border-[#EAE6DF] rounded p-6 shadow-sm animate-fadeIn">
           <h3 className="text-sm font-bold uppercase tracking-wide text-[#1E2522] font-display mb-4 border-b border-[#EAE6DF] pb-2">
-            Register New Vulnerable Repository Asset
+            Register repository asset
           </h3>
           
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               <div className="space-y-1.5">
                 <label className="block font-mono font-bold uppercase tracking-wider text-[#717A75]">
-                  Project Indicator Name
+                  Project name
                 </label>
                 <input
                   type="text"
@@ -183,7 +175,7 @@ app.get('/unsecured-route', (req, res) => {
 
               <div className="space-y-1.5">
                 <label className="block font-mono font-bold uppercase tracking-wider text-[#5C6560]">
-                  VCS Repository URL
+                  Repository URL
                 </label>
                 <input
                   type="url"
@@ -204,7 +196,7 @@ app.get('/unsecured-route', (req, res) => {
 
               <div className="space-y-1.5">
                 <label className="block font-mono font-bold uppercase tracking-wider text-[#717A75]">
-                  Target Track Branch
+                  Tracking branch
                 </label>
                 <input
                   type="text"
@@ -218,7 +210,7 @@ app.get('/unsecured-route', (req, res) => {
 
               <div className="space-y-1.5">
                 <label className="block font-mono font-bold uppercase tracking-wider text-[#717A75]">
-                  Provider Host Platform
+                  Provider
                 </label>
                 <select
                   value={newProjProvider}
@@ -237,21 +229,21 @@ app.get('/unsecured-route', (req, res) => {
               </div>
             </div>
 
-            {/* Custom snippet segment to let them test scanner */}
+            {/* Optional snippet for users who want to attach a representative code sample */}
             <div className="space-y-2">
               <div className="flex justify-between items-center text-xs">
                 <label className="block font-mono font-bold uppercase tracking-wider text-[#717A75]">
-                  Repository Source Code Snippet (For Live Audit analysis)
+                  Source code snippet
                 </label>
                 <span className="text-[10px] text-[#868A81] font-mono">
-                  Optional snippet stored on the project; full orchestrator audits run when you launch a scan.
+                  Optional. Attach a representative snippet if you want the first audit to ground on source text.
                 </span>
               </div>
               <textarea
                 rows={7}
-                required
                 value={newProjSnippet}
                 onChange={(e) => setNewProjSnippet(e.target.value)}
+                placeholder="Paste an optional representative source snippet here, or leave this blank."
                 className="w-full p-3 font-mono text-[11px] bg-slate-900 text-slate-100 border border-slate-800 rounded focus:outline-none focus:border-emerald-500 leading-relaxed"
               />
             </div>
@@ -327,7 +319,7 @@ app.get('/unsecured-route', (req, res) => {
       </div>
 
       {/* Projects Inventory Table Grid */}
-      {projects.length === 0 ? (
+      {safeProjects.length === 0 ? (
         <OsEmptyState
           icon={FolderGit2}
           title="No projects registered yet"

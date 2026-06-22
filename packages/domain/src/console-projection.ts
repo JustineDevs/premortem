@@ -6,6 +6,7 @@ import {
   normalizeEvidenceRefs,
   primaryEvidenceLocation
 } from './evidence-projection';
+import { renderPublishedIssueBodyMarkdown } from './issue-body';
 import { issueCandidateToConsoleStatus } from './review';
 import { runStatusToConsoleRunStatus, scoreFromReviewQueueCounts, scoreFromSeverityCounts } from './status';
 import { countSeverities, severityToConsole } from './severity';
@@ -15,19 +16,26 @@ export type { EvidenceRefLike };
 export interface RuntimeIssueCandidateRow {
   id: string;
   title: string;
+  createdAt?: string;
   validationStatus: string;
   reviewerStatus: string;
   publishedUrl?: string | null;
   category?: string;
+  confidence?: number;
+  priority?: string;
   predictedFailureSummary?: string;
   whyItMatters?: string;
+  triggerConditions?: string[];
   recommendedActionSummary?: string;
   implementationSteps?: string[];
   doneCriteria?: string[];
   affectedAssets?: string[];
+  sourceAgents?: string[];
   sourceFindings?: string[];
   clusterId?: string;
   evidence?: EvidenceRefLike[];
+  evidenceRefs?: EvidenceRefLike[];
+  publishedIssueBodyMarkdown?: string | null;
 }
 
 export interface RuntimeFindingRow {
@@ -38,6 +46,7 @@ export interface RuntimeFindingRow {
   severity: string;
   predictedFailureSummary: string;
   agentRunId: string;
+  confidence?: number;
   whyItMatters?: string | null;
   failureMode?: string | null;
   triggerConditions?: string[];
@@ -82,10 +91,12 @@ export interface ConsoleFindingProjection {
   line: number;
   description: string;
   evidence: string;
+  evidenceRefs?: EvidenceRefLike[];
   trace: Array<{ step: number; description: string; location: string; codeSnippet?: string }>;
   recommendation: string;
   aiReasoning: string;
   gitlabIssueId?: string;
+  publishedIssueBodyMarkdown?: string;
   whyItMatters?: string;
   suggestedPatchCode?: string;
   expectedBehavior?: string;
@@ -114,7 +125,7 @@ function relatedFindingsForIssue(snapshot: RuntimeAuditSnapshotLike, issue: Runt
 }
 
 function collectIssueEvidence(snapshot: RuntimeAuditSnapshotLike, issue: RuntimeIssueCandidateRow) {
-  const issueEvidence = normalizeEvidenceRefs(issue.evidence);
+  const issueEvidence = normalizeEvidenceRefs(issue.evidenceRefs ?? issue.evidence);
   if (issueEvidence.length >= 2) return issueEvidence;
 
   const related = relatedFindingsForIssue(snapshot, issue);
@@ -149,11 +160,49 @@ export function projectIssueCandidateToConsoleFinding(
 
   const evidenceItems = collectIssueEvidence(snapshot, issue);
   const location = primaryEvidenceLocation(evidenceItems);
+  const recommendedControls = relatedFindings.flatMap((finding) => finding.recommendedControls ?? []);
   const severity = severityToConsole(
     cluster?.severity ?? primaryFinding?.severity ?? relatedFindings[0]?.severity ?? 'high'
   );
+  const publishedIssueBodyMarkdown =
+    issue.publishedIssueBodyMarkdown?.trim() ||
+      renderPublishedIssueBodyMarkdown(
+      {
+        title: issue.title,
+        category: primaryFinding?.category ?? issue.category ?? 'issue_candidate',
+        severity: String(primaryFinding?.severity ?? relatedFindings[0]?.severity ?? 'high'),
+        confidence: Number(issue.confidence ?? primaryFinding?.confidence ?? 0.5),
+        predictedFailureSummary:
+          issue.predictedFailureSummary?.trim() ||
+          primaryFinding?.predictedFailureSummary ||
+          issue.title,
+        whyItMatters:
+          issue.whyItMatters?.trim() ||
+          primaryFinding?.whyItMatters?.trim() ||
+          primaryFinding?.predictedFailureSummary ||
+          'Structured issue candidate synthesized from specialist swarm findings.',
+        triggerConditions: issue.triggerConditions ?? [],
+        evidence: evidenceItems,
+        recommendedActionSummary:
+          issue.recommendedActionSummary?.trim() ||
+          formatRecommendedPatch({ recommendedControls }) ||
+          'Review and approve before publish.',
+        implementationSteps: issue.implementationSteps ?? [],
+        doneCriteria: issue.doneCriteria ?? [],
+        affectedAssets: issue.affectedAssets ?? [],
+        sourceAgents: issue.sourceAgents ?? [],
+        sourceFindings: issue.sourceFindings ?? []
+      },
+      {
+        issueCandidateId: issue.id,
+        auditRunId: snapshot.auditRunId,
+        branch: snapshot.branch,
+        createdAt: issue.createdAt,
+        reviewerStatus: issue.reviewerStatus,
+        priority: issue.priority
+      }
+    );
 
-  const recommendedControls = relatedFindings.flatMap((finding) => finding.recommendedControls ?? []);
   const suggestedPatchCode = formatRecommendedPatch({
     recommendedActionSummary: issue.recommendedActionSummary,
     implementationSteps: issue.implementationSteps,
@@ -173,6 +222,7 @@ export function projectIssueCandidateToConsoleFinding(
       primaryFinding?.predictedFailureSummary ||
       issue.title,
     evidence: formatSourceCodeEvidence(evidenceItems),
+    evidenceRefs: evidenceItems,
     trace: buildTraceFromEvidence(evidenceItems),
     recommendation:
       issue.recommendedActionSummary?.trim() ||
@@ -184,6 +234,7 @@ export function projectIssueCandidateToConsoleFinding(
       primaryFinding?.predictedFailureSummary ||
       'Structured issue candidate synthesized from specialist swarm findings.',
     gitlabIssueId: issue.publishedUrl ?? undefined,
+    publishedIssueBodyMarkdown,
     whyItMatters: issue.whyItMatters ?? primaryFinding?.whyItMatters ?? undefined,
     suggestedPatchCode,
     expectedBehavior: primaryFinding?.failureMode ?? undefined,

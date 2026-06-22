@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'yaml';
+import type { AgentAnalysisRole } from './types';
 
 export interface AgentRegistry {
   version: number;
@@ -11,6 +12,7 @@ export interface AgentRegistry {
     prompt: string;
     run_mode: 'always' | 'conditional';
     merge_owner_priority: number;
+    analysis_role?: AgentAnalysisRole;
   }>;
 }
 

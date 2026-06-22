@@ -16,6 +16,7 @@ Umbrella index for Premortem canonical behavior. Use these files as the operatio
 | [output-contracts.md](output-contracts.md) | Agent JSON grammar and validation |
 | [prompting.md](prompting.md) | Prompt skeletons and forbidden patterns |
 | [specialists-and-presets.md](specialists-and-presets.md) | Specialist YAML shape and prompt files |
+| [../../TA.md](../../TA.md) | Canonical actionable remediation and integration spec |
 | [research-behavior.md](research-behavior.md) | Evidence vs inference separation |
 | [ux-behavior.md](ux-behavior.md) | Truthful UI, stable actions |
 | [production-boundaries.md](production-boundaries.md) | Logging, versioning, publish guards |

@@ -1,4 +1,5 @@
 import { gitLabAuthHeaders } from './gitlab-auth';
+import { fetchWithTimeout } from './fetch-with-timeout';
 
 export interface GitLabDiscoveredProject {
   externalProjectId: string;
@@ -27,7 +28,7 @@ interface GitLabProjectApiRow {
 async function gitlabApiGet(baseUrl: string, token: string | undefined, apiPath: string) {
   const headers: Record<string, string> = token ? gitLabAuthHeaders(token) : {};
 
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/v4${apiPath}`, { headers });
+  const response = await fetchWithTimeout(`${baseUrl.replace(/\/$/, '')}/api/v4${apiPath}`, { headers });
   if (!response.ok) {
     const body = await response.text().catch(() => '');
     throw new Error(`GitLab API ${apiPath} failed: ${response.status} ${body.slice(0, 200)}`);

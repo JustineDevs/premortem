@@ -9,6 +9,9 @@ export interface AuditMissionEvalOutput {
   findingCount?: number;
   issueCandidateCount?: number;
   hasHumanReviewGate?: boolean;
+  findingConfidenceAvg?: number;
+  evidenceCountMin?: number;
+  refusalRate?: number;
 }
 
 export interface AuditMissionEvalReference {
@@ -32,6 +35,9 @@ export function scoreAuditMissionOutput(
   const findingCount = Number(output.findingCount ?? 0);
   const issueCandidateCount = Number(output.issueCandidateCount ?? 0);
   const hasHumanReviewGate = Boolean(output.hasHumanReviewGate);
+  const findingConfidenceAvg = Number(output.findingConfidenceAvg ?? Number.NaN);
+  const evidenceCountMin = Number(output.evidenceCountMin ?? Number.NaN);
+  const refusalRate = Number(output.refusalRate ?? Number.NaN);
 
   const checks = [
     {
@@ -50,6 +56,30 @@ export function scoreAuditMissionOutput(
       score: hasHumanReviewGate ? 1 : 0
     }
   ];
+
+  if (Number.isFinite(findingConfidenceAvg)) {
+    checks.push({
+      name: 'finding_confidence_avg',
+      pass: findingConfidenceAvg >= 0.7,
+      score: findingConfidenceAvg >= 0.7 ? 1 : findingConfidenceAvg >= 0.5 ? 0.5 : 0
+    });
+  }
+
+  if (Number.isFinite(evidenceCountMin)) {
+    checks.push({
+      name: 'evidence_count_min',
+      pass: evidenceCountMin >= 2,
+      score: evidenceCountMin >= 2 ? 1 : evidenceCountMin >= 1 ? 0.5 : 0
+    });
+  }
+
+  if (Number.isFinite(refusalRate)) {
+    checks.push({
+      name: 'refusal_rate',
+      pass: refusalRate <= 0.25,
+      score: refusalRate <= 0.25 ? 1 : refusalRate <= 0.5 ? 0.5 : 0
+    });
+  }
 
   const score =
     checks.reduce((total, check) => total + check.score, 0) / Math.max(checks.length, 1);

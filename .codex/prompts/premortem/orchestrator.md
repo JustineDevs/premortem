@@ -29,7 +29,8 @@ Coordinate a bounded repository audit for `{{project_name}}` at `{{project_path}
 4. Collect outputs and normalize them into the Premortem issue schema.
 5. Deduplicate findings and group related findings into clusters.
 6. Preserve evidence links and source references for every proposal.
-7. Produce a final proposal set suitable for human review or policy-based creation.
+7. When a source excerpt includes an exact code snippet, preserve that snippet in the evidence summary or proposal body instead of reducing it to a path reference.
+8. Produce a final proposal set suitable for human review or policy-based creation.
 
 ## Hard Rules
 
@@ -64,4 +65,3 @@ Each proposed issue must include:
 - Confidence
 - Impact
 - Likelihood
-

@@ -4,7 +4,6 @@
  *
  * Stripe webhook handler lives on the web BFF (not the API worker on :18787):
  *   POST {NGROK_URL}/api/stripe/webhook
- *   POST {NGROK_URL}/api/webhooks/stripe  (alias)
  *
  * Prerequisites:
  *   1. pnpm run dev  (web on PREMORTEM_WEB_PORT, default 13000)
@@ -62,7 +61,7 @@ console.log(
       service: 'premortem-ngrok-stripe',
       localWebPort: webPort,
       ngrokDomain: ngrokDomain ?? '(ephemeral: check ngrok TUI for URL)',
-      webhookPaths: ['/api/stripe/webhook', '/api/webhooks/stripe'],
+      webhookPaths: ['/api/stripe/webhook'],
       hint: 'Set NEXT_PUBLIC_APP_URL to your ngrok https URL for Checkout return URLs'
     },
     null,

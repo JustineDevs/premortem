@@ -1,35 +1,13 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { AUDIT_PARALLEL_LANES } from '@premortem/domain';
-import { GitBranch, Network, Sparkles } from 'lucide-react';
-import {
-  Background,
-  Controls,
-  MarkerType,
-  MiniMap,
-  ReactFlow,
-  ReactFlowProvider,
-  type Edge,
-  useEdgesState,
-  useNodesState,
-  useReactFlow
-} from '@xyflow/react';
+import React, { useCallback, useMemo, useState } from 'react';
+import { ArrowRight, ExternalLink, Network, Sparkles, X } from 'lucide-react';
 
-import {
-  REPOSITORY_GRAPH_FORCE_SIZE,
-  layoutRepositoryGraph
-} from './workflow-force-layout';
-import {
-  REPO_GRAPH_NODE_HEIGHT,
-  REPO_GRAPH_NODE_WIDTH,
-  repoGraphNodeTypes,
-  type RepoGraphFlowNode
-} from './workflow-repo-graph-node';
+import { buildGraphNodeInspectContext, formatGraphPropValue } from './build-graph-node-inspect';
+import { WorkflowD3Graph } from './workflow-d3-graph';
 
 import type { WorkflowAuditSnapshot } from './workflow-canvas.types';
 import type { WorkflowGraphEdge, WorkflowGraphNode } from './workflow-graph.types';
-import { WorkflowGraphInspectPanel } from './workflow-graph-inspect-panel';
 
 export type { WorkflowGraphEdge, WorkflowGraphNode } from './workflow-graph.types';
 
@@ -50,19 +28,6 @@ interface WorkflowGraphPanelProps {
   onNavigateTab?: (tab: string) => void;
 }
 
-const TYPE_COLORS = [
-  '#1A936F',
-  '#004E89',
-  '#7B2D8E',
-  '#C5283D',
-  '#E9724C',
-  '#3498db',
-  '#9b59b6',
-  '#27ae60',
-  '#f39c12',
-  '#FF6B35'
-];
-
 function colorForType(type: string, index: number, lane?: WorkflowGraphNode['lane']): string {
   if (type === 'repo') return '#1A936F';
   if (type === 'file' || type === 'pipeline') return '#004E89';
@@ -77,258 +42,8 @@ function colorForType(type: string, index: number, lane?: WorkflowGraphNode['lan
   if (type === 'chain') return '#6B4E9B';
   if (type === 'llm') return '#E9724C';
   if (type === 'agent') return '#7B2D8E';
-  if (type === 'tool') return '#004E89';
-  if (type === 'retriever') return '#3498db';
-  return TYPE_COLORS[index % TYPE_COLORS.length]!;
-}
-
-function toRepoFlowNodes(
-  graphNodes: WorkflowGraphNode[],
-  positions: Map<string, { x: number; y: number }>,
-  selectedGraphNodeId: string | null | undefined
-): RepoGraphFlowNode[] {
-  return graphNodes.map((node, index) => ({
-    id: node.id,
-    type: 'repoGraph',
-    position: positions.get(node.id) ?? { x: (index % 6) * 140, y: Math.floor(index / 6) * 96 },
-    data: {
-      label: node.label,
-      type: node.type,
-      color: colorForType(node.lane ?? node.type, index, node.lane),
-      lane: node.lane
-    },
-    selected: selectedGraphNodeId === node.id
-  }));
-}
-
-function toRepoFlowEdges(graphEdges: WorkflowGraphEdge[]): Edge[] {
-  const labelCounts = new Map<string, number>();
-  for (const edge of graphEdges) {
-    const key = edge.label?.trim() || '';
-    if (key) labelCounts.set(key, (labelCounts.get(key) ?? 0) + 1);
-  }
-
-  const hideRepeatedLabels = graphEdges.length > 8;
-
-  return graphEdges.map((edge) => {
-    const label = edge.label?.trim() || '';
-    const showLabel = Boolean(label) && !(hideRepeatedLabels && (labelCounts.get(label) ?? 0) > 3);
-
-    return {
-      id: edge.id,
-      source: edge.from,
-      target: edge.to,
-      label: showLabel ? label : undefined,
-      type: 'default',
-      style: { stroke: '#B8B0A6', strokeWidth: 1.1, opacity: 0.75 },
-      labelStyle: { fontSize: 7, fontFamily: 'ui-monospace, monospace', fill: '#8A958F' },
-      labelBgStyle: { fill: '#FDFDFD', fillOpacity: 0.92 },
-      labelBgPadding: [2, 4] as [number, number],
-      labelBgBorderRadius: 2,
-      markerEnd: { type: MarkerType.ArrowClosed, color: '#B8B0A6', width: 14, height: 14 }
-    };
-  });
-}
-
-function RepositoryGraphFlow({
-  graphNodes,
-  graphEdges,
-  selectedGraphNodeId,
-  emptyMessage,
-  semanticIncluded = false,
-  phoenixConfigured = false,
-  onSelectGraphNode
-}: {
-  graphNodes: WorkflowGraphNode[];
-  graphEdges: WorkflowGraphEdge[];
-  selectedGraphNodeId?: string | null;
-  emptyMessage?: string;
-  semanticIncluded?: boolean;
-  phoenixConfigured?: boolean;
-  onSelectGraphNode?: (id: string | null) => void;
-}) {
-  const { fitView } = useReactFlow();
-  const [nodes, setNodes, onNodesChange] = useNodesState<RepoGraphFlowNode>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  const layoutVersionRef = useRef(0);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  const entityTypes = useMemo(() => {
-    const map = new Map<string, { name: string; count: number; color: string }>();
-    graphNodes.forEach((node, index) => {
-      const color = colorForType(node.lane ?? node.type, index, node.lane);
-      const existing = map.get(node.type);
-      if (existing) {
-        existing.count += 1;
-      } else {
-        map.set(node.type, { name: node.type, count: 1, color });
-      }
-    });
-    return [...map.values()];
-  }, [graphNodes]);
-
-  const layoutSizeRef = useRef({ width: 0, height: 0 });
-
-  const runGraphLayout = useCallback(() => {
-    const version = ++layoutVersionRef.current;
-
-    if (graphNodes.length === 0) {
-      setNodes([]);
-      setEdges([]);
-      return;
-    }
-
-    const bounds = containerRef.current?.getBoundingClientRect();
-    const width = Math.max(Math.round(bounds?.width ?? REPOSITORY_GRAPH_FORCE_SIZE.width), 360);
-    const height = Math.max(Math.round(bounds?.height ?? REPOSITORY_GRAPH_FORCE_SIZE.height), 280);
-    layoutSizeRef.current = { width, height };
-
-    const inputNodes = graphNodes.map((node) => ({
-      id: node.id,
-      width: REPO_GRAPH_NODE_WIDTH,
-      height: REPO_GRAPH_NODE_HEIGHT,
-      kind: node.type
-    }));
-    const inputEdges = graphEdges.map((edge) => ({
-      id: edge.id,
-      source: edge.from,
-      target: edge.to
-    }));
-
-    const scheduleLayout = () => {
-      const positions = layoutRepositoryGraph(inputNodes, inputEdges, { width, height });
-      if (version !== layoutVersionRef.current) return;
-
-      setNodes(toRepoFlowNodes(graphNodes, positions, selectedGraphNodeId));
-      setEdges(toRepoFlowEdges(graphEdges));
-
-      requestAnimationFrame(() => {
-        void fitView({ padding: 0.18, duration: 320, minZoom: 0.35, maxZoom: 1.2 });
-      });
-    };
-
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-      window.requestIdleCallback(scheduleLayout, { timeout: 120 });
-    } else {
-      scheduleLayout();
-    }
-  }, [graphNodes, graphEdges, selectedGraphNodeId, setNodes, setEdges, fitView]);
-
-  useEffect(() => {
-    runGraphLayout();
-  }, [runGraphLayout]);
-
-  useEffect(() => {
-    const element = containerRef.current;
-    if (!element || typeof ResizeObserver === 'undefined') return;
-
-    const observer = new ResizeObserver(() => {
-      const { width, height } = element.getBoundingClientRect();
-      const prev = layoutSizeRef.current;
-      if (Math.abs(width - prev.width) < 12 && Math.abs(height - prev.height) < 12) {
-        return;
-      }
-      runGraphLayout();
-    });
-
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [runGraphLayout]);
-
-  useEffect(() => {
-    setNodes((current) =>
-      current.map((node) => ({
-        ...node,
-        selected: selectedGraphNodeId === node.id
-      }))
-    );
-  }, [selectedGraphNodeId, setNodes]);
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="relative min-h-[220px] flex-1" ref={containerRef}>
-        {graphNodes.length === 0 ? (
-          <div className="flex h-full items-center justify-center p-6 text-center font-mono text-[10px] text-[#717A75]">
-            {emptyMessage ??
-              (phoenixConfigured
-                ? 'Run an audit to populate the repository graph and Phoenix semantic trace spans.'
-                : 'Run an audit to populate the repository knowledge graph (repo, CI, issues).')}
-          </div>
-        ) : (
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={repoGraphNodeTypes}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onNodeClick={(_event, node) => onSelectGraphNode?.(node.id)}
-            onPaneClick={() => onSelectGraphNode?.(null)}
-            nodesConnectable={false}
-            nodesDraggable
-            elementsSelectable={Boolean(onSelectGraphNode)}
-            fitView
-            minZoom={0.15}
-            maxZoom={1.8}
-            proOptions={{ hideAttribution: true }}
-            className="premortem-repo-graph-flow"
-          >
-            <Background gap={18} size={1.2} color="#D8D2C8" />
-            <Controls showInteractive={false} className="!border-[#EAE6DF] !shadow-sm" />
-            <MiniMap
-              pannable
-              zoomable
-              className="!border-[#EAE6DF] !bg-white/95"
-              nodeColor={(node) => (node.data as RepoGraphFlowNode['data']).color}
-              maskColor="rgba(253, 253, 253, 0.7)"
-            />
-          </ReactFlow>
-        )}
-      </div>
-
-      {!selectedGraphNodeId ? (
-        <div className="shrink-0 space-y-2 border-t border-[#EAE6DF] px-1 py-3">
-          <p className="font-mono text-[9px] font-bold uppercase tracking-wider text-[#8A958F]">
-            Entity types
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {entityTypes.map((entry) => (
-              <span
-                key={entry.name}
-                className="inline-flex items-center gap-1.5 rounded border border-[#EAE6DF] bg-white px-2 py-1 font-mono text-[9px] text-[#4A5550]"
-              >
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color }} />
-                {entry.name} ({entry.count})
-              </span>
-            ))}
-          </div>
-          <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-2">
-            {AUDIT_PARALLEL_LANES.map((lane) => (
-              <div key={lane.id} className="rounded border border-[#EAE6DF] bg-[#FAF8F5] p-2">
-                <div className="flex items-center gap-1.5 font-mono text-[9px] font-bold uppercase text-[#3C4A42]">
-                  {lane.id === 'structure' ? <Network size={11} /> : <GitBranch size={11} />}
-                  {lane.label}
-                </div>
-                <p className="mt-1 text-[9px] leading-relaxed text-[#717A75]">{lane.description}</p>
-              </div>
-            ))}
-            <div className="rounded border border-[#EAE6DF] bg-[#FAF8F5] p-2 sm:col-span-2">
-              <div className="flex items-center gap-1.5 font-mono text-[9px] font-bold uppercase text-[#3C4A42]">
-                <Sparkles size={11} />
-                Phoenix semantic graph
-              </div>
-              <p className="mt-1 text-[9px] leading-relaxed text-[#717A75]">
-                {semanticIncluded
-                  ? 'OpenInference spans (chain, agent, LLM, tool) merged from Phoenix for this audit run.'
-                  : phoenixConfigured
-                    ? 'Phoenix is configured. Semantic spans appear after the next traced audit run.'
-                    : 'Set PHOENIX_API_KEY and PHOENIX_COLLECTOR_ENDPOINT to overlay Phoenix trace spans.'}
-              </p>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
+  const palette = ['#1A936F', '#004E89', '#7B2D8E', '#C5283D', '#E9724C', '#3498db', '#27ae60', '#f39c12'];
+  return palette[index % palette.length] ?? '#1A936F';
 }
 
 export function WorkflowGraphPanel({
@@ -347,60 +62,355 @@ export function WorkflowGraphPanel({
   onSelectGraphNode,
   onNavigateTab
 }: WorkflowGraphPanelProps) {
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+
+  const selectedNode = useMemo(
+    () => nodes.find((node) => node.id === selectedGraphNodeId) ?? null,
+    [nodes, selectedGraphNodeId]
+  );
+
+  const selectedNodeContext = useMemo(() => {
+    if (!selectedNode) return null;
+    return buildGraphNodeInspectContext(selectedNode, nodes, edges, auditSnapshot);
+  }, [auditSnapshot, edges, nodes, selectedNode]);
+
+  const selectedEdge = useMemo(
+    () => edges.find((edge) => edge.id === selectedEdgeId) ?? null,
+    [edges, selectedEdgeId]
+  );
+
+  const legendItems = useMemo(() => {
+    const counts = new Map<string, { count: number; color: string }>();
+    nodes.forEach((node, index) => {
+      const key = node.type || 'node';
+      const entry = counts.get(key);
+      if (entry) {
+        entry.count += 1;
+        return;
+      }
+
+      counts.set(key, { count: 1, color: colorForType(node.lane ?? node.type, index, node.lane) });
+    });
+
+    return Array.from(counts.entries())
+      .map(([name, value]) => ({ name, ...value }))
+      .slice(0, 8);
+  }, [nodes]);
+
+  const openNodeDetails = useCallback(
+    (nodeId: string) => {
+      setSelectedEdgeId(null);
+      onSelectGraphNode?.(nodeId);
+    },
+    [onSelectGraphNode]
+  );
+
+  const clearSelection = useCallback(() => {
+    setSelectedEdgeId(null);
+    onSelectGraphNode?.(null);
+  }, [onSelectGraphNode]);
+
+  const renderDetailPanel = () => {
+    if (selectedNode && selectedNodeContext) {
+      const propEntries = selectedNode.props ? Object.entries(selectedNode.props).slice(0, 8) : [];
+
+      return (
+        <div className="absolute right-3 top-3 bottom-3 z-30 flex w-[320px] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#07110E]/95 shadow-2xl shadow-black/35 backdrop-blur-xl">
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-white/10 bg-white/5 px-4 py-3">
+            <div className="min-w-0 space-y-1">
+              <span className="block font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-emerald-200/70">
+                Graph inspect
+              </span>
+              <h4 className="truncate font-semibold text-sm text-[#F4FAF5]">{selectedNode.label}</h4>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex rounded border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[8px] font-bold uppercase text-[#D5E1D8]">
+                  {selectedNode.type}
+                </span>
+                <span className="inline-flex items-center gap-1 font-mono text-[8px] uppercase tracking-wide text-[#9BABA0]">
+                  {selectedNode.source === 'phoenix' ? <Sparkles size={10} /> : <Network size={10} />}
+                  {selectedNode.source === 'phoenix'
+                    ? 'Phoenix trace span'
+                    : selectedNode.lane === 'semantic'
+                      ? 'Semantic trace'
+                      : selectedNode.lane === 'runtime'
+                        ? 'Runtime graph'
+                        : 'Graph'}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={clearSelection}
+              aria-label="Clear graph selection"
+              className="shrink-0 rounded-full border border-white/10 bg-white/5 p-2 text-[#B4C1B8] transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-3 text-xs [scrollbar-gutter:stable]">
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+              <span className="mb-1 block font-mono text-[8px] font-bold uppercase tracking-[0.24em] text-[#9BABA0]">
+                Node id
+              </span>
+              <code className="block break-all font-mono text-[10px] text-[#F4FAF5]">
+                {selectedNode.id}
+              </code>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div className="rounded-lg border border-white/10 bg-black/20 px-2 py-1.5">
+                  <div className="font-mono text-[8px] uppercase tracking-[0.2em] text-[#9BABA0]">
+                    Incoming
+                  </div>
+                  <div className="mt-0.5 font-mono text-[11px] font-bold text-[#F4FAF5]">
+                    {selectedNodeContext.incoming.length}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-black/20 px-2 py-1.5">
+                  <div className="font-mono text-[8px] uppercase tracking-[0.2em] text-[#9BABA0]">
+                    Outgoing
+                  </div>
+                  <div className="mt-0.5 font-mono text-[11px] font-bold text-[#F4FAF5]">
+                    {selectedNodeContext.outgoing.length}
+                  </div>
+                </div>
+              </div>
+              {selectedNodeContext.webUrl ? (
+                <p className="mt-2 font-mono text-[9px] text-[#94A59B]">{selectedNodeContext.webUrl}</p>
+              ) : null}
+            </div>
+
+            {propEntries.length > 0 ? (
+              <div className="space-y-2">
+                <span className="block font-mono text-[8px] font-bold uppercase tracking-[0.24em] text-[#9BABA0]">
+                  Properties
+                </span>
+                <div className="overflow-hidden rounded-xl border border-white/10">
+                  {propEntries.map(([key, value]) => (
+                    <div
+                      key={key}
+                      className="grid grid-cols-[minmax(88px,34%)_1fr] gap-2 border-b border-white/10 bg-white/[0.03] px-3 py-2 last:border-b-0"
+                    >
+                      <span className="font-mono text-[9px] font-bold uppercase text-[#9BABA0]">
+                        {key}
+                      </span>
+                      <span className="whitespace-pre-wrap break-all font-mono text-[10px] text-[#F4FAF5]">
+                        {formatGraphPropValue(value)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {selectedNodeContext.incoming.length > 0 || selectedNodeContext.outgoing.length > 0 ? (
+              <div className="space-y-2">
+                <span className="block font-mono text-[8px] font-bold uppercase tracking-[0.24em] text-[#9BABA0]">
+                  Graph connections
+                </span>
+                <div className="space-y-1.5">
+                  {selectedNodeContext.incoming.map(({ edge, from }) => (
+                    <button
+                      key={`in-${edge.id}`}
+                      type="button"
+                      onClick={() => from && openNodeDetails(from.id)}
+                      disabled={!from}
+                      className="flex w-full items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-2.5 py-2 text-left transition-colors hover:border-emerald-400/30 hover:bg-emerald-500/10 disabled:cursor-default disabled:opacity-60"
+                    >
+                      <span className="font-mono text-[9px] text-[#9BABA0]">in</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-[#F4FAF5]">
+                        {from?.label ?? edge.from}
+                      </span>
+                      {edge.label ? (
+                        <span className="font-mono text-[8px] uppercase text-[#9BABA0]">
+                          {edge.label}
+                        </span>
+                      ) : null}
+                    </button>
+                  ))}
+                  {selectedNodeContext.outgoing.map(({ edge, to }) => (
+                    <button
+                      key={`out-${edge.id}`}
+                      type="button"
+                      onClick={() => to && openNodeDetails(to.id)}
+                      disabled={!to}
+                      className="flex w-full items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-2.5 py-2 text-left transition-colors hover:border-emerald-400/30 hover:bg-emerald-500/10 disabled:cursor-default disabled:opacity-60"
+                    >
+                      <span className="font-mono text-[9px] text-[#9BABA0]">out</span>
+                      <ArrowRight size={10} className="text-[#9BABA0]" />
+                      <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-[#F4FAF5]">
+                        {to?.label ?? edge.to}
+                      </span>
+                      {edge.label ? (
+                        <span className="font-mono text-[8px] uppercase text-[#9BABA0]">
+                          {edge.label}
+                        </span>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              {selectedNodeContext.webUrl ? (
+                <a
+                  href={selectedNodeContext.webUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400 px-3 py-1.5 font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-[#08110D] hover:bg-emerald-300"
+                >
+                  Open source
+                  <ExternalLink size={10} />
+                </a>
+              ) : null}
+              {selectedNode.type === 'issue' && onNavigateTab ? (
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('audits')}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-[#F4FAF5] hover:bg-white/10"
+                >
+                  Open audits
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (selectedEdge) {
+      const fromNode = nodes.find((node) => node.id === selectedEdge.from) ?? null;
+      const toNode = nodes.find((node) => node.id === selectedEdge.to) ?? null;
+      const edgeProps = selectedEdge.props ? Object.entries(selectedEdge.props).slice(0, 8) : [];
+
+      return (
+        <div className="absolute right-3 top-3 bottom-3 z-30 flex w-[300px] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#07110E]/95 shadow-2xl shadow-black/35 backdrop-blur-xl">
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-white/10 bg-white/5 px-4 py-3">
+            <div className="min-w-0 space-y-1">
+              <span className="block font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-emerald-200/70">
+                Edge details
+              </span>
+              <h4 className="truncate font-semibold text-sm text-[#F4FAF5]">
+                {selectedEdge.label ?? 'RELATED'}
+              </h4>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedEdgeId(null)}
+              aria-label="Clear edge selection"
+              className="shrink-0 rounded-full border border-white/10 bg-white/5 p-2 text-[#B4C1B8] transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-3 text-xs [scrollbar-gutter:stable]">
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+              <div className="font-mono text-[8px] uppercase tracking-[0.24em] text-[#9BABA0]">
+                Relationship
+              </div>
+              <div className="mt-1 font-mono text-[11px] text-[#F4FAF5]">
+                <span className="font-bold">{fromNode?.label ?? selectedEdge.from}</span>
+                <span className="px-1.5 text-[#9BABA0]">→</span>
+                <span className="font-bold">{selectedEdge.label ?? 'RELATED'}</span>
+                <span className="px-1.5 text-[#9BABA0]">→</span>
+                <span className="font-bold">{toNode?.label ?? selectedEdge.to}</span>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+              <span className="mb-1 block font-mono text-[8px] font-bold uppercase tracking-[0.24em] text-[#9BABA0]">
+                Edge id
+              </span>
+              <code className="block break-all font-mono text-[10px] text-[#F4FAF5]">
+                {selectedEdge.id}
+              </code>
+            </div>
+
+            {edgeProps.length > 0 ? (
+              <div className="space-y-2">
+                <span className="block font-mono text-[8px] font-bold uppercase tracking-[0.24em] text-[#9BABA0]">
+                  Properties
+                </span>
+                <div className="overflow-hidden rounded-xl border border-white/10">
+                  {edgeProps.map(([key, value]) => (
+                    <div
+                      key={key}
+                      className="grid grid-cols-[minmax(88px,34%)_1fr] gap-2 border-b border-white/10 bg-white/[0.03] px-3 py-2 last:border-b-0"
+                    >
+                      <span className="font-mono text-[9px] font-bold uppercase text-[#9BABA0]">
+                        {key}
+                      </span>
+                      <span className="whitespace-pre-wrap break-all font-mono text-[10px] text-[#F4FAF5]">
+                        {formatGraphPropValue(value)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
   return (
-    <div className="flex h-full flex-col bg-[#FDFDFD]">
-      <div className="flex shrink-0 items-center justify-between border-b border-[#EAE6DF] px-4 py-2.5">
-        <div>
-          <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#8A958F]">
-            {semanticIncluded ? 'Repository + Phoenix graph' : 'Repository graph'}
-          </p>
-          <p className="text-[11px] text-[#5C6560]">
-            {nodeCount ?? nodes.length} nodes · {edgeCount ?? edges.length} edges · click to inspect
-          </p>
+    <div className="relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden bg-[#050706]">
+      <WorkflowD3Graph
+        key={layoutKey ?? 'workflow-graph'}
+        graphNodes={nodes}
+        graphEdges={edges}
+        selectedGraphNodeId={selectedGraphNodeId}
+        selectedEdgeId={selectedEdgeId}
+        memoryUpdating={memoryUpdating}
+        showEdgeLabels
+        emptyMessage={
+          emptyMessage ??
+          (phoenixConfigured
+            ? semanticIncluded
+              ? 'Graph snapshot and Phoenix semantic trace spans are ready.'
+              : 'Run an audit to populate the graph snapshot and Phoenix semantic trace spans.'
+            : 'Run an audit to populate the graph snapshot (nodes + links).')
+        }
+        semanticIncluded={semanticIncluded}
+        phoenixConfigured={phoenixConfigured}
+        onSelectGraphNode={(id) => {
+          if (id) {
+            openNodeDetails(id);
+          } else {
+            onSelectGraphNode?.(null);
+          }
+        }}
+        onSelectGraphEdge={(id) => {
+          setSelectedEdgeId(id);
+          if (id) {
+            onSelectGraphNode?.(null);
+          }
+        }}
+      />
+
+      <div className="pointer-events-none absolute bottom-3 left-3 z-20 rounded-2xl border border-white/10 bg-black/55 px-4 py-3 shadow-xl shadow-black/20 backdrop-blur-md">
+        <div className="mb-2 font-mono text-[8px] font-bold uppercase tracking-[0.24em] text-emerald-200/70">
+          Entity types
         </div>
-        <div className="flex items-center gap-2">
-          {semanticIncluded ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 font-mono text-[9px] font-bold uppercase text-violet-900">
-              <Sparkles size={10} />
-              Phoenix
-            </span>
-          ) : null}
-          {memoryUpdating ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-mono text-[9px] font-bold uppercase text-amber-800">
-              <span className="h-1.5 w-1.5 motion-safe:animate-ping rounded-full bg-amber-500" />
-              Graph updating
-            </span>
-          ) : null}
+        <div className="flex max-w-[320px] flex-wrap gap-2">
+          {legendItems.map((item) => (
+            <div
+              key={item.name}
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 font-mono text-[9px] text-[#D7E4DA]"
+            >
+              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+              <span>{item.name}</span>
+              <span className="text-[#8D9A93]">{item.count}</span>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="min-h-0 flex-1 overflow-hidden p-3">
-          <ReactFlowProvider key={layoutKey ?? 'workflow-graph'}>
-            <RepositoryGraphFlow
-              key={layoutKey ?? 'workflow-graph'}
-              graphNodes={nodes}
-              graphEdges={edges}
-              selectedGraphNodeId={selectedGraphNodeId}
-              emptyMessage={emptyMessage}
-              semanticIncluded={semanticIncluded}
-              phoenixConfigured={phoenixConfigured}
-              onSelectGraphNode={onSelectGraphNode}
-            />
-          </ReactFlowProvider>
-        </div>
-
-        <WorkflowGraphInspectPanel
-          selectedNodeId={selectedGraphNodeId}
-          nodes={nodes}
-          edges={edges}
-          auditSnapshot={auditSnapshot}
-          auditRunId={auditRunId}
-          onClearSelection={() => onSelectGraphNode?.(null)}
-          onSelectNode={(nodeId) => onSelectGraphNode?.(nodeId)}
-          onNavigateTab={onNavigateTab}
-        />
-      </div>
+      {renderDetailPanel()}
     </div>
   );
 }

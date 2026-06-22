@@ -1,27 +1,6 @@
 import { getCloudflareContext } from '@opennextjs/cloudflare';
 
-export interface SupabaseRuntimeConfig {
-  url: string;
-  anonKey: string;
-}
-
-function readSupabaseRuntimeConfig(env: Record<string, unknown> | undefined): SupabaseRuntimeConfig | null {
-  if (!env) {
-    return null;
-  }
-
-  const url = env.NEXT_PUBLIC_SUPABASE_URL ?? env.SUPABASE_URL;
-  const anonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? env.SUPABASE_ANON_KEY;
-
-  if (typeof url !== 'string' || typeof anonKey !== 'string' || !url || !anonKey) {
-    return null;
-  }
-
-  return {
-    url: url.replace(/\/$/, ''),
-    anonKey
-  };
-}
+import { readSupabaseRuntimeConfig, type SupabaseRuntimeConfig } from './config';
 
 function readFromProcessEnv(): SupabaseRuntimeConfig | null {
   return readSupabaseRuntimeConfig(process.env as Record<string, unknown>);

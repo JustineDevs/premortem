@@ -37,8 +37,15 @@ export function getPromptPresetDefinition(id: PromptPresetId): PromptPresetDefin
 
 export function loadPromptPresetSource(id: PromptPresetId): string {
   const definition = getPromptPresetDefinition(id);
-  const filePath = path.join(resolveRepoRoot(), definition.sourcePromptPath);
-  return fs.readFileSync(filePath, 'utf8').trim();
+  const rootDir = resolveRepoRoot();
+  const prompt = fs.readFileSync(path.join(rootDir, definition.sourcePromptPath), 'utf8').trim();
+  const floorPath = path.join(rootDir, '.agents/prompts/specialist-floor.md');
+  if (!fs.existsSync(floorPath)) {
+    return prompt;
+  }
+
+  const floor = fs.readFileSync(floorPath, 'utf8').trim();
+  return `${floor}\n\n${prompt}`.trim();
 }
 
 export function buildFindingSynthesizerMessages(input: FindingSynthesizerPromptInput): LlmMessage[] {

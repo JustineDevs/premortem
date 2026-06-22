@@ -60,7 +60,7 @@ export function MarketingAutoplayDemo({
   return (
     <section
       className="landing-block-demo"
-      aria-label="Premortem workflow demo"
+      aria-label="Premortem workflow walkthrough"
       data-demo-variant={variant}
     >
       <div className="landing-block-demo__steps" aria-label="Workflow steps">
@@ -88,7 +88,7 @@ export function MarketingAutoplayDemo({
             {frame.phase}
           </span>
           <span className="landing-block-demo__live" aria-hidden>
-            Auto demo
+            Auto preview
           </span>
         </div>
 

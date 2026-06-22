@@ -25,8 +25,12 @@ function run(command, args) {
 const exitCode = withHiddenRootDeployConfig(() => {
   const steps = [
     ['pnpm', ['--dir', 'apps/web', 'run', 'prepreview']],
-    ['pnpm', ['--filter', '@premortem/web', 'exec', 'opennextjs-cloudflare', 'build', '--dangerouslyUseUnsupportedNextVersion']],
-    ['pnpm', ['--filter', '@premortem/web', 'exec', 'opennextjs-cloudflare', 'preview']]
+    [
+      'pnpm',
+      ['--dir', 'apps/web', 'exec', 'opennextjs-cloudflare', 'build', '--dangerouslyUseUnsupportedNextVersion']
+    ],
+    ['node', ['./scripts/cloudflare/sanitize-open-next-env.mjs', 'apps/web/.open-next/cloudflare/next-env.mjs']],
+    ['pnpm', ['--dir', 'apps/web', 'exec', 'opennextjs-cloudflare', 'preview']]
   ];
 
   for (const [command, args] of steps) {

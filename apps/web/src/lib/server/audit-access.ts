@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { getAuditRunSnapshot } from '@premortem/orchestrator';
+import { getAuditRunSnapshot } from '@premortem/orchestrator/read-model';
 
 import { bffErrorResponse } from '@/lib/server/bff-errors';
 import { resolveRequestActorContext } from '@/lib/server/request-context';

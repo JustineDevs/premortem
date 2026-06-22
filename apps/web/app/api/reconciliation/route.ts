@@ -1,20 +1,10 @@
-import { NextResponse } from 'next/server';
+import { bffErrorResponse } from '@/lib/server/bff-errors';
+import { proxyPremortemApi } from '@/lib/server/proxy-api';
 
-import { getApiBaseUrl } from '@/lib/runtime-config';
-import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
-
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const context = await resolveRequestActorContext();
-    const response = await fetch(`${getApiBaseUrl()}/api/reconciliation`, {
-      headers: {
-        accept: 'application/json',
-        ...actorHeaders(context)
-      },
-      cache: 'no-store'
-    });
-    return NextResponse.json(await response.json(), { status: response.status });
+    return await proxyPremortemApi('/api/reconciliation', undefined, request);
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed' }, { status: 502 });
+    return bffErrorResponse(error, 'Failed to load reconciliation');
   }
 }

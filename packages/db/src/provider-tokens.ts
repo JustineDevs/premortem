@@ -1,4 +1,4 @@
-import { refreshGitLabOAuthToken, gitLabAuthHeaders } from '@premortem/integrations';
+import { getNangoToken, refreshGitLabOAuthToken, gitLabAuthHeaders } from '@premortem/integrations';
 import { isProductionMode } from '@premortem/domain';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
@@ -136,13 +136,41 @@ async function refreshStoredGitLabConnectionTokens(connectionId: string, refresh
   return payload.access_token;
 }
 
+async function resolveManagedConnectionAccessToken(connection: {
+  id: string;
+  nangoConnectionId?: string | null;
+  nangoProviderKey?: string | null;
+}) {
+  if (!connection.nangoConnectionId || !connection.nangoProviderKey) {
+    return null;
+  }
+
+  try {
+    return await getNangoToken(connection.nangoConnectionId, connection.nangoProviderKey);
+  } catch {
+    return null;
+  }
+}
+
 /** Returns a live GitLab access token, refreshing OAuth credentials when needed. */
 export async function ensureGitLabAccessTokenForConnection(connectionId: string): Promise<string> {
   const connection = await prisma.providerConnection.findUnique({
     where: { id: connectionId }
   });
 
-  if (!connection?.encryptedAccessToken) {
+  if (!connection) {
+    throw new GitLabTokenError(
+      'GitLab integration is missing a saved connection. Reconnect GitLab in Settings.',
+      'gitlab_reconnect_required'
+    );
+  }
+
+  const managedToken = await resolveManagedConnectionAccessToken(connection);
+  if (managedToken) {
+    return managedToken;
+  }
+
+  if (!connection.encryptedAccessToken) {
     throw new GitLabTokenError(
       'GitLab integration is missing an access token. Reconnect GitLab in Settings.',
       'gitlab_reconnect_required'
@@ -184,7 +212,11 @@ export async function ensureGitLabAccessTokenForConnection(connectionId: string)
 async function resolveConnectionAccessToken(connection: {
   id: string;
   encryptedAccessToken: string | null;
+  nangoConnectionId?: string | null;
+  nangoProviderKey?: string | null;
 }) {
+  const managedToken = await resolveManagedConnectionAccessToken(connection);
+  if (managedToken) return managedToken;
   if (!connection.encryptedAccessToken) return null;
   return ensureGitLabAccessTokenForConnection(connection.id);
 }
@@ -201,11 +233,12 @@ export async function resolveGitLabCredentialsForOrganization(
         id: options.connectionId,
         organizationId,
         provider: 'gitlab',
-        status: { in: ['active', 'pending'] }
+        status: { in: ['active', 'pending'] },
+        OR: [{ encryptedAccessToken: { not: null } }, { nangoConnectionId: { not: null } }]
       }
     });
 
-    if (connection?.encryptedAccessToken) {
+    if (connection) {
       const token = await resolveConnectionAccessToken(connection);
       if (!token) return null;
       return {
@@ -221,7 +254,11 @@ export async function resolveGitLabCredentialsForOrganization(
     where: { id: organizationId },
     include: {
       providerConnections: {
-        where: { provider: 'gitlab', status: 'active' },
+        where: {
+          provider: 'gitlab',
+          status: 'active',
+          OR: [{ encryptedAccessToken: { not: null } }, { nangoConnectionId: { not: null } }]
+        },
         orderBy: { updatedAt: 'desc' },
         take: 1
       }
@@ -232,7 +269,7 @@ export async function resolveGitLabCredentialsForOrganization(
 
   const connection = organization.providerConnections[0];
 
-  if (connection?.encryptedAccessToken) {
+  if (connection) {
     const token = await resolveConnectionAccessToken(connection);
     if (!token) return null;
     return {
@@ -263,7 +300,11 @@ export async function resolveGitLabCredentialsForProject(
       organization: {
         include: {
           providerConnections: {
-            where: { provider: 'gitlab', status: 'active' },
+            where: {
+              provider: 'gitlab',
+              status: 'active',
+              OR: [{ encryptedAccessToken: { not: null } }, { nangoConnectionId: { not: null } }]
+            },
             orderBy: { updatedAt: 'desc' },
             take: 1
           }
@@ -277,7 +318,7 @@ export async function resolveGitLabCredentialsForProject(
   const connection = project.connection ?? project.organization.providerConnections[0];
   const baseUrl = resolveGitLabApiBaseUrl(process.env.GITLAB_BASE_URL);
 
-  if (connection?.encryptedAccessToken) {
+  if (connection) {
     const token = await resolveConnectionAccessToken(connection);
     if (!token) return null;
     return {
@@ -339,6 +380,17 @@ export async function resolveGitHubCredentialsForProject(
   const connection = project.connection?.provider === 'github'
     ? project.connection
     : project.organization.providerConnections[0];
+
+  if (connection) {
+    const managedToken = await resolveManagedConnectionAccessToken(connection);
+    if (managedToken) {
+      return {
+        token: managedToken,
+        connectionId: connection.id,
+        source: 'connection'
+      };
+    }
+  }
 
   if (connection?.encryptedAccessToken) {
     return {

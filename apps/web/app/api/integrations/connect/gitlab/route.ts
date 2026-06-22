@@ -5,7 +5,12 @@ import {
   gitlabAuthorizeUrl,
   integrationOAuthCookieNames
 } from '@/lib/gitlab-oauth';
-import { gitlabOAuthRedirectUri } from '@/lib/runtime-config';
+import {
+  getCanonicalLoopbackOrigin,
+  getPublicAppOrigin,
+  getRequestOrigin,
+  gitlabOAuthRedirectUri
+} from '@/lib/runtime-config';
 import { resolveRequestActorContext } from '@/lib/server/request-context';
 
 function safeNextPath(value: string | null, discover: boolean) {
@@ -22,20 +27,27 @@ function safeNextPath(value: string | null, discover: boolean) {
 export async function GET(request: NextRequest) {
   const clientId = process.env.GITLAB_CLIENT_ID;
   const clientSecret = process.env.GITLAB_CLIENT_SECRET;
+  const origin = getPublicAppOrigin(getRequestOrigin(request));
+  const canonicalOrigin = getCanonicalLoopbackOrigin(getRequestOrigin(request));
+
+  if (canonicalOrigin && canonicalOrigin !== origin) {
+    const canonicalUrl = new URL(request.nextUrl.pathname + request.nextUrl.search, canonicalOrigin);
+    return NextResponse.redirect(canonicalUrl, 303);
+  }
 
   if (!clientId || !clientSecret) {
-    const redirectUrl = new URL('/app', request.url);
+    const redirectUrl = new URL('/app', origin);
     redirectUrl.searchParams.set('tab', 'settings');
     redirectUrl.searchParams.set('integration_notice', 'config');
     return NextResponse.redirect(redirectUrl);
   }
 
   try {
-    await resolveRequestActorContext();
+    await resolveRequestActorContext(request);
   } catch {
     const discover = request.nextUrl.searchParams.get('discover') === '1';
     const next = safeNextPath(request.nextUrl.searchParams.get('next'), discover);
-    const loginUrl = new URL('/login', request.url);
+    const loginUrl = new URL('/login', origin);
     loginUrl.searchParams.set('next', next);
     return NextResponse.redirect(loginUrl);
   }
@@ -43,7 +55,7 @@ export async function GET(request: NextRequest) {
   const discover = request.nextUrl.searchParams.get('discover') === '1';
   const next = safeNextPath(request.nextUrl.searchParams.get('next'), discover);
   const state = createOAuthState();
-  const redirectUri = gitlabOAuthRedirectUri(request.nextUrl.origin);
+  const redirectUri = gitlabOAuthRedirectUri(origin);
   const baseUrl = process.env.GITLAB_BASE_URL ?? 'https://gitlab.com';
   const authorizeUrl = gitlabAuthorizeUrl({ clientId, redirectUri, state, baseUrl });
   const cookies = integrationOAuthCookieNames();

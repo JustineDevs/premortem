@@ -1,5 +1,5 @@
 export * from './types';
-export * from './gemini';
-export * from './azure-openai';
+export * from './routing';
+export * from './client';
 export * from './factory';
 export * from './prompt-presets';

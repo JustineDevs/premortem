@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from './fetch-with-timeout';
+
 export interface GitLabOAuthTokenResponse {
   access_token: string;
   refresh_token?: string;
@@ -13,7 +15,7 @@ export async function refreshGitLabOAuthToken(input: {
   baseUrl?: string;
 }): Promise<GitLabOAuthTokenResponse> {
   const base = (input.baseUrl ?? 'https://gitlab.com').replace(/\/$/, '');
-  const response = await fetch(`${base}/oauth/token`, {
+  const response = await fetchWithTimeout(`${base}/oauth/token`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({

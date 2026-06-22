@@ -1,5 +1,5 @@
 import { DEFAULT_GEMINI_MODEL } from '@premortem/domain';
-import { isGitLabMcpEnabled } from '@premortem/integrations';
+import { fetchOrbitContext, isGitLabMcpEnabled } from '@premortem/integrations';
 import {
   FunctionTool,
   Gemini,
@@ -8,7 +8,7 @@ import {
   type LlmAgentConfig,
   type StreamableHTTPConnectionParams
 } from '@google/adk';
-import { tracePremortemAgentMission, trace as otelTrace } from '@premortem/observability';
+import { tracePremortemAgentMission, tracePremortemToolCall } from '@premortem/observability/phoenix';
 
 import { buildPhoenixMcpConnection, describePhoenixRuntime } from './phoenix-mcp';
 
@@ -39,6 +39,55 @@ export interface PremortemRootAgentOptions {
   project?: string;
   location?: string;
 }
+
+const loadOrbitContextParameters = {
+  type: 'OBJECT',
+  properties: {
+    externalProjectId: {
+      type: 'STRING',
+      minLength: '1',
+      description: 'The GitLab project full path or Orbit project identifier.'
+    },
+    branch: {
+      type: 'STRING',
+      minLength: '1',
+      description: 'The target branch to ground the audit against.'
+    },
+    prefixes: {
+      type: 'ARRAY',
+      items: {
+        type: 'STRING',
+        minLength: '1'
+      },
+      description: 'Optional repository prefixes to include in Orbit definition lookups.'
+    },
+    maxDefinitionsPerPrefix: {
+      type: 'INTEGER',
+      minimum: 1,
+      maximum: 200,
+      description: 'Optional cap for definitions loaded per prefix.'
+    },
+    maxMergeRequests: {
+      type: 'INTEGER',
+      minimum: 1,
+      maximum: 50,
+      description: 'Optional cap for recent merge requests loaded from Orbit.'
+    },
+    maxPipelines: {
+      type: 'INTEGER',
+      minimum: 1,
+      maximum: 50,
+      description: 'Optional cap for recent pipelines loaded from Orbit.'
+    },
+    timeoutMs: {
+      type: 'INTEGER',
+      minimum: 1,
+      maximum: 120000,
+      description: 'Optional timeout for Orbit lookups in milliseconds.'
+    }
+  },
+  required: ['externalProjectId', 'branch']
+} as const;
 
 export const PREMORTEM_GEMINI_SAFETY_SETTINGS = [
   {
@@ -104,6 +153,58 @@ function buildGitLabMcpConnection(input: {
   };
 }
 
+function buildOrbitAnalyzerPlan(contextStatus: 'enabled' | 'unavailable') {
+  return {
+    contextStatus,
+    analyzers: [
+      {
+        name: 'ci_pipeline_auditor',
+        focus: 'deployment and rollback risk',
+        inputs: ['recentPipelines', 'recentMergeRequests']
+      },
+      {
+        name: 'dependency_drift_auditor',
+        focus: 'risky or stale dependency and interface drift',
+        inputs: ['definitionMaps', 'recentMergeRequests']
+      },
+      {
+        name: 'ownership_risk_auditor',
+        focus: 'orphaned paths and low-ownership surface area',
+        inputs: ['definitionMaps', 'recentMergeRequests']
+      }
+    ]
+  };
+}
+
+export async function loadOrbitBackedAuditPlan(input: {
+  externalProjectId: string;
+  branch: string;
+  prefixes?: string[];
+  maxDefinitionsPerPrefix?: number;
+  maxMergeRequests?: number;
+  maxPipelines?: number;
+  timeoutMs?: number;
+}) {
+  const orbitContext = await fetchOrbitContext({
+    externalProjectId: input.externalProjectId,
+    branch: input.branch,
+    prefixes: input.prefixes,
+    maxDefinitionsPerPrefix: input.maxDefinitionsPerPrefix,
+    maxMergeRequests: input.maxMergeRequests,
+    maxPipelines: input.maxPipelines,
+    timeoutMs: input.timeoutMs
+  });
+
+  return {
+    externalProjectId: input.externalProjectId,
+    branch: input.branch,
+    orbitContext,
+    auditPlan: buildOrbitAnalyzerPlan(orbitContext?.status ?? 'unavailable'),
+    grounded: orbitContext?.status === 'enabled',
+    generatedAt: new Date().toISOString()
+  };
+}
+
 export function buildPremortemRootAgent(options: PremortemRootAgentOptions) {
   const modelName = options.model ?? DEFAULT_GEMINI_MODEL;
   const apiKey =
@@ -144,10 +245,33 @@ export function buildPremortemRootAgent(options: PremortemRootAgentOptions) {
     new FunctionTool({
       name: 'premortem_record_mission_step',
       description: 'Record a Premortem multi-step audit mission checkpoint for human review.',
-      execute: async () => ({
-        recorded: true,
-        at: new Date().toISOString()
-      })
+      execute: async () =>
+        tracePremortemToolCall(
+          async () => ({
+            recorded: true,
+            at: new Date().toISOString(),
+            input: null
+          }),
+          {
+            name: 'premortem_record_mission_step',
+            kind: 'TOOL'
+          }
+        )
+    }),
+    new FunctionTool({
+      name: 'premortem_load_orbit_context',
+      description:
+        'Load Orbit repo graph context for a GitLab project and return the analyzer plan that will ground the audit.',
+      parameters: loadOrbitContextParameters as never,
+      execute: async (input: Record<string, unknown>) =>
+        tracePremortemToolCall(
+          async () =>
+            loadOrbitBackedAuditPlan(input as Parameters<typeof loadOrbitBackedAuditPlan>[0]),
+          {
+            name: 'premortem_load_orbit_context',
+            kind: 'TOOL'
+          }
+        )
     })
   ];
 
@@ -172,7 +296,9 @@ export function buildPremortemRootAgent(options: PremortemRootAgentOptions) {
       'Premortem agent runtime for predictive audits with GitLab and Phoenix MCP tools.',
     instruction: [
       'You orchestrate Premortem predictive code audits for GitLab projects.',
+      'Always load Orbit context first when the project and branch are known, then reason from the graph instead of guessing.',
       'Use GitLab MCP tools (prefixed premortem_) to read pipelines, jobs, and open issues.',
+      'Use the Orbit tool to ground repository structure, CI history, and ownership before planning analyzers.',
       'Use Phoenix MCP tools (prefixed phoenix_) to inspect your own traces, experiments, prompts, and datasets.',
       'When quality drifts, query recent Phoenix traces for this project and adjust the audit strategy.',
       'Coordinate multi-step analysis: ingest repository context, inspect CI history,',
@@ -245,9 +371,13 @@ export async function bootstrapPremortemAgentMission(input: {
   gitlabBaseUrl?: string;
   gitlabToken?: string;
 }) {
-  return tracePremortemAgentMission(async () => bootstrapPremortemAgentMissionCore(input), {
-    name: 'premortem.agent_mission'
-  })();
+  const traced = await tracePremortemAgentMission(
+    async () => bootstrapPremortemAgentMissionCore(input),
+    {
+      name: 'premortem.agent_mission'
+    }
+  );
+  return traced();
 }
 
 async function bootstrapPremortemAgentMissionCore(input: {
@@ -258,7 +388,6 @@ async function bootstrapPremortemAgentMissionCore(input: {
   gitlabBaseUrl?: string;
   gitlabToken?: string;
 }) {
-  otelTrace.getActiveSpan()?.setAttribute('premortem.audit_run_id', input.auditRunId);
   const credentials = resolveAgentBuilderCredentials(input);
   const trace = createMissionTrace(credentials.model);
   recordMissionStep(trace, 'mission.start', {

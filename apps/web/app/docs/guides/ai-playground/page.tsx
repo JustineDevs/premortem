@@ -3,7 +3,7 @@ import { aiPlaygroundGuideDoc } from '@/content/marketing/docs-additional-conten
 
 import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
 export const metadata = buildSeoMetadata({
-  title: 'AI Code Playground | Premortem Docs',
+  title: 'Code analysis',
   description: aiPlaygroundGuideDoc.lead,
   canonical: '/docs/guides/ai-playground',
   keywords: canonicalDocsKeywords

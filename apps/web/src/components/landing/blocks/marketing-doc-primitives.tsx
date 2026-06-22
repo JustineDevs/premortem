@@ -94,7 +94,15 @@ export function MarketingDocSearch() {
         }
       }
     }
-    return items.slice(0, 8);
+    const uniqueItems: NavHit[] = [];
+    const seen = new Set<string>();
+    for (const item of items) {
+      const key = `${item.href}:${item.label}:${item.section}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      uniqueItems.push(item);
+    }
+    return uniqueItems.slice(0, 8);
   }, [query]);
 
   return (
@@ -113,8 +121,8 @@ export function MarketingDocSearch() {
       />
       {query.trim() && hits.length > 0 ? (
         <ul className="landing-doc-search__results" role="listbox">
-          {hits.map((hit) => (
-            <li key={hit.href}>
+          {hits.map((hit, index) => (
+            <li key={`${hit.href}:${hit.label}:${hit.section}:${index}`}>
               <Link href={hit.href} className="landing-doc-search__hit" scroll={false}>
                 <span className="landing-doc-search__hit-label" style={label14}>
                   {hit.label}

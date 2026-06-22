@@ -135,6 +135,9 @@ export function DashboardView({
   gitLabConnected = false,
   discoveredRepoCount = 0
 }: DashboardViewProps) {
+  const safeProjects = Array.isArray(projects) ? projects : [];
+  const safeAudits = Array.isArray(audits) ? audits : [];
+  const safeRiskClusters = Array.isArray(riskClusters) ? riskClusters : [];
   const [clustersExpanded, setClustersExpanded] = useState(false);
   const [projectsExpanded, setProjectsExpanded] = useState(false);
   const [monitorSnapshot, setMonitorSnapshot] = useState<{
@@ -144,10 +147,10 @@ export function DashboardView({
   } | null>(null);
 
   const monitorAudit =
-    audits.find((audit) => audit.status === 'RUNNING') ??
-    audits.find((audit) => audit.status === 'PAUSED') ??
-    audits.find((audit) => audit.status === 'COMPLETED') ??
-    audits[0];
+    safeAudits.find((audit) => audit.status === 'RUNNING') ??
+    safeAudits.find((audit) => audit.status === 'PAUSED') ??
+    safeAudits.find((audit) => audit.status === 'COMPLETED') ??
+    safeAudits[0];
 
   React.useEffect(() => {
     if (!monitorAudit?.id) {
@@ -158,7 +161,7 @@ export function DashboardView({
     let cancelled = false;
 
     const loadSnapshot = () => {
-      void fetch(`/api/audits/${monitorAudit.id}`)
+      void fetch(`/api/audits/${monitorAudit.id}?hydrate=0`)
         .then((response) => response.json())
         .then((payload) => {
           const snapshot = payload.snapshot ?? payload.auditRun;
@@ -189,33 +192,48 @@ export function DashboardView({
     };
   }, [monitorAudit?.id, monitorAudit?.status]);
   
-  const totalAuditsCount = audits.filter(a => a.status === 'COMPLETED').length;
-  const recentAudit = audits.find(a => a.status === 'COMPLETED');
+  const totalAuditsCount = safeAudits.filter((a) => a.status === 'COMPLETED').length;
+  const recentAudit = safeAudits.find((a) => a.status === 'COMPLETED');
   
-  const totalFindingsCount = audits.reduce((sum, current) => {
+  const totalFindingsCount = safeAudits.reduce((sum, current) => {
     return sum + (current.findings?.length || 0);
   }, 0);
 
   const stats = {
-    critical: audits.reduce((sum, item) => sum + (item.criticalCount || 0), 0),
-    high: audits.reduce((sum, item) => sum + (item.highCount || 0), 0),
-    medium: audits.reduce((sum, item) => sum + (item.mediumCount || 0), 0),
-    low: audits.reduce((sum, item) => sum + (item.lowCount || 0), 0),
+    critical: safeAudits.reduce((sum, item) => sum + (item.criticalCount || 0), 0),
+    high: safeAudits.reduce((sum, item) => sum + (item.highCount || 0), 0),
+    medium: safeAudits.reduce((sum, item) => sum + (item.mediumCount || 0), 0),
+    low: safeAudits.reduce((sum, item) => sum + (item.lowCount || 0), 0),
   };
 
-  const clustersToShow: RiskCluster[] = riskClusters;
+  const clustersToShow: RiskCluster[] = safeRiskClusters;
   const hasRealClusters = clustersToShow.length > 0;
-  const workspaceEmpty = projects.length === 0 && audits.length === 0 && !isLoading;
+  const workspaceEmpty = safeProjects.length === 0 && safeAudits.length === 0 && !isLoading;
 
   const visibleClusters = clustersExpanded
     ? clustersToShow
     : clustersToShow.slice(0, CLUSTER_PREVIEW_COUNT);
 
   const visibleProjects = projectsExpanded
-    ? projects
-    : projects.slice(0, PROJECT_PREVIEW_COUNT);
+    ? safeProjects
+    : safeProjects.slice(0, PROJECT_PREVIEW_COUNT);
 
-  const visibleAudits = audits.slice(0, AUDIT_PREVIEW_COUNT);
+  const visibleAudits = safeAudits.slice(0, AUDIT_PREVIEW_COUNT);
+  const activeAuditCount = safeAudits.filter(
+    (audit) => audit.status === 'RUNNING'
+  ).length;
+  const activeRuntimeCount = Math.max(runningAudits, activeAuditCount);
+  const pausedAuditCount = safeAudits.filter((audit) => audit.status === 'PAUSED').length;
+  const runtimeStatusLabel =
+    activeRuntimeCount > 0
+      ? activeRuntimeCount === 1
+        ? 'AUDIT IN PROGRESS'
+        : `${activeRuntimeCount} AUDITS RUNNING`
+      : pausedAuditCount > 0
+        ? pausedAuditCount === 1
+          ? 'AUDIT PAUSED'
+          : `${pausedAuditCount} AUDITS PAUSED`
+        : 'IDLE';
 
   return (
     <div className="flex-1 overflow-y-auto p-8 font-sans space-y-8 max-w-7xl mx-auto w-full">
@@ -277,10 +295,10 @@ export function DashboardView({
                 {gitLabConnected ? 'Open projects' : 'Connect GitLab'}
                 <ArrowUpRight size={12} />
               </button>
-              {gitLabConnected && projects.length > 0 ? (
+              {gitLabConnected && safeProjects.length > 0 ? (
                 <button
                   type="button"
-                  onClick={() => onTriggerScan(projects[0].id)}
+                  onClick={() => onTriggerScan(safeProjects[0].id)}
                   className="inline-flex items-center gap-1 rounded border border-emerald-800 bg-emerald-950 px-3 py-1.5 text-[11px] font-mono font-bold uppercase tracking-wider text-[#72C8AF] hover:bg-emerald-900"
                 >
                   Launch scan
@@ -310,10 +328,10 @@ export function DashboardView({
           </div>
           
           <div className="mt-6 pt-4 border-t border-[#EAE6DF]/60 text-xs text-[#5C6560] flex items-center justify-between font-mono z-10">
-            <span>AUDITED PROJECTS: {projects.length}</span>
+            <span>AUDITED PROJECTS: {safeProjects.length}</span>
             <div className="flex items-center gap-1 text-emerald-700">
               <TrendingUp size={12} />
-              <span>{runningAudits > 0 ? `${runningAudits} AUDITS RUNNING` : audits.some((a) => a.status === 'RUNNING') ? 'AUDIT IN PROGRESS' : 'IDLE'}</span>
+              <span>{runtimeStatusLabel}</span>
             </div>
           </div>
 
@@ -602,7 +620,7 @@ export function DashboardView({
 
                 <SeeMoreButton
                   expanded={projectsExpanded}
-                  hiddenCount={Math.max(0, projects.length - PROJECT_PREVIEW_COUNT)}
+                  hiddenCount={Math.max(0, safeProjects.length - PROJECT_PREVIEW_COUNT)}
                   onToggle={() => setProjectsExpanded((prev) => !prev)}
                   onNavigate={onNavigateTab ? () => onNavigateTab('projects') : undefined}
                   navigateLabel={onNavigateTab ? 'All projects' : undefined}

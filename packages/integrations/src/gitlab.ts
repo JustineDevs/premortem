@@ -1,4 +1,5 @@
 import { gitLabAuthHeaders } from './gitlab-auth';
+import { fetchWithTimeout } from './fetch-with-timeout';
 
 export { gitLabAuthHeaders } from './gitlab-auth';
 
@@ -27,7 +28,7 @@ function gitLabJsonHeaders(token: string) {
 }
 
 export async function listGitLabLabels(baseUrl: string, token: string, projectId: string) {
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${baseUrl}/api/v4/projects/${encodeURIComponent(projectId)}/labels?per_page=100`,
     { headers: gitLabAuthHeaders(token) }
   );
@@ -48,14 +49,14 @@ export async function ensureGitLabLabels(
   for (const label of labels) {
     if (existingNames.has(label.name.toLowerCase())) continue;
 
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${baseUrl}/api/v4/projects/${encodeURIComponent(projectId)}/labels`,
       {
         method: 'POST',
         headers: gitLabJsonHeaders(token),
         body: JSON.stringify({
           name: label.name,
-          color: label.color?.replace('#', '').slice(0, 6),
+          color: label.color ? `#${label.color.replace('#', '').slice(0, 6)}` : undefined,
           description: label.description?.slice(0, 255)
         })
       }
@@ -70,7 +71,7 @@ export async function ensureGitLabLabels(
 }
 
 export async function createGitLabIssue(baseUrl: string, token: string, payload: GitLabIssuePayload) {
-  const response = await fetch(`${baseUrl}/api/v4/projects/${encodeURIComponent(payload.projectId)}/issues`, {
+  const response = await fetchWithTimeout(`${baseUrl}/api/v4/projects/${encodeURIComponent(payload.projectId)}/issues`, {
     method: 'POST',
     headers: gitLabJsonHeaders(token),
     body: JSON.stringify({
@@ -95,12 +96,11 @@ export async function updateGitLabIssueTimeEstimate(
   issueIid: string | number,
   timeEstimate: string
 ) {
-  const response = await fetch(
-    `${baseUrl}/api/v4/projects/${encodeURIComponent(projectId)}/issues/${issueIid}`,
+  const response = await fetchWithTimeout(
+    `${baseUrl}/api/v4/projects/${encodeURIComponent(projectId)}/issues/${issueIid}/time_estimate?duration=${encodeURIComponent(timeEstimate)}`,
     {
-      method: 'PUT',
-      headers: gitLabJsonHeaders(token),
-      body: JSON.stringify({ time_estimate: timeEstimate })
+      method: 'POST',
+      headers: gitLabAuthHeaders(token)
     }
   );
 

@@ -23,5 +23,5 @@ Produce:
 
 - Do not claim readiness if architecture, evidence, logic, security, or DX/UX gaps remain unresolved.
 - Keep the recommended build slice small, testable, and reversible.
-- Treat `$build` as the sole owner of `.ma/plans/build.md` and `build_status`.
+- Treat `$build` as the sole owner of the workspace-local build state and `build_status`.
 - If the user wants code immediately and the path is clear, end with a concrete implementation plan rather than more review prose.

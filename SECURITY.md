@@ -2,6 +2,8 @@
 
 Security is mandatory. Premortem handles repository access tokens, LLM provider keys, reviewer identity, billing state, and GitLab publication paths. Authentication, authorization, secret isolation, webhook verification, and audit traceability are required, not optional.
 
+Repository hygiene is enforced with Knip for dead-code and dependency drift (`pnpm run lint:deadcode`) and TruffleHog for secret scanning (`pnpm run scan:secrets`).
+
 ---
 
 ## System Architecture Overview
@@ -72,7 +74,7 @@ The browser must not receive GitLab tokens, Supabase service-role keys, queue cr
 | **Auth routes** | Supabase callback, logout, and session refresh remain server-side. |
 | **Audit & workspace APIs** | Proxy to runtime API with actor context; no direct DB access from arbitrary client-supplied org IDs without server validation. |
 | **Stripe checkout** | Checkout session creation uses server-only `STRIPE_SECRET_KEY`. |
-| **Stripe webhooks** | Signature verification via `STRIPE_WEBHOOK_SECRET` before mutating billing state (`apps/web/app/api/webhooks/stripe/route.ts`). |
+| **Stripe webhooks** | Signature verification via `STRIPE_WEBHOOK_SECRET` before mutating billing state (`apps/web/app/api/stripe/webhook/route.ts`). |
 
 BFF owns HTTP edge behavior for the web app. Pipeline logic, token storage, and publish authority live in API + orchestrator layers.
 
@@ -126,7 +128,7 @@ Storage policy: public docs stay non-sensitive; internal security assessments an
 | Integration | Security responsibility |
 |-------------|-------------------------|
 | **GitLab** | OAuth (`GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`) or scoped token; separate validation for repo read vs issue write before onboarding continues. |
-| **LLM providers** | `GEMINI_API_KEY` and/or Azure OpenAI vars are server-only; used inside orchestrator/LLM packages, never shipped to the client. |
+| **LLM providers** | `GEMINI_API_KEY` is server-only; used inside orchestrator/LLM packages, never shipped to the client. |
 | **Stripe** | Owns customers, subscriptions, checkout, and webhook-driven plan inputs. Must not become primary app identity or reviewer session authority. |
 | **Observability** | `SENTRY_DSN`, `POSTHOG_*` keys: configure server vs public DSN/key split correctly; do not leak PII in custom event payloads. |
 
@@ -160,7 +162,7 @@ Session boundary summary: [docs/security/session-design.md](./docs/security/sess
 |---------|------------|--------------|
 | Stripe billing | `STRIPE_WEBHOOK_SECRET` | `stripe.webhooks.constructEvent` on raw body; reject missing/invalid signatures |
 
-Canonical route: `POST /api/stripe/webhook` (aliases under `/api/webhooks/stripe`). In production, missing webhook secrets should fail closed (503) where implemented.
+Canonical route: `POST /api/stripe/webhook`. In production, missing webhook secrets should fail closed (503) where implemented.
 
 Organization notification webhooks (if enabled) should use signed payloads and shared secrets configured per workspace policy, verified before mutating alert state.
 
@@ -187,7 +189,7 @@ Non-negotiable product gates (see [.agents/rules/production-boundaries.md](./.ag
 3. Disable `PREMORTEM_AUTH_DISABLED` in production; verify Supabase JWT validation on API routes.
 4. Set `CORS_ORIGIN` to the production web origin (e.g. `https://premortem.jstn.site` per `.env.example`).
 5. Configure GitLab OAuth or token vars; verify repo read and issue write separately before onboarding.
-6. Set LLM provider keys (`GEMINI_API_KEY` and/or Azure OpenAI vars) server-side only.
+6. Set `GEMINI_API_KEY` server-side only.
 7. Set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` when billing is enabled; test webhooks in Stripe test mode first.
 8. Configure Sentry and PostHog with appropriate public vs server key split.
 9. Confirm entitlements enforcement (`PLAN_LIMITS`) for repo count, monthly audits, and publish capability.

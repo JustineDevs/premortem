@@ -1,11 +1,10 @@
 import {
-  createProviderConnection,
   createOrganizationApiKey,
-  ensureProfileMembership,
+  createOrganizationInvitation,
+  createProviderConnection,
+  EntitlementError,
   getWorkspaceBundle,
   getOrganizationActivityEvents,
-  listUserNotifications,
-  markUserNotificationsRead,
   recordActivityEvent,
   revokeOrganizationApiKey,
   stopAllAuditRuntime,
@@ -20,18 +19,29 @@ import {
   updateWorkspaceProfile,
   upsertProviderConnectionFromOAuth
 } from '@premortem/db';
+import {
+  createOrganizationNotifications,
+  listUserNotifications,
+  markUserNotificationsRead
+} from '@premortem/db/notifications';
+import { createNangoConnectSession } from '@premortem/integrations';
 import { normalizeWorkItemAttributeConfig } from '@premortem/domain';
 
+import { apiErrorResponse } from '../lib/error-response';
 import { resolveApiActorContext } from '../lib/request-context';
+import { BILLING_ROLES, ORG_ADMIN_ROLES, ORG_WRITE_ROLES, requireApiRole } from '../lib/authorization';
+import {
+  readJsonRecord,
+  readOptionalBoolean,
+  readOptionalRecord,
+  readOptionalString,
+  readOptionalStringArray,
+  readOptionalStringLiteral,
+  readRequiredString
+} from '../lib/request-body';
 
 export async function handleWorkspaceGet(request: Request) {
   const actor = await resolveApiActorContext(request);
-
-  await ensureProfileMembership({
-    profileId: actor.profileId,
-    organizationId: actor.organizationId,
-    email: actor.email
-  });
 
   const workspace = await getWorkspaceBundle({
     organizationId: actor.organizationId,
@@ -41,16 +51,15 @@ export async function handleWorkspaceGet(request: Request) {
 }
 
 export async function handleWorkspaceProfilePatch(request: Request) {
-  const body = (await request.json()) as {
-    fullName?: string;
-    username?: string;
-    timezone?: string;
-    bio?: string;
-  };
+  const body = (await readJsonRecord(request)) ?? {};
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_WRITE_ROLES);
   const profile = await updateWorkspaceProfile({
     profileId: actor.profileId,
-    ...body
+    fullName: readOptionalString(body, 'fullName'),
+    username: readOptionalString(body, 'username'),
+    timezone: readOptionalString(body, 'timezone'),
+    bio: readOptionalString(body, 'bio')
   });
   await recordActivityEvent({
     organizationId: actor.organizationId,
@@ -64,15 +73,14 @@ export async function handleWorkspaceProfilePatch(request: Request) {
 }
 
 export async function handleWorkspaceOrganizationPatch(request: Request) {
-  const body = (await request.json()) as {
-    name?: string;
-    billingEmail?: string;
-    websiteUrl?: string;
-  };
+  const body = (await readJsonRecord(request)) ?? {};
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_ADMIN_ROLES);
   const organization = await updateWorkspaceOrganization({
     organizationId: actor.organizationId,
-    ...body
+    name: readOptionalString(body, 'name'),
+    billingEmail: readOptionalString(body, 'billingEmail'),
+    websiteUrl: readOptionalString(body, 'websiteUrl')
   });
   await recordActivityEvent({
     organizationId: actor.organizationId,
@@ -86,13 +94,26 @@ export async function handleWorkspaceOrganizationPatch(request: Request) {
 }
 
 export async function handleWorkspacePoliciesPatch(request: Request) {
-  const body = (await request.json()) as {
-    policies: Array<{ id: string; name: string; description: string; active: boolean }>;
-  };
+  const body = (await readJsonRecord(request)) ?? {};
+  const policies = body.policies;
+  if (!Array.isArray(policies)) {
+    return Response.json({ error: 'policies is required' }, { status: 400 });
+  }
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_ADMIN_ROLES);
   await updateWorkspacePolicies({
     organizationId: actor.organizationId,
-    policies: body.policies
+    policies: policies.map((policy) => ({
+      id: String(policy && typeof policy === 'object' ? (policy as Record<string, unknown>).id ?? '' : ''),
+      name: String(policy && typeof policy === 'object' ? (policy as Record<string, unknown>).name ?? '' : ''),
+      description: String(
+        policy && typeof policy === 'object'
+          ? (policy as Record<string, unknown>).description ?? ''
+          : ''
+      ),
+      active:
+        Boolean(policy && typeof policy === 'object' ? (policy as Record<string, unknown>).active : false)
+    }))
   });
   await recordActivityEvent({
     organizationId: actor.organizationId,
@@ -106,14 +127,16 @@ export async function handleWorkspacePoliciesPatch(request: Request) {
 }
 
 export async function handleWorkspaceRuntimePatch(request: Request) {
-  const body = (await request.json()) as { continuousAuditEnabled?: boolean };
-  if (typeof body.continuousAuditEnabled !== 'boolean') {
+  const body = (await readJsonRecord(request)) ?? {};
+  const continuousAuditEnabled = readOptionalBoolean(body, 'continuousAuditEnabled');
+  if (typeof continuousAuditEnabled !== 'boolean') {
     return Response.json({ error: 'continuousAuditEnabled is required' }, { status: 400 });
   }
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_ADMIN_ROLES);
   const result = await updateWorkspaceRuntime({
     organizationId: actor.organizationId,
-    continuousAuditEnabled: body.continuousAuditEnabled
+    continuousAuditEnabled
   });
   await recordActivityEvent({
     organizationId: actor.organizationId,
@@ -121,7 +144,7 @@ export async function handleWorkspaceRuntimePatch(request: Request) {
     eventType: 'runtime.updated',
     objectType: 'organization',
     objectId: actor.organizationId,
-    summary: `Continuous audit ${body.continuousAuditEnabled ? 'enabled' : 'disabled'}`
+    summary: `Continuous audit ${continuousAuditEnabled ? 'enabled' : 'disabled'}`
   });
   return Response.json({ ok: true, ...result });
 }
@@ -141,16 +164,16 @@ export async function handleWorkspaceRuntimeStopAll(request: Request) {
 }
 
 export async function handleWorkspaceWorkItemAttributesPatch(request: Request) {
-  const body = (await request.json()) as {
-    workItemAttributes?: Record<string, unknown>;
-  };
-  if (!body.workItemAttributes) {
+  const body = (await readJsonRecord(request)) ?? {};
+  const workItemAttributes = readOptionalRecord(body, 'workItemAttributes');
+  if (!workItemAttributes) {
     return Response.json({ error: 'workItemAttributes is required' }, { status: 400 });
   }
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_ADMIN_ROLES);
   await updateWorkspaceWorkItemAttributes({
     organizationId: actor.organizationId,
-    workItemAttributes: normalizeWorkItemAttributeConfig(body.workItemAttributes)
+    workItemAttributes: normalizeWorkItemAttributeConfig(workItemAttributes)
   });
   await recordActivityEvent({
     organizationId: actor.organizationId,
@@ -164,19 +187,30 @@ export async function handleWorkspaceWorkItemAttributesPatch(request: Request) {
 }
 
 export async function handleWorkspaceNotificationsPatch(request: Request) {
-  const body = (await request.json()) as {
-    notifications: {
-      slackWebhook?: string;
-      slackChannel?: string;
-      isSlackConnected?: boolean;
-      alertEmails?: string;
-      alertSeverity?: string;
-    };
+  const body = (await readJsonRecord(request)) ?? {};
+  const notifications = readOptionalRecord(body, 'notifications');
+  if (!notifications) {
+    return Response.json({ error: 'notifications is required' }, { status: 400 });
+  }
+  const notificationSettings = {
+    slackWebhook: readOptionalString(notifications, 'slackWebhook'),
+    slackChannel: readOptionalString(notifications, 'slackChannel'),
+    isSlackConnected: readOptionalBoolean(notifications, 'isSlackConnected'),
+    alertEmails: readOptionalString(notifications, 'alertEmails'),
+    alertSeverity: readOptionalStringLiteral(notifications, 'alertSeverity', [
+      'LOW',
+      'MEDIUM',
+      'HIGH',
+      'CRITICAL'
+    ]),
+    slackNangoConnectionId: readOptionalString(notifications, 'slackNangoConnectionId'),
+    slackNangoProviderKey: readOptionalString(notifications, 'slackNangoProviderKey')
   };
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_ADMIN_ROLES);
   await updateWorkspaceNotifications({
     organizationId: actor.organizationId,
-    notifications: body.notifications
+    notifications: notificationSettings
   });
   await recordActivityEvent({
     organizationId: actor.organizationId,
@@ -205,36 +239,65 @@ export async function handleWorkspaceNotificationsGet(request: Request) {
 
 export async function handleWorkspaceNotificationsRead(request: Request) {
   const actor = await resolveApiActorContext(request);
-  const body = (await request.json()) as { notificationIds?: string[] };
+  const body = (await readJsonRecord(request)) ?? {};
   const result = await markUserNotificationsRead({
     userId: actor.profileId,
     organizationId: actor.organizationId,
-    notificationIds: body.notificationIds
+    notificationIds: readOptionalStringArray(body, 'notificationIds') ?? undefined
   });
   return Response.json({ ok: true, updatedCount: result.count });
 }
 
 export async function handleWorkspaceLlmPatch(request: Request) {
-  const body = (await request.json()) as {
-    llm: {
-      selectedGeminiModel?: string;
-      maxTokens?: number;
-      temperature?: number;
-      customProviders?: Array<{ name: string; host: string; model: string; active: boolean }>;
-      vendorRouting?: Array<{
-        id: string;
-        label: string;
-        description: string;
-        kind: 'managed' | 'custom' | 'auto_discover';
-        providerRef: string;
-        enabled: boolean;
-      }>;
-    };
-  };
+  const body = (await readJsonRecord(request)) ?? {};
+  const llm = readOptionalRecord(body, 'llm');
+  if (!llm) {
+    return Response.json({ error: 'llm is required' }, { status: 400 });
+  }
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_ADMIN_ROLES);
+  const customProviders = Array.isArray(llm.customProviders)
+    ? llm.customProviders
+        .filter((provider) => provider && typeof provider === 'object')
+        .map((provider) => ({
+          name: String((provider as Record<string, unknown>).name ?? ''),
+          host: String((provider as Record<string, unknown>).host ?? ''),
+          model: String((provider as Record<string, unknown>).model ?? ''),
+          active: (provider as Record<string, unknown>).active === true
+        }))
+    : undefined;
+  const vendorRouting = Array.isArray(llm.vendorRouting)
+    ? llm.vendorRouting
+        .filter((tier) => tier && typeof tier === 'object')
+        .map((tier) => ({
+          id: String((tier as Record<string, unknown>).id ?? ''),
+          label: String((tier as Record<string, unknown>).label ?? ''),
+          description: String((tier as Record<string, unknown>).description ?? ''),
+          kind:
+            readOptionalStringLiteral(tier as Record<string, unknown>, 'kind', [
+              'managed',
+              'custom',
+              'auto_discover'
+            ]) ?? 'managed',
+          providerRef: String((tier as Record<string, unknown>).providerRef ?? ''),
+          enabled: (tier as Record<string, unknown>).enabled === true
+        }))
+    : undefined;
   await updateWorkspaceLlm({
     organizationId: actor.organizationId,
-    llm: body.llm
+    llm: {
+      selectedGeminiModel: readOptionalString(llm, 'selectedGeminiModel'),
+      maxTokens:
+        typeof llm.maxTokens === 'number' && Number.isFinite(llm.maxTokens)
+          ? llm.maxTokens
+          : undefined,
+      temperature:
+        typeof llm.temperature === 'number' && Number.isFinite(llm.temperature)
+          ? llm.temperature
+          : undefined,
+      customProviders,
+      vendorRouting
+    }
   });
   await recordActivityEvent({
     organizationId: actor.organizationId,
@@ -248,29 +311,32 @@ export async function handleWorkspaceLlmPatch(request: Request) {
 }
 
 export async function handleWorkspaceIntegrationsPost(request: Request) {
-  const body = (await request.json()) as {
-    provider?: 'gitlab' | 'github';
-    externalAccountName?: string;
-    externalAccountId?: string;
-    accessScope?: Record<string, unknown>;
-    accessToken?: string;
-    refreshToken?: string;
-    expiresInSeconds?: number;
-  };
+  const body = (await readJsonRecord(request)) ?? {};
 
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_ADMIN_ROLES);
 
-  if (body.accessToken && body.externalAccountId && body.externalAccountName) {
+  const provider = readOptionalString(body, 'provider');
+  const externalAccountName = readOptionalString(body, 'externalAccountName');
+  const externalAccountId = readOptionalString(body, 'externalAccountId');
+  const accessToken = readOptionalString(body, 'accessToken');
+  const refreshToken = readOptionalString(body, 'refreshToken');
+  const nangoConnectionId = readOptionalString(body, 'nangoConnectionId');
+  const nangoProviderKey = readOptionalString(body, 'nangoProviderKey');
+
+  if (accessToken && externalAccountId && externalAccountName) {
     const connection = await upsertProviderConnectionFromOAuth({
       organizationId: actor.organizationId,
       createdById: actor.profileId,
-      provider: body.provider ?? 'gitlab',
-      externalAccountId: body.externalAccountId,
-      externalAccountName: body.externalAccountName,
-      accessToken: body.accessToken,
-      refreshToken: body.refreshToken,
-      accessScope: body.accessScope,
-      expiresInSeconds: body.expiresInSeconds
+      provider: provider === 'github' ? 'github' : 'gitlab',
+      externalAccountId,
+      externalAccountName,
+      accessToken,
+      refreshToken: refreshToken ?? undefined,
+      accessScope: readOptionalRecord(body, 'accessScope') ?? undefined,
+      expiresInSeconds: typeof body.expiresInSeconds === 'number' ? body.expiresInSeconds : undefined,
+      nangoConnectionId: nangoConnectionId ?? undefined,
+      nangoProviderKey: nangoProviderKey ?? undefined
     });
     await recordActivityEvent({
       organizationId: actor.organizationId,
@@ -283,18 +349,20 @@ export async function handleWorkspaceIntegrationsPost(request: Request) {
     return Response.json({ ok: true, connection });
   }
 
-  if (!body.externalAccountName?.trim()) {
+  if (!externalAccountName?.trim()) {
     return Response.json({ error: 'externalAccountName is required' }, { status: 400 });
   }
 
   const connection = await createProviderConnection({
     organizationId: actor.organizationId,
     createdById: actor.profileId,
-    provider: body.provider ?? 'gitlab',
-    externalAccountName: body.externalAccountName.trim(),
-    externalAccountId: body.externalAccountId?.trim(),
-    accessScope: body.accessScope,
-    accessToken: body.accessToken
+    provider: provider === 'github' ? 'github' : 'gitlab',
+    externalAccountName: externalAccountName.trim(),
+    externalAccountId: externalAccountId?.trim(),
+    accessScope: readOptionalRecord(body, 'accessScope') ?? undefined,
+    accessToken: accessToken ?? undefined,
+    nangoConnectionId: nangoConnectionId ?? undefined,
+    nangoProviderKey: nangoProviderKey ?? undefined
   });
 
   await recordActivityEvent({
@@ -309,35 +377,68 @@ export async function handleWorkspaceIntegrationsPost(request: Request) {
   return Response.json({ ok: true, connection });
 }
 
+export async function handleWorkspaceNangoConnectSessionPost(request: Request) {
+  const body = (await readJsonRecord(request)) ?? {};
+  const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_ADMIN_ROLES);
+  const tags = readOptionalRecord(body, 'tags');
+  const overrides = readOptionalRecord(body, 'overrides');
+  const providerConfigKey = readOptionalString(body, 'providerConfigKey');
+  const allowedIntegrations = readOptionalStringArray(body, 'allowedIntegrations');
+  const stringTags = tags
+    ? Object.fromEntries(
+        Object.entries(tags).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+      )
+    : undefined;
+  const session = await createNangoConnectSession({
+    tags: {
+      organization_id: actor.organizationId,
+      end_user_id: actor.profileId,
+      ...(actor.email ? { end_user_email: actor.email } : {}),
+      ...(stringTags ?? {})
+    },
+    ...(providerConfigKey
+      ? {
+          allowedIntegrations: allowedIntegrations?.length ? allowedIntegrations : [providerConfigKey]
+        }
+      : allowedIntegrations?.length
+        ? { allowedIntegrations }
+        : {}),
+    ...(overrides ? { overrides } : {})
+  });
+  return Response.json({ ok: true, ...session });
+}
+
 export async function handleWorkspaceIntegrationSync(request: Request, connectionId: string) {
+  const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_ADMIN_ROLES);
   const connection = await syncProviderConnection(connectionId);
   return Response.json({ ok: true, connection });
 }
 
 export async function handleWorkspaceBillingPatch(request: Request) {
-  const body = (await request.json()) as { plan?: 'free' | 'pro' | 'team' | 'enterprise' };
-  if (!body.plan) {
+  const body = (await readJsonRecord(request)) ?? {};
+  const plan = readOptionalStringLiteral(body, 'plan', ['free', 'pro', 'team', 'enterprise']);
+  if (!plan) {
     return Response.json({ error: 'plan is required' }, { status: 400 });
   }
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, BILLING_ROLES);
   try {
     const billing = await updateBillingPlan({
       organizationId: actor.organizationId,
-      plan: body.plan
+      plan
     });
     await recordActivityEvent({
       organizationId: actor.organizationId,
       actorId: actor.profileId,
       eventType: 'billing.plan_changed',
       objectType: 'organization_billing_account',
-      summary: `Updated billing plan to ${body.plan}`
+      summary: `Updated billing plan to ${plan}`
     });
     return Response.json({ ok: true, billing });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : 'Billing update failed' },
-      { status: 402 }
-    );
+    return apiErrorResponse(error, 'Billing update failed', { fallbackStatus: 402 });
   }
 }
 
@@ -389,16 +490,18 @@ export async function handleWorkspaceActivityExport(request: Request) {
 }
 
 export async function handleWorkspaceApiKeysPost(request: Request) {
-  const body = (await request.json()) as { label?: string };
-  if (!body.label?.trim()) {
+  const body = (await readJsonRecord(request)) ?? {};
+  const label = readRequiredString(body, 'label');
+  if (!label) {
     return Response.json({ error: 'label is required' }, { status: 400 });
   }
 
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_ADMIN_ROLES);
   const apiKey = await createOrganizationApiKey({
     organizationId: actor.organizationId,
     createdById: actor.profileId,
-    label: body.label
+    label
   });
   await recordActivityEvent({
     organizationId: actor.organizationId,
@@ -413,6 +516,7 @@ export async function handleWorkspaceApiKeysPost(request: Request) {
 
 export async function handleWorkspaceApiKeyDelete(request: Request, keyId: string) {
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_ADMIN_ROLES);
   const result = await revokeOrganizationApiKey({
     organizationId: actor.organizationId,
     keyId
@@ -431,4 +535,48 @@ export async function handleWorkspaceApiKeyDelete(request: Request, keyId: strin
   });
 
   return Response.json({ ok: true });
+}
+
+export async function handleWorkspaceMembersInvitePost(request: Request) {
+  const body = (await readJsonRecord(request)) ?? {};
+  const email = readRequiredString(body, 'email');
+  const role = readOptionalString(body, 'role');
+
+  if (!email) {
+    return Response.json({ error: 'email is required' }, { status: 400 });
+  }
+
+  const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_ADMIN_ROLES);
+
+  try {
+    const invitation = await createOrganizationInvitation({
+      organizationId: actor.organizationId,
+      invitedById: actor.profileId,
+      email,
+      role: role === 'owner' || role === 'admin' || role === 'viewer' || role === 'billing' ? role : 'member'
+    });
+
+    await createOrganizationNotifications({
+      organizationId: actor.organizationId,
+      kind: 'member_invited',
+      title: 'Member invitation sent',
+      body: `${email} was invited as ${role ?? 'member'}.`,
+      metadata: {
+        invitationId: invitation.invitation.id,
+        invitedEmail: email,
+        invitedRole: role ?? 'member'
+      }
+    });
+
+    return Response.json({ ok: true, ...invitation });
+  } catch (error) {
+    if (error instanceof EntitlementError) {
+      return Response.json(
+        { error: 'Plan limit reached.', code: error.code },
+        { status: error.status }
+      );
+    }
+    throw error;
+  }
 }

@@ -6,6 +6,8 @@ const SYNTHETIC_EVIDENCE_REF =
 const GENERIC_ISSUE_TITLE =
   /^contain .+ failures before production rollout$/i;
 
+export const ISSUE_CONSENSUS_CONFIDENCE_THRESHOLD = 0.85;
+
 export function isSyntheticEvidenceRef(ref: string): boolean {
   return SYNTHETIC_EVIDENCE_REF.test(ref.trim());
 }
@@ -31,6 +33,11 @@ export function validateIssueCandidate(issue: IssueCandidate): string[] {
   const errors: string[] = [];
   if (!issue.title || issue.title.length < 12) errors.push('weak title');
   if (GENERIC_ISSUE_TITLE.test(issue.title.trim())) errors.push('generic mock-style title');
+  if (issue.confidence < ISSUE_CONSENSUS_CONFIDENCE_THRESHOLD) {
+    errors.push(
+      `confidence below consensus threshold (${issue.confidence.toFixed(3)} < ${ISSUE_CONSENSUS_CONFIDENCE_THRESHOLD.toFixed(2)})`
+    );
+  }
   if ((issue.evidence?.length ?? 0) < 2) errors.push('not enough evidence');
   if ((issue.trigger_conditions?.length ?? 0) < 2) errors.push('not enough trigger conditions');
   if ((issue.implementation_steps?.length ?? 0) < 2) errors.push('not enough implementation steps');

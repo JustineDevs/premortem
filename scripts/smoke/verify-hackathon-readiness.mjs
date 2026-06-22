@@ -6,7 +6,6 @@ import { loadPremortemLocalEnv } from '../load-local-env.mjs';
 loadPremortemLocalEnv();
 
 import {
-  DEFAULT_GEMINI_MODEL,
   allowsForceLocalIngest
 } from '../../packages/domain/dist/index.js';
 import {
@@ -28,6 +27,10 @@ import {
   isPhoenixLlmEvalEnabled,
   PREMORTEM_PHOENIX_CODE_EVALUATOR_PATH
 } from '../../packages/observability/dist/index.js';
+import { SMOKE_GEMINI_MODEL as DEFAULT_SMOKE_GEMINI_MODEL } from '../../packages/domain/dist/index.js';
+
+const SMOKE_GEMINI_MODEL = process.env.LLM_MODEL?.trim() || DEFAULT_SMOKE_GEMINI_MODEL;
+process.env.LLM_MODEL = SMOKE_GEMINI_MODEL;
 
 function pass(label) {
   console.log(`PASS ${label}`);
@@ -75,10 +78,10 @@ if (!existsSync(licensePath)) {
   }
 }
 
-if (DEFAULT_GEMINI_MODEL !== 'gemini-3-flash-preview') {
-  fail('DEFAULT_GEMINI_MODEL', `expected gemini-3-flash-preview, got ${DEFAULT_GEMINI_MODEL}`);
+if (SMOKE_GEMINI_MODEL !== 'gemini-2.5-flash-lite') {
+  fail('SMOKE_GEMINI_MODEL', `expected gemini-2.5-flash-lite, got ${SMOKE_GEMINI_MODEL}`);
 } else {
-  pass(`DEFAULT_GEMINI_MODEL=${DEFAULT_GEMINI_MODEL}`);
+  pass(`SMOKE_GEMINI_MODEL=${SMOKE_GEMINI_MODEL}`);
 }
 
 if (typeof fetchGitLabContextViaMcp !== 'function' || typeof isGitLabMcpEnabled !== 'function') {
@@ -102,7 +105,7 @@ const mission = await bootstrapPremortemAgentMission({
 
 if (mission.engine !== 'google-adk') {
   fail('agent mission engine', `expected google-adk, got ${mission.engine}`);
-} else if (mission.model !== DEFAULT_GEMINI_MODEL) {
+} else if (mission.model !== SMOKE_GEMINI_MODEL) {
   fail('agent mission model', mission.model);
 } else if (mission.steps.length < 2) {
   fail('agent mission steps', 'expected multi-step trace');
@@ -113,7 +116,7 @@ if (mission.engine !== 'google-adk') {
 const rootAgent = buildPremortemRootAgent({
   gitlabBaseUrl: process.env.GITLAB_BASE_URL?.trim() || 'https://gitlab.com',
   gitlabToken: process.env.GITLAB_TOKEN?.trim() || 'smoke-token',
-  model: DEFAULT_GEMINI_MODEL,
+  model: SMOKE_GEMINI_MODEL,
   geminiApiKey: process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim() || 'smoke-local-definition-only'
 });
 

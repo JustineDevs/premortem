@@ -3,7 +3,7 @@ import { billingPlansReferenceDoc } from '@/content/marketing/docs-additional-co
 
 import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
 export const metadata = buildSeoMetadata({
-  title: 'Billing & plan limits | Premortem Docs',
+  title: 'Billing & plan limits',
   description: billingPlansReferenceDoc.lead,
   canonical: '/docs/reference/billing-plans',
   keywords: canonicalDocsKeywords

@@ -18,11 +18,13 @@ apps/web/.wrangler/tmp/
 .cloudflare-pages
 .cursor/hooks/state/
 .turbo
+.cache/
 .next
 coverage
 dist
 *.log
 *.tsbuildinfo
+packages/*/src/**/*.js
 **/__pycache__/
 
 # Internal / private design and strategy
@@ -66,3 +68,6 @@ dist
 .idea/
 .vscode/*.code-workspace
 .cursor/obsidian-vault/
+.ma/
+packages/evals/promptfoo/results*.json
+apps/web/tmp-auth-probe-*

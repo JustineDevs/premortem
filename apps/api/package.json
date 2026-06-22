@@ -4,9 +4,9 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx watch src/local-server.ts",
+    "dev": "node --import tsx src/local-server.ts",
     "dev:worker": "wrangler dev",
-    "deploy": "node ../../scripts/cloudflare/ensure-queues.mjs production && wrangler deploy --config wrangler.production.toml",
+    "deploy": "node ../../scripts/cloudflare/run-worker-deploy.mjs",
     "deploy:dev": "node ../../scripts/cloudflare/ensure-queues.mjs dev && wrangler deploy --env dev",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "bash ../../scripts/smoke/run-audit-flow.sh",
@@ -15,9 +15,9 @@
   "dependencies": {
     "@premortem/domain": "workspace:*",
     "@premortem/db": "workspace:*",
+    "@premortem/integrations": "workspace:*",
     "@premortem/gitlab-sync": "workspace:*",
     "@premortem/orchestrator": "workspace:*",
-    "@premortem/storage": "workspace:*",
     "@premortem/workflow": "workspace:*",
     "@premortem/observability": "workspace:*"
   },

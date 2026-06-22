@@ -42,20 +42,20 @@ export async function getUsageEventTotalsForOrganization(
   graphWrites: number;
   publishes: number;
 }> {
-  const events = await prisma.usageEvent.findMany({
+  const grouped = await prisma.usageEvent.groupBy({
+    by: ['eventType'],
     where: {
       organizationId,
       createdAt: { gte: since }
     },
-    select: {
-      eventType: true,
+    _sum: {
       quantity: true
     }
   });
 
-  return events.reduce(
+  return grouped.reduce(
     (acc, event) => {
-      const quantity = asNumber(event.quantity);
+      const quantity = asNumber(event._sum.quantity);
       if (event.eventType === 'audit_run') acc.auditRuns += quantity;
       if (event.eventType === 'tokens_in' || event.eventType === 'tokens_out') {
         acc.tokensUsed += quantity;

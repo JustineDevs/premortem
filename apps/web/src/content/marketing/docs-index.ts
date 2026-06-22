@@ -12,6 +12,7 @@ export {
   neo4jGraphReferenceDoc,
   observabilityReferenceDoc,
   securityConceptDoc,
+  enterpriseReadinessDoc,
   publishGitlabTutorialDoc
 } from './docs-additional-content';
 
@@ -34,17 +35,17 @@ export const docsNavSections: readonly DocSection[] = [
       {
         href: marketingLinks.docs,
         label: 'Documentation hub',
-        description: 'Choose the right doc type for your goal.'
+        description: 'Choose the right doc type for the current task.'
       },
       {
         href: marketingLinks.docsGettingStarted,
         label: 'Local setup',
-        description: 'Install, configure env vars, and run pnpm dev.'
+        description: 'Install, configure env vars, and run the local stack.'
       },
       {
         href: marketingLinks.docsTutorialFirstAudit,
         label: 'Tutorial: first audit',
-        description: 'Learning-oriented path from connect to review-ready issues.'
+        description: 'Learning-oriented path from connect to review-ready issue candidates.'
       },
       {
         href: marketingLinks.docsTutorialPublishGitlab,
@@ -64,7 +65,7 @@ export const docsNavSections: readonly DocSection[] = [
       {
         href: marketingLinks.docsGuidesRunAudit,
         label: 'Run an audit',
-        description: 'Trigger scans, runtime console, pause/resume checkpoints.'
+        description: 'Trigger scans, inspect runtime state, and manage pause/resume checkpoints.'
       },
       {
         href: marketingLinks.docsGuidesReviewPublish,
@@ -83,8 +84,8 @@ export const docsNavSections: readonly DocSection[] = [
       },
       {
         href: marketingLinks.docsGuidesAiPlayground,
-        label: 'AI Code Playground',
-        description: 'Ad-hoc Gemini snippet analysis outside full audits.'
+        label: 'Code analysis',
+        description: 'Ad hoc code analysis outside full audits.'
       },
       {
         href: marketingLinks.docsGuidesWorkspaceSettings,
@@ -94,12 +95,12 @@ export const docsNavSections: readonly DocSection[] = [
       {
         href: marketingLinks.docsGuidesAuthSessions,
         label: 'Auth & sessions',
-        description: 'Supabase login, local dev auth, GitLab OAuth redirects.'
+        description: 'Supabase login, local auth modes, and GitLab OAuth redirects.'
       },
       {
         href: marketingLinks.docsGuidesDeployProduction,
         label: 'Deploy to production',
-        description: 'Cloudflare Pages/Worker, Supabase, Neo4j, Stripe.'
+        description: 'Cloudflare Pages and Worker, Supabase, Neo4j, and Stripe.'
       },
       {
         href: marketingLinks.docsIntegrationsGitlab,
@@ -129,12 +130,17 @@ export const docsNavSections: readonly DocSection[] = [
       {
         href: marketingLinks.docsReferenceNeo4j,
         label: 'Neo4j & graph store',
-        description: 'Local docker, Aura, graph API, NEO4J_DISABLED.'
+        description: 'Local Docker, Aura, graph API, and local fallback controls.'
       },
       {
         href: marketingLinks.docsReferenceObservability,
         label: 'Observability',
-        description: 'Sentry, PostHog, Langfuse, Phoenix tracing.'
+        description: 'Sentry, PostHog, Langfuse, and Phoenix tracing.'
+      },
+      {
+        href: marketingLinks.docsArchitectureEnterpriseReadiness,
+        label: 'Enterprise readiness',
+        description: 'Security defensibility, tenant isolation, and provider posture.'
       },
       {
         href: marketingLinks.docsArchitecture,
@@ -251,7 +257,7 @@ export const docsHubCards = [
   {
     href: marketingLinks.docsGettingStarted,
     title: 'Local setup',
-    description: 'Bootstrap the monorepo, configure .env.local, and verify smoke tests.',
+    description: 'Bootstrap the monorepo, configure .env.local, and run verification checks.',
     tag: 'Getting started'
   },
   {
@@ -261,9 +267,15 @@ export const docsHubCards = [
     tag: 'Guide'
   },
   {
+    href: marketingLinks.docsArchitectureEnterpriseReadiness,
+    title: 'Enterprise readiness',
+    description: 'Security defensibility, tenant isolation, and provider posture.',
+    tag: 'Reference'
+  },
+  {
     href: marketingLinks.docsTutorialFirstAudit,
     title: 'First audit tutorial',
-    description: 'Connect a repo, run the specialist swarm, and reach review-ready issues.',
+    description: 'Connect a repo, run the specialist swarm, and produce review-ready issues.',
     tag: 'Tutorial'
   },
   {
@@ -287,25 +299,25 @@ export const docsHubCards = [
   {
     href: marketingLinks.docsTroubleshooting,
     title: 'Troubleshooting',
-    description: 'Auth loops, empty dashboard, OAuth host, publish drift.',
+    description: 'Auth loops, empty dashboard, OAuth host alignment, and publish drift.',
     tag: 'Support'
   }
 ] as const;
 
 export const gettingStartedDoc = {
   title: 'Local setup',
-  lead: 'Run Premortem locally and confirm the reviewer console loads at /app.',
+  lead: 'Run Premortem locally and confirm the reviewer console loads at /app under the intended environment configuration.',
   audience: 'Developers evaluating Premortem or contributing to the monorepo.',
   prerequisites: [
     'Node.js 20+ and pnpm 9.x (see packageManager in package.json).',
     'Supabase/Postgres via DATABASE_URL and DIRECT_URL in .env.local.',
-    'Optional: Gemini or Azure OpenAI keys for live LLM audit flows.'
+    'Optional: Gemini keys for live LLM-backed audit flows.'
   ],
   expectedResult: 'pnpm dev serves the landing page at /, the console at /app, and the API responds on PREMORTEM_API_PORT.',
   toc: [
     { id: 'prerequisites', label: 'Prerequisites' },
     { id: 'start-stack', label: 'Start the stack' },
-    { id: 'verify', label: 'Verify with smoke tests' }
+    { id: 'verify', label: 'Verify with checks' }
   ],
   sections: [
     {
@@ -314,7 +326,7 @@ export const gettingStartedDoc = {
       bullets: [
         'Copy .env.example to .env.local and fill DATABASE_URL, DIRECT_URL, and provider keys.',
         'Run pnpm install at the repository root.',
-        'For auth-disabled local dev, set PREMORTEM_AUTH_DISABLED=1.'
+        'For local verification only, set PREMORTEM_AUTH_DISABLED=1.'
       ]
     },
     {
@@ -328,9 +340,9 @@ export const gettingStartedDoc = {
     },
     {
       id: 'verify',
-      heading: 'Verify with smoke tests',
+      heading: 'Verify with checks',
       bullets: [
-        'pnpm run smoke:local checks /health, /, /app, and audit snapshot routes.',
+        'pnpm run smoke:local checks /health, /, /app, and audit snapshot routes in a local environment.',
         'pnpm run smoke:onboarding-e2e submits a real audit and confirms persisted findings.'
       ]
     }
@@ -347,7 +359,7 @@ export const firstAuditTutorialDoc = {
   audience: 'New operators and engineers onboarding to Premortem.',
   prerequisites: [
     'Local stack running (see Local setup).',
-    'A GitLab project you can authorize, or PREMORTEM_INGEST_LOCAL=1 for mock ingest.'
+    'A GitLab project you can authorize, or PREMORTEM_INGEST_LOCAL=1 for local verification ingest only.'
   ],
   expectedResult: 'An audit run with agent telemetry, deduplicated clusters, and issue candidates awaiting reviewer approval.',
   screenshot: {
@@ -375,9 +387,10 @@ export const firstAuditTutorialDoc = {
       id: 'trigger',
       heading: 'Trigger the audit',
       bullets: [
-        'From Dashboard or Projects, click Run scan on the connected project.',
+        'Trigger surfaces: MR comment, Duo sidebar, pipeline/job, or the Run audit button in Dashboard/Projects.',
+        'The input always includes the project plus branch or MR context, so the audit is grounded before analysis starts.',
         'The API enqueues an audit job; status moves queued → running.',
-        'Continuous audit toggle (sidebar or dashboard): OFF = manual scans only; ON = automatic ~90s rotation when idle.'
+        'Continuous audit toggle (sidebar or dashboard): OFF means manual scans only; ON enables automatic idle rotation.'
       ]
     },
     {
@@ -395,8 +408,9 @@ export const firstAuditTutorialDoc = {
       heading: 'Review outputs',
       bullets: [
         'Open Audits → select the run → Findings tab.',
+        'Inspect one finding, follow source evidence, and review the graph-backed lineage.',
         'Confirm, edit, or reject synthesized issue candidates.',
-        'Approved items are eligible for GitLab publish (see Review & publish guide).'
+        'Approved items become publishable GitLab issues (see Review & publish guide).'
       ]
     }
   ],
@@ -432,7 +446,7 @@ export const connectGitlabGuideDoc = {
       heading: 'Register project',
       bullets: [
         'Projects → Register repository: name, repo URL, branch (usually main).',
-        'Optional scan snippet attaches custom context for ad-hoc sandbox scans.',
+        'Optional scan snippet attaches custom context for ad hoc snippet analysis.',
         'Work item attributes (Settings) control labels applied on publish.'
       ]
     },
@@ -468,7 +482,7 @@ export const runAuditGuideDoc = {
       id: 'manual',
       heading: 'Manual scan',
       bullets: [
-        'Dashboard → Run scan on a project card, or Projects → trigger from the row action.',
+        'Dashboard → Run audit on a project card, or Projects → trigger from the row action.',
         'POST /api/audits with projectId and branch enqueues the same job programmatically.',
         'Poll GET /api/audits/:id for runStatus, agentRuns, and events.'
       ]
@@ -478,7 +492,7 @@ export const runAuditGuideDoc = {
       heading: 'Continuous audit',
       bullets: [
         'Sidebar and dashboard toggles set continuousAuditEnabled for the organization.',
-        'When OFF, no automatic audits run: only manual Run scan triggers jobs.',
+        'When OFF, no automatic audits run: only manual Run audit triggers jobs.',
         'When ON, idle projects rotate on a ~90s cycle; active runs block new auto-scans.',
         'PATCH /api/workspace/runtime updates org metadata and project autoRunOnPush flags.'
       ]
@@ -517,8 +531,8 @@ export const reviewPublishGuideDoc = {
       id: 'review',
       heading: 'Review findings',
       bullets: [
-        'Audits → Findings: filter by severity, inspect trace and evidence.',
-        'Actions: Confirm, Dismiss, or proceed to synthesis edit mode.',
+        'Audits → Findings: filter by severity, inspect trace and evidence, and drill into graph-backed lineage.',
+        'Actions: Confirm, Dismiss, edit synthesis, or proceed to publish flow.',
         'Merged/split findings stay traceable in lineage view.'
       ]
     },
@@ -576,7 +590,7 @@ export const apiReferenceDoc = {
       bullets: [
         'Browser: Supabase session cookie on BFF routes (/api/* on web).',
         'Direct API worker: Bearer token or internal service auth in production.',
-        'Local smoke: PREMORTEM_AUTH_DISABLED=1 with fixture org/project IDs.'
+        'Local verification: PREMORTEM_AUTH_DISABLED=1 with local verification org/project IDs.'
       ],
       codeBlocks: [
         {
@@ -645,20 +659,21 @@ export const apiReferenceDoc = {
 
 export const environmentReferenceDoc = {
   title: 'Environment variables',
-  lead: 'Required and optional configuration for local dev, smoke tests, and production deployments.',
+  lead: 'Required and optional configuration for local development, verification, and production deployments.',
   audience: 'Developers deploying or debugging the stack.',
   githubSource: 'https://github.com/JustineDevs/premortem/blob/main/.env.example',
   toc: [
     { id: 'app', label: 'App URLs' },
     { id: 'database', label: 'Database' },
     { id: 'supabase', label: 'Supabase' },
-    { id: 'llm', label: 'LLM providers' },
+    { id: 'llm', label: 'LLM routing' },
     { id: 'gitlab', label: 'GitLab' },
     { id: 'neo4j', label: 'Neo4j' },
     { id: 'observability', label: 'Observability' },
     { id: 'billing', label: 'Stripe billing' },
     { id: 'cloudflare', label: 'Cloudflare' },
-    { id: 'runtime-flags', label: 'Runtime flags' }
+    { id: 'runtime-flags', label: 'Runtime flags' },
+    { id: 'safe-ops', label: 'Safe operation' }
   ],
   sections: [
     {
@@ -690,10 +705,10 @@ export const environmentReferenceDoc = {
     },
     {
       id: 'llm',
-      heading: 'LLM providers',
+      heading: 'LLM routing',
       bullets: [
-        'GEMINI_API_KEY, LLM_MODEL (default gemini-3-flash-preview).',
-        'Azure OpenAI: AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_MODEL.'
+        'GEMINI_API_KEY, LLM_MODEL (configured per environment; smoke harness defaults to gemini-2.5-flash-lite).',
+        'Keep provider keys server-side only; do not expose them in browser bundles.'
       ]
     },
     {
@@ -748,8 +763,8 @@ export const environmentReferenceDoc = {
       id: 'runtime-flags',
       heading: 'Runtime flags',
       bullets: [
-        'PREMORTEM_AUTH_DISABLED=1: smoke/fixture only, never production.',
-        'PREMORTEM_INGEST_LOCAL=1: mock repository ingest.',
+        'PREMORTEM_AUTH_DISABLED=1: local verification only, never production.',
+        'PREMORTEM_INGEST_LOCAL=1: local verification repository ingest.',
         'PREMORTEM_PUBLISH_DRY_RUN=1, PREMORTEM_RECONCILE_DRY_RUN=1: skip remote side effects.',
         'PREMORTEM_SKIP_DOCKER=1, PREMORTEM_PRODUCTION_MODE=1: dev stack toggles.'
       ],
@@ -758,6 +773,16 @@ export const environmentReferenceDoc = {
           variant: 'local',
           text: 'Copy .env.example to .env.local and fill values group by group.'
         }
+      ]
+    },
+    {
+      id: 'safe-ops',
+      heading: 'Safe operation',
+      bullets: [
+        'Never set PREMORTEM_AUTH_DISABLED=1 in production.',
+        'Use PREMORTEM_INGEST_LOCAL=1 only for local verification imports or test workflows.',
+        'Keep NEXT_PUBLIC_APP_URL, GitLab OAuth redirects, and provider callbacks on one canonical host.',
+        'Run pnpm run verify:env before production cutover to confirm configured mode.'
       ]
     }
   ],
@@ -844,7 +869,7 @@ export const dataFlowConceptDoc = {
       id: 'govern',
       heading: 'Governance',
       bullets: [
-        'Human review in /app before publish: no bypass from agent output to GitLab.',
+        'Human review in /app before publish: the review gate prevents direct agent-to-GitLab publish.',
         'Work item attributes automation applies labels/metadata on publish.',
         'Reconciliation detects drift between local snapshot and remote issue.'
       ]
@@ -879,7 +904,9 @@ export const troubleshootingDoc = {
       heading: 'Auth & login',
       bullets: [
         'ERR_TOO_MANY_REDIRECTS on /login: middleware canonical host redirect. Use one host (127.0.0.1 vs localhost) in NEXT_PUBLIC_APP_URL and GitLab OAuth app.',
-        '401 in /app: set PREMORTEM_AUTH_DISABLED=1 only for smoke, or complete Supabase login.',
+        '401 in /app: set PREMORTEM_AUTH_DISABLED=1 only for local verification, or complete Supabase login.',
+        'Captcha-config notice on /login or /signup: Turnstile is enabled but NEXT_PUBLIC_TURNSTILE_SITE_KEY or TURNSTILE_SECRET_KEY is missing in the deployment environment.',
+        'Callback failure on /login or /signup: the external code exchange failed or the callback host did not match NEXT_PUBLIC_APP_URL.',
         'OAuth state mismatch: clear cookies and reconnect GitLab from Settings.'
       ],
       callouts: [
@@ -894,8 +921,8 @@ export const troubleshootingDoc = {
       heading: 'Empty dashboard',
       bullets: [
         'Zeros on compliance/severity: workspace has no completed audits yet, not a bug.',
-        'Connect GitLab, register a project, then Run scan to populate metrics.',
-        'LOCAL_DEV_FIXTURE org may show fixture data when PREMORTEM_AUTH_DISABLED=1 in smoke only.'
+        'Connect GitLab, register a project, then Run audit to populate metrics.',
+        'LOCAL_DEV_FIXTURE org may show seeded local verification data when PREMORTEM_AUTH_DISABLED=1 in local verification mode.'
       ],
       screenshot: {
         src: '/landing/demo/1.png',
@@ -921,7 +948,7 @@ export const troubleshootingDoc = {
         '403 feature_locked: upgrade from Free to Starter for GitLab publish.',
         'Missing labels: enable work item attributes in Settings.',
         'Reconciliation drift: compare driftFields; re-publish or edit GitLab issue manually.',
-        'Stripe checkout fails locally: use Settings plan patch or test price IDs.'
+        'Stripe checkout requires configured price IDs; local development can still use Settings plan patch.'
       ]
     }
   ],
@@ -964,7 +991,7 @@ export const productFlowsDoc = {
       heading: 'Org & collaboration',
       bullets: [
         'Org switching when user belongs to multiple organizations.',
-        'Invitations and role-based access (roadmap: enterprise SSO).',
+        'Invitations and role-based access; enterprise SSO is tracked on the roadmap.',
         'Provider re-auth when OAuth tokens expire (WARNING on project cards).'
       ]
     },
@@ -1006,7 +1033,7 @@ export const productFlowsDoc = {
 
 export const architectureDoc = {
   title: 'Architecture overview',
-  lead: 'Core services and planned supporting infrastructure for Premortem v0.1.0.',
+  lead: 'Core services and supporting infrastructure for Premortem v0.1.0, including trust boundaries and release guardrails.',
   audience: 'Engineers integrating with or extending the platform.',
   githubSource:
     'https://github.com/JustineDevs/premortem/blob/main/docs/architecture/adr-0001-canonical-product-and-system-design.md',
@@ -1021,7 +1048,7 @@ export const architectureDoc = {
     'Cloudflare Workers via Wrangler for API edge entrypoints.',
     'GitLab as the primary issue publishing and repository provider.',
     'MCP Toolbox for Databases for safe SQL-oriented agent database access.',
-    'Gemini as the default LLM path, with Azure OpenAI as the enterprise alternative.',
+    'Gemini as the default LLM path for audits and agent flows.',
     'Neo4j as the graph persistence layer for repository structure and risk context.'
   ],
   supportingNext: [
@@ -1032,6 +1059,17 @@ export const architectureDoc = {
     'Microsoft Entra ID if enterprise SSO becomes required.'
   ],
   sections: [
+    {
+      id: 'guardrails',
+      heading: 'Operational guardrails',
+      bullets: [
+        'Production mode requires real auth, real provider keys, and explicit release checks before publish.',
+        'Audit generation uses a shared workflow contract: grounded evidence, base-rate checks, and an empty envelope when no critical risk is present.',
+        'Graph payloads fail closed when mandatory nodes or relations are missing.',
+        'Agent output is validated, clustered, and reviewer-approved before GitLab publish.',
+        'Prompt evaluation gates run before deployment and block regressions below the accepted threshold.'
+      ]
+    },
     {
       id: 'deep-dives',
       heading: 'Repository deep dives',
@@ -1048,6 +1086,7 @@ export const architectureDoc = {
     { href: marketingLinks.docsReferenceApi, label: 'API routes' },
     { href: marketingLinks.docsConceptsDataFlow, label: 'Data flow' },
     { href: marketingLinks.docsConceptsSecurity, label: 'Security & trust' },
+    { href: marketingLinks.docsArchitectureEnterpriseReadiness, label: 'Enterprise readiness' },
     {
       href: 'https://github.com/JustineDevs/premortem/blob/main/docs/architecture/adr-0001-canonical-product-and-system-design.md',
       label: 'ADR 0001 on GitHub'
@@ -1142,7 +1181,7 @@ export const releasesDoc = {
   included: [
     'Agent registry, policies, specialist prompts, and strict Zod validation.',
     'Prisma persistence, Supabase schema, and RLS/auth migration starters.',
-    'LLM adapter seams for Gemini and Azure OpenAI.',
+    'LLM adapter seams for Gemini.',
     'Neo4j driver-backed graph snapshot write path.',
     'GitLab publish and reconciliation worker starters.',
     'Queueing, idempotency, leasing, checkpoint pause/resume, and enterprise scaffolding.'
@@ -1165,8 +1204,8 @@ export const releasesDoc = {
 
 export const faqDoc = {
   title: 'Frequently asked questions',
-  lead: 'Short answers for the most common launch, auth, and support questions.',
-  description: 'Short answers for the most common launch, auth, and support questions.',
+  lead: 'Short answers for launch, auth, data handling, and support questions with current provider scope.',
+  description: 'Short answers for launch, auth, data handling, and support questions with current provider scope.',
   toc: [
     { id: 'accounts', label: 'Accounts' },
     { id: 'launch', label: 'Launch' },
@@ -1178,9 +1217,11 @@ export const faqDoc = {
       id: 'accounts',
       heading: 'Accounts',
       bullets: [
-        'Sign in with GitLab today. GitHub is still coming soon.',
+        'Sign in with GitLab today. GitHub repository integration, Bitbucket, Azure DevOps, and Gitea are roadmap surfaces and are labeled coming soon in Settings.',
         'Forgot password flows use Supabase email recovery and the existing auth callback route.',
-        'If auth is unavailable in local development, check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.'
+        'Cloudflare Turnstile protects /login and /signup when NEXT_PUBLIC_TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY are configured.',
+        'If auth is unavailable in local development, check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.',
+        'Use PREMORTEM_AUTH_DISABLED=1 only in local verification mode, never in production.'
       ]
     },
     {
@@ -1188,8 +1229,9 @@ export const faqDoc = {
       heading: 'Launch',
       bullets: [
         'The public site, docs, and auth pages share the same visual system and branding.',
+        'The product keeps raw repository context transient and stores structured audit artifacts for review.',
         'Search indexing is supported through robots.txt, sitemap.xml, and social metadata.',
-        'Stripe is wired in test mode until live keys and production billing are enabled.'
+        'Stripe stays in test mode until live keys and the catalog are configured.'
       ]
     },
     {
@@ -1198,6 +1240,8 @@ export const faqDoc = {
       bullets: [
         'Use the docs hub for setup, guides, and troubleshooting.',
         'If a page errors inside the reviewer console, retry from the route-level error view.',
+        'Alert fatigue is reduced by consensus validation and dedupe clustering before reviewer exposure.',
+        'Auth callback errors usually mean the external code exchange failed or the callback host did not match the canonical app URL.',
         'For product issues, contact the team through the published support email.'
       ]
     },
@@ -1206,12 +1250,15 @@ export const faqDoc = {
       heading: 'Privacy and data',
       bullets: [
         'Premortem uses Supabase for auth and persistence while the rest of the stack keeps domain data in the configured services.',
-        'The product documents privacy and terms publicly, and the auth pages link to both before GitLab sign-in.'
+        'Organization-scoped access controls and RLS are used to separate tenant data.',
+        'The product documents privacy and terms publicly, and the auth pages link to both before GitLab sign-in.',
+        'If your deployment requires a zero data retention or no-training LLM contract, choose a provider plan that explicitly offers it.'
       ]
     }
   ],
   relatedLinks: [
     { href: marketingLinks.docsTroubleshooting, label: 'Troubleshooting' },
-    { href: marketingLinks.docsGuidesAuthSessions, label: 'Auth & sessions' }
+    { href: marketingLinks.docsGuidesAuthSessions, label: 'Auth & sessions' },
+    { href: marketingLinks.docsArchitectureEnterpriseReadiness, label: 'Enterprise readiness' }
   ]
 } as const;

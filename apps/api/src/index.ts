@@ -1,9 +1,8 @@
-import { buildWorkerRegisteredAgents, executeAuditJob, submitAudit } from '@premortem/orchestrator';
-import { captureServerException, initServerObservability } from '@premortem/observability';
+import { captureServerException, initServerObservability } from '@premortem/observability/server';
 import type { RegisteredAgent } from '@premortem/agent-kit';
 import type { AuditJob } from '@premortem/workflow';
 import { validateProductionBootEnv } from '@premortem/domain';
-import { prisma, recordActivityEvent } from '@premortem/db';
+import { prisma, recordActivityEvent, resetMonthlyAuditUsage } from '@premortem/db';
 import { appRouter } from './lib/router';
 import type {
   AppEnv,
@@ -77,6 +76,7 @@ async function runContinuousAuditSweep(env: AppEnv, controller?: ScheduledContro
     if (!project) continue;
 
     try {
+      const { submitAudit } = await import('@premortem/orchestrator');
       const submission = await submitAudit({
         organizationId: organization.id,
         projectId: project.id,
@@ -106,10 +106,19 @@ async function runContinuousAuditSweep(env: AppEnv, controller?: ScheduledContro
       console.error('continuous-audit.sweep-error', {
         organizationId: organization.id,
         projectId: project.id,
-        error: error instanceof Error ? error.message : String(error)
+        error: 'continuous_audit_sweep_failed'
       });
     }
   }
+}
+
+function isMonthlyResetTick(controller: ScheduledControllerLike) {
+  const scheduled = new Date(controller.scheduledTime);
+  return (
+    scheduled.getUTCDate() === 1 &&
+    scheduled.getUTCHours() === 0 &&
+    scheduled.getUTCMinutes() === 0
+  );
 }
 
 export async function handleAuditQueue(
@@ -118,16 +127,21 @@ export async function handleAuditQueue(
   _ctx?: ExecutionContextLike,
   options?: { registryAgents?: RegisteredAgent[] }
 ) {
-  const registryAgents = options?.registryAgents ?? buildWorkerRegisteredAgents();
+  const orchestrator = options?.registryAgents ? null : await import('@premortem/orchestrator');
+  const registryAgents = options?.registryAgents ?? orchestrator!.buildWorkerRegisteredAgents();
 
   for (const message of batch.messages) {
     if (!isAuditJob(message.body)) {
-      console.error('audit-queue.invalid-payload', { queue: batch.queue, messageId: message.id });
+      captureServerException(new Error('audit-queue.invalid-payload'), {
+        queue: batch.queue,
+        messageId: message.id
+      });
       message.ack();
       continue;
     }
 
     try {
+      const { executeAuditJob } = orchestrator ?? (await import('@premortem/orchestrator'));
       await executeAuditJob({
         job: message.body,
         registryAgents
@@ -139,7 +153,7 @@ export async function handleAuditQueue(
         queue: batch.queue,
         messageId: message.id,
         attempts,
-        error: error instanceof Error ? error.message : String(error)
+        error: 'audit_job_failed'
       });
       captureServerException(error, { queue: batch.queue, messageId: message.id, attempts });
 
@@ -158,6 +172,9 @@ export async function scheduled(
   env: AppEnv,
   _ctx?: ExecutionContextLike
 ) {
+  if (isMonthlyResetTick(controller)) {
+    await resetMonthlyAuditUsage();
+  }
   await runContinuousAuditSweep(env, controller);
 }
 

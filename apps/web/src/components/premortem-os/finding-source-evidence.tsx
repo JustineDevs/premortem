@@ -2,11 +2,12 @@
 
 import React from 'react';
 import { FileCode } from 'lucide-react';
+import { formatSourceCodeEvidence } from '@premortem/domain';
 
 import type { Finding } from '@/lib/premortem-os/types';
 
 interface FindingSourceEvidenceProps {
-  finding: Pick<Finding, 'evidence' | 'filepath' | 'line' | 'trace'>;
+  finding: Pick<Finding, 'evidence' | 'evidenceRefs' | 'filepath' | 'line' | 'trace' | 'suggestedPatchCode'>;
   title?: string;
   compact?: boolean;
   className?: string;
@@ -20,9 +21,13 @@ export function FindingSourceEvidence({
 }: FindingSourceEvidenceProps) {
   const traceWithSnippets = finding.trace.filter((step) => step.codeSnippet?.trim());
   const hasTraceSnippets = traceWithSnippets.length > 0;
-  const hasEvidenceText = Boolean(finding.evidence?.trim());
+  const evidenceText = finding.evidenceRefs?.length
+    ? formatSourceCodeEvidence(finding.evidenceRefs)
+    : finding.evidence?.trim() ?? '';
+  const hasEvidenceText = Boolean(evidenceText);
+  const hasSuggestedPatch = Boolean(finding.suggestedPatchCode?.trim());
 
-  if (!hasEvidenceText && !hasTraceSnippets) {
+  if (!hasEvidenceText && !hasTraceSnippets && !hasSuggestedPatch) {
     return (
       <div className={`rounded border border-dashed border-zinc-300 bg-zinc-50 p-3 ${className}`}>
         <p className="font-mono text-[9px] uppercase tracking-wide text-zinc-500">{title}</p>
@@ -57,7 +62,23 @@ export function FindingSourceEvidence({
             </div>
           )}
           <pre className="overflow-x-auto p-3 font-mono text-[10px] leading-relaxed text-zinc-300 select-text">
-            <code>{finding.evidence}</code>
+            <code>{evidenceText}</code>
+          </pre>
+        </div>
+      )}
+
+      {hasSuggestedPatch && (
+        <div className="overflow-hidden rounded border border-emerald-900/30 bg-emerald-950 shadow-inner">
+          {!compact && (
+            <div className="flex items-center gap-1.5 border-b border-emerald-900/40 bg-emerald-950/80 p-2 font-mono text-[9px] text-emerald-200">
+              <span className="h-2.5 w-2.5 rounded-full bg-[#E15A5A]" />
+              <span className="h-2.5 w-2.5 rounded-full bg-[#E88B5D]" />
+              <span className="h-2.5 w-2.5 rounded-full bg-[#7AB355]" />
+              <span className="ml-1 select-none font-bold text-[#CDE2D3]">Recommended code DNA</span>
+            </div>
+          )}
+          <pre className="overflow-x-auto p-3 font-mono text-[10px] leading-relaxed text-emerald-50 select-text">
+            <code>{finding.suggestedPatchCode}</code>
           </pre>
         </div>
       )}

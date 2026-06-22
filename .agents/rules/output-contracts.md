@@ -15,6 +15,7 @@ All agents and orchestrators must:
 5. Refuse or mark insufficiency when evidence is weak.
 6. Never silently invent repo facts.
 7. Never convert unknowns into confident recommendations.
+8. When source context includes a code snippet, preserve it in evidence or issue-body payloads rather than collapsing it to a file name only.
 
 ## Prediction outcome contract
 
@@ -48,6 +49,8 @@ Use this unless a subsystem defines a stricter schema (e.g. finding synthesizer 
 - Regression: `pnpm run eval:prompts` / `packages/evals/promptfoo/promptfooconfig.yaml`
 
 Top-level key must be `issues`. Each issue requires evidence arrays meeting minimum bar in eval fixtures.
+
+When the source material includes an exact code excerpt, the rendered issue body or evidence payload should carry that excerpt forward in context.
 
 ## Issue validator contract
 

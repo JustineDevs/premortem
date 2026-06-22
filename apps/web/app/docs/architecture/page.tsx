@@ -9,7 +9,7 @@ import { architectureDoc } from '@/content/marketing/docs-index';
 
 import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
 export const metadata = buildSeoMetadata({
-  title: 'Architecture overview | Premortem Docs',
+  title: 'Architecture overview',
   description: architectureDoc.lead,
   canonical: '/docs/architecture',
   keywords: canonicalDocsKeywords

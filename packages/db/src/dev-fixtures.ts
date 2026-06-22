@@ -87,6 +87,13 @@ export async function ensureLocalDevelopmentFixture() {
       id: { not: LOCAL_DEV_FIXTURE.projectId }
     }
   });
+  await prisma.project.deleteMany({
+    where: {
+      provider: 'gitlab',
+      externalProjectId,
+      id: { not: LOCAL_DEV_FIXTURE.projectId }
+    }
+  });
 
   await prisma.project.upsert({
     where: { id: LOCAL_DEV_FIXTURE.projectId },

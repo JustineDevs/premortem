@@ -3,7 +3,7 @@ import { gitlabIntegrationDoc } from '@/content/marketing/docs-index';
 
 import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
 export const metadata = buildSeoMetadata({
-  title: 'GitLab integration | Premortem Docs',
+  title: 'GitLab integration',
   description: gitlabIntegrationDoc.lead,
   canonical: '/docs/integrations/gitlab',
   keywords: canonicalDocsKeywords

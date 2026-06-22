@@ -3,7 +3,7 @@ import { apiReferenceDoc } from '@/content/marketing/docs-index';
 
 import { buildSeoMetadata, canonicalDocsKeywords } from '@/lib/seo-metadata';
 export const metadata = buildSeoMetadata({
-  title: 'API routes | Premortem Docs',
+  title: 'API routes',
   description: apiReferenceDoc.lead,
   canonical: '/docs/reference/api',
   keywords: canonicalDocsKeywords

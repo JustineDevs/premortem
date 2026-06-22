@@ -1160,7 +1160,7 @@ var Component = /* @__PURE__ */ React.forwardRef(function (props, ref) {
 													"--framer-text-alignment": "left",
 												}}
 											>
-												{"Platform expansion (coming soon)."}
+												{"Platform expansion is planned."}
 											</motion.p>
 										</React.Fragment>
 									</RichText>

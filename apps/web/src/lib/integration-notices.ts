@@ -1,6 +1,6 @@
 export const integrationNoticeMessages: Record<string, string> = {
   gitlab_connected: 'GitLab connected successfully. Pick a repository to enable.',
-  coming_soon: 'That provider connector is coming soon.',
+  coming_soon: 'That provider connector is not enabled in this release.',
   denied: 'GitLab authorization was cancelled.',
   config: 'GitLab OAuth is not configured. Set GITLAB_CLIENT_ID and GITLAB_CLIENT_SECRET.',
   invalid_state:

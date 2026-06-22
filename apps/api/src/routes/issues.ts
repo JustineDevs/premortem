@@ -5,12 +5,26 @@ import {
   assertCanPublish,
   assertGitLabPublishReadiness,
   assertIssueCandidateApprovedForPublish,
+  recordPublishedIssueOutcome,
   recordReviewAction,
   splitIssueCandidate
 } from '@premortem/db';
-import { ReviewAction, ReviewStatus, allowsPublishDryRun, allowsReconcileDryRun, skipsPublishEntitlementCheck } from '@premortem/domain';
+import {
+  ReviewAction,
+  ReviewStatus,
+  allowsPublishDryRun,
+  allowsReconcileDryRun,
+  skipsPublishEntitlementCheck
+} from '@premortem/domain';
 import { publishIssueCandidate, reconcilePublishedIssues } from '@premortem/gitlab-sync';
 
+import { apiErrorResponse } from '../lib/error-response';
+import { ORG_ADMIN_ROLES, ORG_WRITE_ROLES, requireApiRole } from '../lib/authorization';
+import {
+  readJsonRecord,
+  readOptionalString,
+  readRequiredString
+} from '../lib/request-body';
 import { resolveApiActorContext } from '../lib/request-context';
 
 function isMissingIssueCandidateError(error: unknown) {
@@ -28,15 +42,61 @@ function issueCandidateNotFoundResponse(issueCandidateId: string) {
   return Response.json({ error: `Issue candidate ${issueCandidateId} not found` }, { status: 404 });
 }
 
+function publishedIssueNotFoundResponse(publishedIssueId: string) {
+  return Response.json({ error: `Published issue ${publishedIssueId} not found` }, { status: 404 });
+}
+
+function isPublishedIssueOutcomeType(value: unknown): value is 'true_positive' | 'false_positive' | 'not_applicable' | 'wont_fix' {
+  return (
+    value === 'true_positive' ||
+    value === 'false_positive' ||
+    value === 'not_applicable' ||
+    value === 'wont_fix'
+  );
+}
+
+async function resolveAuthorizedIssueCandidate(request: Request, issueCandidateId: string) {
+  const actor = await resolveApiActorContext(request);
+  const { prisma } = await import('@premortem/db');
+  const candidate = await prisma.issueCandidate.findUnique({
+    where: { id: issueCandidateId },
+    select: { projectId: true, project: { select: { organizationId: true } } }
+  });
+  if (!candidate || candidate.project.organizationId !== actor.organizationId) {
+    return null;
+  }
+  return { actor, candidate };
+}
+
+async function resolveAuthorizedPublishedIssue(request: Request, publishedIssueId: string) {
+  const actor = await resolveApiActorContext(request);
+  const { prisma } = await import('@premortem/db');
+  const publishedIssue = await prisma.publishedIssue.findUnique({
+    where: { id: publishedIssueId },
+    select: { id: true, organizationId: true, projectId: true }
+  });
+
+  if (!publishedIssue || publishedIssue.organizationId !== actor.organizationId) {
+    return null;
+  }
+
+  return { actor, publishedIssue };
+}
+
 export async function handleIssueApprove(request: Request, issueCandidateId: string) {
-  const body = (await request.json().catch(() => ({}))) as { notes?: string };
+  const body = (await readJsonRecord(request)) ?? {};
   try {
-    const actor = await resolveApiActorContext(request);
+    const authorized = await resolveAuthorizedIssueCandidate(request, issueCandidateId);
+    if (!authorized) {
+      return issueCandidateNotFoundResponse(issueCandidateId);
+    }
+    const { actor } = authorized;
+    requireApiRole(actor, ORG_WRITE_ROLES);
     const action = await recordReviewAction({
       issueCandidateId,
       actorId: actor.profileId,
       actionType: ReviewAction.APPROVE,
-      notes: body.notes
+      notes: readOptionalString(body, 'notes')
     });
     return Response.json({ ok: true, action, reviewerStatus: ReviewStatus.APPROVED });
   } catch (error) {
@@ -48,14 +108,19 @@ export async function handleIssueApprove(request: Request, issueCandidateId: str
 }
 
 export async function handleIssueReject(request: Request, issueCandidateId: string) {
-  const body = (await request.json().catch(() => ({}))) as { notes?: string };
+  const body = (await readJsonRecord(request)) ?? {};
   try {
-    const actor = await resolveApiActorContext(request);
+    const authorized = await resolveAuthorizedIssueCandidate(request, issueCandidateId);
+    if (!authorized) {
+      return issueCandidateNotFoundResponse(issueCandidateId);
+    }
+    const { actor } = authorized;
+    requireApiRole(actor, ORG_WRITE_ROLES);
     const action = await recordReviewAction({
       issueCandidateId,
       actorId: actor.profileId,
       actionType: ReviewAction.REJECT,
-      notes: body.notes
+      notes: readOptionalString(body, 'notes')
     });
     return Response.json({ ok: true, action, reviewerStatus: ReviewStatus.REJECTED });
   } catch (error) {
@@ -67,26 +132,25 @@ export async function handleIssueReject(request: Request, issueCandidateId: stri
 }
 
 export async function handleIssueEdit(request: Request, issueCandidateId: string) {
-  const body = (await request.json()) as {
-    notes?: string;
-    title?: string;
-    whyItMatters?: string;
-    recommendedActionSummary?: string;
-    deferred?: boolean;
-  };
+  const body = (await readJsonRecord(request)) ?? {};
   try {
-    const actor = await resolveApiActorContext(request);
+    const authorized = await resolveAuthorizedIssueCandidate(request, issueCandidateId);
+    if (!authorized) {
+      return issueCandidateNotFoundResponse(issueCandidateId);
+    }
+    const { actor } = authorized;
+    requireApiRole(actor, ORG_WRITE_ROLES);
     const action = await recordReviewAction({
       issueCandidateId,
       actorId: actor.profileId,
       actionType: ReviewAction.EDIT,
-      notes: body.notes,
-      payload: body.deferred ? { deferred: true } : body
+      notes: readOptionalString(body, 'notes'),
+      payload: body
     });
     return Response.json({
       ok: true,
       action,
-      reviewerStatus: body.deferred ? ReviewStatus.PENDING : ReviewStatus.EDITED
+      reviewerStatus: body.deferred === true ? ReviewStatus.PENDING : ReviewStatus.EDITED
     });
   } catch (error) {
     if (isMissingIssueCandidateError(error)) {
@@ -97,12 +161,10 @@ export async function handleIssueEdit(request: Request, issueCandidateId: string
 }
 
 export async function handleIssueMerge(request: Request, issueCandidateId: string) {
-  const body = (await request.json()) as {
-    mergedIntoIssueCandidateId?: string;
-    notes?: string;
-  };
+  const body = (await readJsonRecord(request)) ?? {};
 
-  if (!body.mergedIntoIssueCandidateId?.trim()) {
+  const mergedIntoIssueCandidateId = readRequiredString(body, 'mergedIntoIssueCandidateId');
+  if (!mergedIntoIssueCandidateId) {
     return Response.json(
       { error: 'mergedIntoIssueCandidateId is required', code: 'merge_target_required', field: 'mergedIntoIssueCandidateId' },
       { status: 400 }
@@ -110,13 +172,18 @@ export async function handleIssueMerge(request: Request, issueCandidateId: strin
   }
 
   try {
-    const actor = await resolveApiActorContext(request);
+    const authorized = await resolveAuthorizedIssueCandidate(request, issueCandidateId);
+    if (!authorized) {
+      return issueCandidateNotFoundResponse(issueCandidateId);
+    }
+    const { actor } = authorized;
+    requireApiRole(actor, ORG_WRITE_ROLES);
     const action = await recordReviewAction({
       issueCandidateId,
       actorId: actor.profileId,
       actionType: ReviewAction.MERGE,
-      notes: body.notes,
-      payload: { mergedIntoIssueCandidateId: body.mergedIntoIssueCandidateId }
+      notes: readOptionalString(body, 'notes'),
+      payload: { mergedIntoIssueCandidateId }
     });
     return Response.json({ ok: true, action, reviewerStatus: ReviewStatus.REJECTED });
   } catch (error) {
@@ -128,12 +195,9 @@ export async function handleIssueMerge(request: Request, issueCandidateId: strin
 }
 
 export async function handleIssueSplit(request: Request, issueCandidateId: string) {
-  const body = (await request.json().catch(() => ({}))) as {
-    title?: string;
-    notes?: string;
-  };
+  const body = (await readJsonRecord(request)) ?? {};
 
-  const title = body.title?.trim();
+  const title = readRequiredString(body, 'title');
   if (!title) {
     return Response.json(
       { error: 'title is required for split', code: 'split_title_required', field: 'title' },
@@ -142,12 +206,17 @@ export async function handleIssueSplit(request: Request, issueCandidateId: strin
   }
 
   try {
-    const actor = await resolveApiActorContext(request);
+    const authorized = await resolveAuthorizedIssueCandidate(request, issueCandidateId);
+    if (!authorized) {
+      return issueCandidateNotFoundResponse(issueCandidateId);
+    }
+    const { actor } = authorized;
+    requireApiRole(actor, ORG_WRITE_ROLES);
     const result = await splitIssueCandidate({
       issueCandidateId,
       actorId: actor.profileId,
       title,
-      notes: body.notes
+      notes: readOptionalString(body, 'notes')
     });
 
     return Response.json({
@@ -168,10 +237,15 @@ export async function handleIssueSplit(request: Request, issueCandidateId: strin
 }
 
 export async function handleIssuePublish(request: Request, issueCandidateId: string) {
-  const actor = await resolveApiActorContext(request);
-
+  let actor: Awaited<ReturnType<typeof resolveApiActorContext>> | null = null;
   try {
     const { prisma } = await import('@premortem/db');
+    const authorized = await resolveAuthorizedIssueCandidate(request, issueCandidateId);
+    if (!authorized) {
+      return issueCandidateNotFoundResponse(issueCandidateId);
+    }
+    actor = authorized.actor;
+    requireApiRole(actor, ORG_ADMIN_ROLES);
     const candidate = await prisma.issueCandidate.findUnique({
       where: { id: issueCandidateId },
       select: { projectId: true, project: { select: { organizationId: true } } }
@@ -186,17 +260,20 @@ export async function handleIssuePublish(request: Request, issueCandidateId: str
     await assertGitLabPublishReadiness(candidate.projectId);
   } catch (error) {
     if (error instanceof EntitlementError) {
-      return Response.json({ error: error.message, code: error.code }, { status: error.status });
+      return Response.json(
+        { error: 'Plan limit reached.', code: error.code },
+        { status: error.status }
+      );
     }
     if (error instanceof AuditReadinessError) {
       return Response.json(
-        { error: error.message, code: error.code, field: error.field, system: error.system },
+        { error: 'Publish target is not ready.', code: error.code, field: error.field, system: error.system },
         { status: 422 }
       );
     }
     if (error instanceof PublishNotApprovedError) {
       return Response.json(
-        { error: error.message, code: error.code, field: error.field },
+        { error: 'Issue must be approved before publish.', code: error.code, field: error.field },
         { status: error.status }
       );
     }
@@ -220,8 +297,10 @@ export async function handleIssuePublish(request: Request, issueCandidateId: str
       published = await publishIssueCandidate(issueCandidateId);
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Publish failed';
-    return Response.json({ error: message, code: 'publish_failed' }, { status: 502 });
+    return apiErrorResponse(error, 'Publish failed', {
+      fallbackStatus: 502,
+      code: 'publish_failed'
+    });
   }
 
   const action = await recordReviewAction({
@@ -246,6 +325,7 @@ export async function handleIssuePublish(request: Request, issueCandidateId: str
 
 export async function handleIssueReconcile(request: Request) {
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_WRITE_ROLES);
 
   try {
     const result = await reconcilePublishedIssues({ organizationId: actor.organizationId });
@@ -254,9 +334,60 @@ export async function handleIssueReconcile(request: Request) {
     if (allowsReconcileDryRun()) {
       return Response.json({ ok: true, reconciledCount: 0, driftedCount: 0, failedCount: 0, dryRun: true });
     }
+    return apiErrorResponse(error, 'Reconciliation failed', { fallbackStatus: 502 });
+  }
+}
+
+export async function handleIssueOutcome(request: Request, publishedIssueId: string) {
+  const body = (await readJsonRecord(request)) ?? {};
+  const outcomeType = readOptionalString(body, 'outcomeType');
+
+  if (!isPublishedIssueOutcomeType(outcomeType)) {
     return Response.json(
-      { error: error instanceof Error ? error.message : 'Reconciliation failed' },
-      { status: 502 }
+      {
+        error: 'outcomeType must be one of true_positive, false_positive, not_applicable, wont_fix',
+        code: 'invalid_outcome_type'
+      },
+      { status: 400 }
     );
+  }
+
+  try {
+    const authorized = await resolveAuthorizedPublishedIssue(request, publishedIssueId);
+    if (!authorized) {
+      return publishedIssueNotFoundResponse(publishedIssueId);
+    }
+
+    const { actor, publishedIssue } = authorized;
+    requireApiRole(actor, ORG_WRITE_ROLES);
+
+    const updated = await recordPublishedIssueOutcome({
+      organizationId: actor.organizationId,
+      projectId: publishedIssue.projectId,
+      publishedIssueId,
+      outcomeType,
+      outcomeNotes: readOptionalString(body, 'outcomeNotes') ?? null
+    });
+
+    if (!updated) {
+      return publishedIssueNotFoundResponse(publishedIssueId);
+    }
+
+    return Response.json({
+      ok: true,
+      publishedIssue: {
+        id: updated.id,
+        outcomeType: updated.outcomeType,
+        outcomeNotes: updated.outcomeNotes,
+        outcomeAt: updated.outcomeAt
+      }
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? String((error as { message?: unknown }).message ?? '') : '';
+    if (/not found/i.test(message)) {
+      return publishedIssueNotFoundResponse(publishedIssueId);
+    }
+    throw error;
   }
 }

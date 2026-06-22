@@ -18,7 +18,7 @@ if (fixtureMode) {
 
 if (!configuredMode) {
   console.error(
-    'Configured credentials required: DATABASE_URL, GITLAB_TOKEN, and GEMINI_API_KEY (or Azure OpenAI).'
+    'Configured credentials required: DATABASE_URL, GITLAB_TOKEN, and a supported LLM API key.'
   );
   process.exit(1);
 }

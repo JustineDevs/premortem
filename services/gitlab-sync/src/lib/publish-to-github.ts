@@ -1,5 +1,5 @@
 import { prisma, resolveGitHubCredentialsForProject } from '@premortem/db';
-import { createOrganizationNotifications } from '@premortem/db';
+import { createOrganizationNotifications } from '@premortem/db/notifications';
 import { recordUsageEvent } from '@premortem/db';
 import {
   createGitHubIssue,
@@ -7,7 +7,9 @@ import {
   parseGitHubRepoFromUrl
 } from '@premortem/integrations';
 import type { FindingSeverity } from '@premortem/agent-kit';
-import { renderGitLabIssue } from '@premortem/orchestrator';
+import type { EvidenceRefLike } from '@premortem/domain';
+import { captureServerException } from '@premortem/observability/server';
+import { renderPublishedIssueBody } from '@premortem/orchestrator/render-gitlab-issue';
 
 import { buildPublishWorkItemAttributes, resolveWorkItemAttributeConfig } from './resolve-work-item-attributes';
 
@@ -35,7 +37,10 @@ interface PublishableIssue {
   project: { externalProjectId: string; repoUrl: string | null; provider: string };
   publishedIssue: { id: string; url: string | null } | null;
   auditRun?: { branch: string; commitSha: string | null } | null;
+  createdAt?: string | Date | null;
 }
+
+type PublishableEvidence = EvidenceRefLike;
 
 export async function publishIssueCandidateToGitHub(issue: PublishableIssue) {
   if (issue.reviewerStatus !== 'approved' && issue.reviewerStatus !== 'edited') {
@@ -76,7 +81,7 @@ export async function publishIssueCandidateToGitHub(issue: PublishableIssue) {
   });
 
   const description =
-    renderGitLabIssue({
+    renderPublishedIssueBody({
       title: issue.title,
       category: issue.category,
       severity: issue.severity as FindingSeverity,
@@ -84,13 +89,23 @@ export async function publishIssueCandidateToGitHub(issue: PublishableIssue) {
       predicted_failure_summary: issue.predictedFailureSummary,
       why_it_matters: issue.whyItMatters,
       trigger_conditions: issue.triggerConditions as string[],
-      evidence: issue.evidence as Array<{ kind: string; ref: string; reason: string }>,
+      evidence: issue.evidence as PublishableEvidence[],
       recommended_action_summary: issue.recommendedActionSummary,
       implementation_steps: issue.implementationSteps as string[],
       done_criteria: issue.doneCriteria as string[],
       affected_assets: issue.affectedAssets as string[],
       source_agents: issue.sourceAgents as string[],
       source_findings: issue.sourceFindings as string[]
+    },
+    {
+      issueCandidateId: issue.id,
+      auditRunId: issue.auditRunId,
+      branch: issue.auditRun?.branch,
+      commitSha: issue.auditRun?.commitSha,
+      projectPath: issue.project.repoUrl ?? issue.project.externalProjectId,
+      createdAt: issue.createdAt ? new Date(issue.createdAt).toISOString() : null,
+      reviewerStatus: issue.reviewerStatus,
+      priority: issue.priority
     }) + attributes.metadataFooter;
 
   const config = await resolveWorkItemAttributeConfig(issue.organizationId);
@@ -138,10 +153,12 @@ export async function publishIssueCandidateToGitHub(issue: PublishableIssue) {
       publishedIssueId: publishedIssue.id
     }
   }).catch((error) => {
-    console.warn(
-      '[publish-to-github] notification fanout failed:',
-      error instanceof Error ? error.message : error
-    );
+    captureServerException(error, {
+      surface: 'publish-to-github.notification-fanout',
+      organizationId: issue.organizationId,
+      projectId: issue.projectId,
+      issueCandidateId: issue.id
+    });
   });
 
   await recordUsageEvent({

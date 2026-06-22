@@ -6,7 +6,8 @@ import React, {
   useEffect,
   useImperativeHandle,
   useMemo,
-  useRef
+  useRef,
+  useState
 } from 'react';
 import { RotateCcw } from 'lucide-react';
 import {
@@ -22,11 +23,6 @@ import {
   useNodesState,
   useReactFlow
 } from '@xyflow/react';
-
-import {
-  PIPELINE_ELK_OPTIONS,
-  layoutWithElk
-} from './workflow-elk-layout';
 import {
   PIPELINE_NODE_HEIGHT,
   PIPELINE_NODE_WIDTH,
@@ -121,6 +117,37 @@ function toFlowEdges(boardEdges: WorkflowCanvasEdge[]): Edge[] {
   }));
 }
 
+function buildPipelineGridPositions(
+  boardNodes: WorkflowCanvasNode[],
+  containerWidth: number
+): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>();
+  if (boardNodes.length === 0) {
+    return positions;
+  }
+
+  const columns = boardNodes.length <= 2 ? boardNodes.length : 2;
+
+  const horizontalGap = 72;
+  const verticalGap = 84;
+  const columnStep = PIPELINE_NODE_WIDTH + horizontalGap;
+  const rowStep = PIPELINE_NODE_HEIGHT + verticalGap;
+  const totalWidth = columns * PIPELINE_NODE_WIDTH + (columns - 1) * horizontalGap;
+  const offsetX = Math.max(0, Math.round((containerWidth - totalWidth) / 2));
+  const offsetY = 24;
+
+  boardNodes.forEach((node, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    positions.set(node.id, {
+      x: offsetX + column * columnStep,
+      y: offsetY + row * rowStep
+    });
+  });
+
+  return positions;
+}
+
 function PipelineFlowCanvas({
   boardNodes,
   boardEdges,
@@ -129,7 +156,9 @@ function PipelineFlowCanvas({
   onSelectNode,
   onSelectEdge,
   onClearSelection,
-  layoutRequestRef
+  layoutRequestRef,
+  isVisible,
+  containerWidth
 }: {
   boardNodes: WorkflowCanvasNode[];
   boardEdges: WorkflowCanvasEdge[];
@@ -139,68 +168,43 @@ function PipelineFlowCanvas({
   onSelectEdge: (id: string) => void;
   onClearSelection: () => void;
   layoutRequestRef: React.MutableRefObject<(() => void) | null>;
+  isVisible: boolean;
+  containerWidth: number;
 }) {
   const { fitView } = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<PipelineStepFlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  const layoutVersionRef = useRef(0);
   const activeNodeIdRef = useRef(activeNodeId);
+  const gridPositions = useMemo(
+    () => buildPipelineGridPositions(boardNodes, containerWidth),
+    [boardNodes, containerWidth]
+  );
 
   useEffect(() => {
     activeNodeIdRef.current = activeNodeId;
   }, [activeNodeId]);
 
-  const runElkLayout = useCallback(
-    async (fitAfter = false) => {
-      const version = ++layoutVersionRef.current;
-      const inputNodes = boardNodes.map((node) => ({
-        id: node.id,
-        width: PIPELINE_NODE_WIDTH,
-        height: PIPELINE_NODE_HEIGHT
-      }));
-      const inputEdges = boardEdges.map((edge) => ({
-        id: edge.id,
-        source: edge.from,
-        target: edge.to
-      }));
-
-      const positions = await layoutWithElk(inputNodes, inputEdges, PIPELINE_ELK_OPTIONS);
-      if (version !== layoutVersionRef.current) return;
-
-      setNodes(toFlowNodes(boardNodes, positions, activeNodeIdRef.current));
-      setEdges(toFlowEdges(boardEdges));
-
-      if (fitAfter) {
-        requestAnimationFrame(() => {
-          void fitView({ padding: 0.18, duration: 280 });
-        });
-      }
-    },
-    [boardNodes, boardEdges, setNodes, setEdges, fitView]
-  );
-
   useEffect(() => {
-    void runElkLayout(true);
-  }, [runElkLayout]);
-
-  useEffect(() => {
-    setNodes((current) =>
-      current.map((node) => ({
-        ...node,
-        selected: activeNodeId === node.id
-      }))
-    );
+    if (!isVisible) return;
+    setNodes(toFlowNodes(boardNodes, gridPositions, activeNodeIdRef.current));
     setEdges(toFlowEdges(boardEdges));
-  }, [activeNodeId, boardEdges, setNodes, setEdges]);
+    requestAnimationFrame(() => {
+      void fitView({ padding: 0.1, duration: 280 });
+    });
+  }, [activeNodeId, boardEdges, boardNodes, fitView, gridPositions, isVisible, setEdges, setNodes]);
 
   useEffect(() => {
     layoutRequestRef.current = () => {
-      void runElkLayout(true);
+      setNodes(toFlowNodes(boardNodes, gridPositions, activeNodeIdRef.current));
+      setEdges(toFlowEdges(boardEdges));
+      requestAnimationFrame(() => {
+        void fitView({ padding: 0.1, duration: 280 });
+      });
     };
     return () => {
       layoutRequestRef.current = null;
     };
-  }, [layoutRequestRef, runElkLayout]);
+  }, [boardEdges, boardNodes, fitView, gridPositions, layoutRequestRef, setEdges, setNodes]);
 
   const onNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
@@ -232,6 +236,8 @@ function PipelineFlowCanvas({
       onPaneClick={onPaneClick}
       nodesConnectable={false}
       nodesDraggable
+      snapToGrid
+      snapGrid={[24, 24]}
       elementsSelectable
       fitView
       minZoom={0.35}
@@ -269,30 +275,65 @@ export const WorkflowCanvasBoard = forwardRef<
 ) {
   const layoutRequestRef = useRef<(() => void) | null>(null);
   const fitViewRef = useRef<(() => void) | null>(null);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const [isVisible, setIsVisible] = useState(false);
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
 
   useImperativeHandle(ref, () => ({
     resetLayout: () => layoutRequestRef.current?.(),
     resetCamera: () => fitViewRef.current?.()
   }));
 
+  useEffect(() => {
+    const element = wrapperRef.current;
+    if (!element) return;
+
+    const updateVisibility = () => {
+      const { width, height } = element.getBoundingClientRect();
+      setContainerSize({ width, height });
+      setIsVisible(width > 0 && height > 0);
+    };
+
+    updateVisibility();
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver(updateVisibility);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className="relative h-full min-h-[520px] w-full overflow-hidden rounded-lg border border-[#EAE6DF] bg-[#FAF8F5]">
-      <div className="pointer-events-none absolute left-3 top-3 z-10 rounded border border-[#EAE6DF] bg-white/95 px-2 py-1 font-mono text-[9px] text-[#5C6560] shadow-sm">
-        Drag nodes · Scroll to zoom · ELK auto-layout
+    <div
+      ref={wrapperRef}
+      className="relative h-full min-h-[520px] w-full overflow-hidden rounded-lg border border-[#EAE6DF] bg-[#FAF8F5]"
+    >
+        <div className="pointer-events-none absolute left-3 top-3 z-10 rounded border border-[#EAE6DF] bg-white/95 px-2 py-1 font-mono text-[9px] text-[#5C6560] shadow-sm">
+        Drag nodes · Snap to grid · Scroll to zoom · Grid layout
       </div>
-      <ReactFlowProvider>
-        <FitViewBridge fitViewRef={fitViewRef} />
-        <PipelineFlowCanvas
-          boardNodes={boardNodes}
-          boardEdges={boardEdges}
-          activeNodeId={activeNodeId}
-          activeEdgeId={activeEdgeId}
-          onSelectNode={onSelectNode}
-          onSelectEdge={onSelectEdge}
-          onClearSelection={onClearSelection}
-          layoutRequestRef={layoutRequestRef}
-        />
-      </ReactFlowProvider>
+      {isVisible ? (
+        <ReactFlowProvider>
+          <FitViewBridge fitViewRef={fitViewRef} />
+          <PipelineFlowCanvas
+            boardNodes={boardNodes}
+            boardEdges={boardEdges}
+            activeNodeId={activeNodeId}
+            activeEdgeId={activeEdgeId}
+            onSelectNode={onSelectNode}
+            onSelectEdge={onSelectEdge}
+            onClearSelection={onClearSelection}
+            layoutRequestRef={layoutRequestRef}
+            isVisible={isVisible}
+            containerWidth={containerSize.width}
+          />
+        </ReactFlowProvider>
+      ) : (
+        <div className="flex h-full min-h-[520px] items-center justify-center px-6 text-center font-mono text-[10px] uppercase tracking-wider text-[#8A958F]">
+          Preparing workflow canvas…
+        </div>
+      )}
     </div>
   );
 });
@@ -306,7 +347,7 @@ function FitViewBridge({
 
   useEffect(() => {
     fitViewRef.current = () => {
-      void fitView({ padding: 0.18, duration: 280 });
+      void fitView({ padding: 0.1, duration: 280 });
     };
     return () => {
       fitViewRef.current = null;
@@ -329,7 +370,7 @@ export function WorkflowCanvasControls({
         type="button"
         onClick={onResetLayout}
         className="cursor-pointer rounded px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#5C6560] transition-colors hover:bg-white hover:text-[#1E2522] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-950"
-        title="Re-run ELK layout"
+        title="Re-run grid layout"
       >
         Reset layout
       </button>

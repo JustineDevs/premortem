@@ -35,7 +35,36 @@ export function resolvePremortemRepoRoot(startDir = process.cwd()) {
  * Load repo-root `.env.local` then `.env` into process.env (without overriding existing values).
  */
 export function loadPremortemLocalEnv(repoRoot = resolvePremortemRepoRoot()) {
-  for (const fileName of ['.env.local', '.env']) {
+  loadPremortemEnvFiles(['.env.local', '.env'], repoRoot);
+
+  applySupabaseDatabaseEnv(process.env);
+
+  return repoRoot;
+}
+
+/**
+ * Load repo-root production env files into process.env.
+ *
+ * Production deploy flows intentionally allow file values to override stale shell exports so
+ * Cloudflare Pages and Workers get the same reference configuration every run.
+ */
+export function loadPremortemProductionEnv(repoRoot = resolvePremortemRepoRoot()) {
+  loadPremortemEnvFiles(['.env.production.local', '.env.production'], repoRoot, {
+    override: true
+  });
+
+  applySupabaseDatabaseEnv(process.env);
+
+  return repoRoot;
+}
+
+/**
+ * Load one or more dotenv-style files from the repo root into process.env.
+ */
+export function loadPremortemEnvFiles(fileNames, repoRoot = resolvePremortemRepoRoot(), options = {}) {
+  const override = options.override === true;
+
+  for (const fileName of fileNames) {
     const absolutePath = path.join(repoRoot, fileName);
     if (!fs.existsSync(absolutePath)) continue;
 
@@ -48,7 +77,7 @@ export function loadPremortemLocalEnv(repoRoot = resolvePremortemRepoRoot()) {
       if (!match) continue;
 
       const [, key, rawValue] = match;
-      if (process.env[key] !== undefined) continue;
+      if (!override && process.env[key] !== undefined) continue;
 
       let value = rawValue.trim();
       if (
@@ -61,10 +90,6 @@ export function loadPremortemLocalEnv(repoRoot = resolvePremortemRepoRoot()) {
       process.env[key] = value;
     }
   }
-
-  applySupabaseDatabaseEnv(process.env);
-
-  return repoRoot;
 }
 
 /** Read one key from repo `.env.local` / `.env` (file wins over inherited shell for dev tooling). */

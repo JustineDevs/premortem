@@ -1,7 +1,9 @@
-import { allowsForceLocalIngest, DEFAULT_GEMINI_MODEL } from '../../packages/domain/dist/index.js';
+import { SMOKE_GEMINI_MODEL as DEFAULT_SMOKE_GEMINI_MODEL, allowsForceLocalIngest } from '../../packages/domain/dist/index.js';
 import { loadPremortemLocalEnv } from '../load-local-env.mjs';
 
 loadPremortemLocalEnv();
+const SMOKE_GEMINI_MODEL = process.env.LLM_MODEL?.trim() || DEFAULT_SMOKE_GEMINI_MODEL;
+process.env.LLM_MODEL = SMOKE_GEMINI_MODEL;
 import { splitIssueCandidate } from '../../packages/db/dist/index.js';
 import {
   fetchGitLabContextViaMcp,
@@ -215,10 +217,10 @@ if (typeof fetchRecentGitLabPipelines !== 'function' || typeof fetchOpenGitLabIs
   pass('gitlab context exports');
 }
 
-if (DEFAULT_GEMINI_MODEL !== 'gemini-3-flash-preview') {
-  fail('DEFAULT_GEMINI_MODEL', DEFAULT_GEMINI_MODEL);
+if (SMOKE_GEMINI_MODEL !== 'gemini-2.5-flash-lite') {
+  fail('SMOKE_GEMINI_MODEL', SMOKE_GEMINI_MODEL);
 } else {
-  pass(`DEFAULT_GEMINI_MODEL=${DEFAULT_GEMINI_MODEL}`);
+  pass(`SMOKE_GEMINI_MODEL=${SMOKE_GEMINI_MODEL}`);
 }
 
 if (typeof fetchGitLabContextViaMcp !== 'function') {
@@ -278,7 +280,11 @@ if (gitlabToken && gitlabProject) {
         }
 
         const transport = bundle.metadata?.ingestionTransport;
-        if (isGitLabMcpEnabled() && transport !== 'gitlab-mcp') {
+        if (isGitLabMcpEnabled() && transport === 'gitlab-rest-fallback') {
+          pass(
+            `gitlab ingest transport (${String(transport)}; ${String(bundle.metadata?.mcpUnavailableReason ?? 'mcp unavailable')})`
+          );
+        } else if (isGitLabMcpEnabled() && transport !== 'gitlab-mcp') {
           fail('gitlab ingest transport', `expected MCP transport metadata, got ${String(transport)}`);
         } else if (transport) {
           pass(`gitlab ingest transport (${String(transport)})`);

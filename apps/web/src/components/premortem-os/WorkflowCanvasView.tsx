@@ -22,7 +22,6 @@ import { useWorkflowViewMode } from './use-workflow-view-mode';
 import { WorkflowCanvasBoard, type WorkflowCanvasBoardHandle } from './workflow-canvas-board';
 import { WORKFLOW_STEP_IDS, type WorkflowAuditSnapshot } from './workflow-canvas.types';
 import { WorkflowCommandBar } from './workflow-command-bar';
-import { WorkflowEdgeBanner } from './workflow-edge-banner';
 import { WorkflowGraphPanel } from './workflow-graph-panel';
 import { WorkflowStepWorkbench } from './workflow-step-workbench';
 import { panelClassForMode } from './workflow-view-mode-toggle';
@@ -54,28 +53,39 @@ export function WorkflowCanvasView({
   onTriggerScan,
   setActiveTab
 }: WorkflowCanvasViewProps) {
+  const safeProjects = Array.isArray(projects) ? projects : [];
+  const safeAudits = Array.isArray(audits) ? audits : [];
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
-  const [activeNodeId, setActiveNodeId] = useState<string | null>('node-run-audit');
+  const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [activeEdgeId, setActiveEdgeId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [selectedFindingIdForDetail, setSelectedFindingIdForDetail] = useState<string | null>(null);
   const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<string | null>(null);
+  const [isInspectionCollapsed, setIsInspectionCollapsed] = useState(false);
   const canvasRef = useRef<WorkflowCanvasBoardHandle>(null);
 
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationIndex, setSimulationIndex] = useState(-1);
 
   const { viewMode, setViewMode } = useWorkflowViewMode(activeNodeId, WORKFLOW_STEP_IDS);
+  const isSplitMode = viewMode === 'split';
+  const isWorkbenchMode = viewMode === 'workbench';
+
+  useEffect(() => {
+    if (!isSplitMode) {
+      setIsInspectionCollapsed(false);
+    }
+  }, [isSplitMode]);
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
     setTimeout(() => setToastMessage(null), 3500);
   }, []);
 
-  const registeredProjects = projects;
+  const registeredProjects = safeProjects;
   const effectiveProjects = useMemo(
-    () => mergeConsoleProjects(registeredProjects, audits),
-    [registeredProjects, audits]
+    () => mergeConsoleProjects(registeredProjects, safeAudits),
+    [registeredProjects, safeAudits]
   );
   const hasRegisteredProjects = registeredProjects.length > 0;
   const hasEffectiveProjects = effectiveProjects.length > 0;
@@ -90,13 +100,13 @@ export function WorkflowCanvasView({
     if (!selectedProjectId || !effectiveProjects.some((project) => project.id === selectedProjectId)) {
       setSelectedProjectId(defaultProjectId);
     }
-  }, [audits, effectiveProjects, hasEffectiveProjects, selectedProjectId]);
+  }, [safeAudits, effectiveProjects, hasEffectiveProjects, selectedProjectId]);
 
   const selectedProj =
     effectiveProjects.find((project) => project.id === selectedProjectId) ?? effectiveProjects[0];
 
   const matchingAudit = selectedProj
-    ? pickLatestAuditForProject(audits, selectedProjectId || selectedProj.id)
+    ? pickLatestAuditForProject(safeAudits, selectedProjectId || selectedProj.id)
     : undefined;
 
   const snapshotQuery = useQuery({
@@ -104,7 +114,7 @@ export function WorkflowCanvasView({
     enabled: Boolean(matchingAudit?.id),
     staleTime: 60_000,
     queryFn: async () => {
-      const response = await fetch(`/api/audits/${matchingAudit!.id}`);
+      const response = await fetch(`/api/audits/${matchingAudit!.id}?hydrate=0`);
       if (!response.ok) return null;
       const payload = (await response.json()) as {
         snapshot?: WorkflowAuditSnapshot;
@@ -121,7 +131,7 @@ export function WorkflowCanvasView({
     setSelectedGraphNodeId(null);
   }, [matchingAudit?.id, selectedProjectId]);
 
-  const graphArtifactEnabled = Boolean(matchingAudit?.id);
+  const graphArtifactEnabled = Boolean(matchingAudit?.graphSnapshot);
   const { nodes: artifactNodes, edges: artifactEdges, loading: graphArtifactLoading } =
     useWorkflowGraphArtifact(matchingAudit?.id, { enabled: graphArtifactEnabled });
 
@@ -140,7 +150,7 @@ export function WorkflowCanvasView({
         setSimulationIndex(0);
         setActiveNodeId('node-connect-vcs');
         setActiveEdgeId(null);
-      } else if (simulationIndex >= 6) {
+      } else if (simulationIndex >= SIMULATION_STEP_IDS.length) {
         setIsSimulating(false);
         setSimulationIndex(-1);
         setActiveNodeId('node-publish-gitlab');
@@ -149,7 +159,7 @@ export function WorkflowCanvasView({
         timer = setTimeout(() => {
           const nextIndex = simulationIndex + 1;
           setSimulationIndex(nextIndex);
-          if (nextIndex < 6) {
+          if (nextIndex < SIMULATION_STEP_IDS.length) {
             setActiveNodeId(SIMULATION_STEP_IDS[nextIndex]!);
             setActiveEdgeId(SIMULATION_EDGE_IDS[nextIndex] ?? null);
           }
@@ -178,6 +188,7 @@ export function WorkflowCanvasView({
       selectedProj,
       matchingAudit,
       auditSnapshot,
+      auditSummary: auditSnapshot?.summary ?? null,
       runtimeEventTypes,
       isSimulating,
       simulationIndex,
@@ -258,19 +269,19 @@ export function WorkflowCanvasView({
 
   const graphEmptyMessage = !matchingAudit
     ? phoenixConfigured
-      ? 'Run an audit to populate the repository graph and Phoenix semantic trace spans.'
-      : 'Run an audit to populate the repository knowledge graph (repo, CI, issues).'
+      ? 'Run an audit to populate the graph and Phoenix semantic trace spans.'
+      : 'Run an audit to populate the graph (repo, CI, issues).'
     : graphArtifactLoading || semanticGraphLoading
-      ? 'Loading repository and Phoenix semantic graphs for the selected audit…'
+      ? 'Loading graph and Phoenix semantic spans for the selected audit…'
       : graphDisplay.fromArtifact
         ? graphDisplay.semanticIncluded
           ? undefined
           : phoenixConfigured
-            ? 'Repository graph loaded. Phoenix semantic spans will appear on the next traced audit run.'
+            ? 'Graph loaded. Phoenix semantic spans will appear on the next traced audit run.'
             : undefined
         : graphDisplay.semanticIncluded
           ? undefined
-          : 'This audit has no repository graph artifact yet. Re-run the scan or open Audits for details.';
+          : 'This audit has no graph artifact yet. Re-run the scan or open Audits for details.';
 
   return (
     <div className="flex h-screen flex-1 flex-col overflow-hidden font-sans" id="workflow-canvas-hub">
@@ -295,6 +306,7 @@ export function WorkflowCanvasView({
         selectedProjectId={selectedProjectId}
         onProjectChange={setSelectedProjectId}
         selectedProject={selectedProj}
+        selectedEdge={activeEdge}
         hasProjects={hasRegisteredProjects}
         onExecuteStream={() => {
           if (!hasRegisteredProjects) {
@@ -318,8 +330,13 @@ export function WorkflowCanvasView({
         </div>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div className={`border-r border-[#EAE6DF] ${panelClassForMode('left', viewMode)}`}>
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        <div
+          className={`border-r border-[#EAE6DF] ${panelClassForMode(
+            'left',
+            viewMode
+          )}`}
+        >
           <WorkflowGraphPanel
             nodes={graphDisplay.nodes}
             edges={graphDisplay.edges}
@@ -338,14 +355,20 @@ export function WorkflowCanvasView({
           />
         </div>
 
-        <div className={`flex min-h-0 flex-col overflow-hidden ${panelClassForMode('right', viewMode)}`}>
-          <div className="flex min-h-0 flex-[1.05] flex-col overflow-hidden bg-[#FAF8F5]">
+        <div
+          className={`flex min-h-0 flex-col overflow-hidden ${panelClassForMode(
+            'right',
+            viewMode
+          )}`}
+        >
+          {!isWorkbenchMode ? (
+            <div className="flex min-h-0 flex-[1.1] flex-col overflow-hidden bg-[#FAF8F5]">
             {isSimulating && (
               <div className="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full border border-amber-300 bg-amber-50 p-2 px-6 font-mono text-[10px] font-bold text-amber-950 shadow-md">
                 <span className="h-2 w-2 motion-safe:animate-ping rounded-full bg-amber-600" />
                 <span>
-                  Step replay (not live data): {simulationIndex + 1} of 6 — &quot;
-                  {nodes[simulationIndex]?.label || 'Active gateway'}&quot;
+                  Step replay: {Math.min(simulationIndex + 1, SIMULATION_STEP_IDS.length)} of {SIMULATION_STEP_IDS.length} — &quot;
+                  {nodes[simulationIndex]?.label || 'Selected step'}&quot;
                 </span>
               </div>
             )}
@@ -371,11 +394,18 @@ export function WorkflowCanvasView({
                 }}
               />
             </div>
+            </div>
+          ) : null}
 
-            {activeEdge && <WorkflowEdgeBanner edge={activeEdge} />}
-          </div>
-
-          <div className="flex min-h-0 flex-[0.95] flex-col overflow-hidden border-t border-[#EAE6DF]">
+          <div
+            className={`flex min-h-0 flex-col overflow-hidden border-t border-[#EAE6DF] ${
+              isWorkbenchMode
+                ? 'flex-1'
+                : isSplitMode && isInspectionCollapsed
+                  ? 'flex-none'
+                  : 'flex-[1.05]'
+            }`}
+          >
             <WorkflowStepWorkbench
               activeNode={activeNode}
               activeEdge={activeEdge}
@@ -396,6 +426,9 @@ export function WorkflowCanvasView({
                 setActiveEdgeId(null);
               }}
               onNavigateTab={setActiveTab}
+              canCollapse={isSplitMode}
+              isCollapsed={isInspectionCollapsed}
+              onToggleCollapse={() => setIsInspectionCollapsed((value) => !value)}
             />
           </div>
         </div>

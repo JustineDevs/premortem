@@ -4,16 +4,33 @@ import { fileURLToPath } from 'node:url';
 
 import net from 'node:net';
 
+import { SMOKE_GEMINI_MODEL } from '@premortem/domain';
 import { applySupabaseDatabaseEnv } from '../../packages/db/supabase-database-url.mjs';
+import { collectProductionBootEnvIssues } from '@premortem/domain';
 import {
   applyConfiguredDevDefaults,
   hasConfiguredRuntimeCredentials
 } from '../lib/configured-env.mjs';
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+function unquoteEnvValue(value) {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
 
 export function loadSmokeEnv() {
-  for (const fileName of ['.env.local', '.env']) {
+  const fileNames = ['.env.local', '.env'];
+  if (process.env.PREMORTEM_PRODUCTION_MODE === '1') {
+    fileNames.push('.env.production');
+  }
+
+  for (const fileName of fileNames) {
     const absolutePath = path.join(ROOT_DIR, fileName);
     if (!fs.existsSync(absolutePath)) continue;
 
@@ -22,7 +39,7 @@ export function loadSmokeEnv() {
       if (!match) continue;
       const [, key, rawValue] = match;
       if (process.env[key] !== undefined) continue;
-      process.env[key] = rawValue.replace(/^"/, '').replace(/"$/, '');
+      process.env[key] = unquoteEnvValue(rawValue);
     }
   }
 
@@ -38,7 +55,6 @@ export function loadSmokeEnv() {
     delete process.env.PREMORTEM_INGEST_LOCAL;
     delete process.env.PREMORTEM_PUBLISH_DRY_RUN;
     delete process.env.PREMORTEM_EXECUTOR;
-    process.env.PREMORTEM_SMOKE_SKIP_LLM_SPECIALISTS = '1';
     process.env.NEO4J_DISABLED ??= '0';
   } else if (fixtureMode) {
     process.env.PREMORTEM_AUTH_DISABLED ??= '1';
@@ -53,10 +69,17 @@ export function loadSmokeEnv() {
     }
   } else {
     process.env.PREMORTEM_RECONCILE_DRY_RUN ??= '1';
-    if (!process.env.GEMINI_API_KEY && !process.env.AZURE_OPENAI_API_KEY) {
+    if (
+      !process.env.GEMINI_API_KEY &&
+      !process.env.OPENAI_API_KEY &&
+      !process.env.ANTHROPIC_API_KEY
+    ) {
       process.env.PREMORTEM_EXECUTOR ??= 'mock';
     }
   }
+
+  // Smoke and stress harnesses should stay on the cheaper Gemini tier.
+  process.env.LLM_MODEL = SMOKE_GEMINI_MODEL;
 
   return {
     rootDir: ROOT_DIR,
@@ -67,18 +90,10 @@ export function loadSmokeEnv() {
 }
 
 export function assertProductionSmokePrerequisites() {
-  const missing = [];
-  if (!process.env.DATABASE_URL) missing.push('DATABASE_URL');
+  const missing = [...collectProductionBootEnvIssues(process.env)];
   if (!process.env.GITLAB_TOKEN && !process.env.GITLAB_SMOKE_PUBLISH_TOKEN) {
     missing.push('GITLAB_TOKEN or GITLAB_SMOKE_PUBLISH_TOKEN (issue publish probe; MCP read tokens are not enough)');
   }
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) missing.push('SUPABASE_SERVICE_ROLE_KEY');
-  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) missing.push('NEXT_PUBLIC_SUPABASE_URL');
-  if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY');
-  if (!process.env.GEMINI_API_KEY && !process.env.AZURE_OPENAI_API_KEY) {
-    missing.push('GEMINI_API_KEY or AZURE_OPENAI_*');
-  }
-  if (process.env.NEO4J_DISABLED === '1') missing.push('NEO4J must be enabled (unset NEO4J_DISABLED)');
   if (missing.length > 0) {
     throw new Error(
       `Production smoke requires real credentials: ${missing.join(', ')}. Set PREMORTEM_SMOKE_USE_FIXTURE=1 for mock-only CI.`

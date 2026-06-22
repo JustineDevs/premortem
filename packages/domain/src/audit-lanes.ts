@@ -24,17 +24,28 @@ export const AUDIT_PARALLEL_LANES: readonly AuditParallelLane[] = [
 
 export const STRUCTURE_LANE_AGENTS = [
   'repo_topology_agent',
+  'cross_repo_boundary_agent',
   'dependency_supply_chain_agent',
+  'supply_chain_vulnerability_agent',
   'artifact_integrity_agent',
+  'api_deprecation_risk_agent',
   'test_adequacy_agent',
-  'integration_boundary_agent'
+  'integration_boundary_agent',
+  'product_gap_agent'
 ] as const;
 
 export const RUNTIME_LANE_AGENTS = [
+  'ci_regression_agent',
   'release_safety_agent',
   'trust_boundary_agent',
+  'security_threat_model_agent',
   'onboarding_operability_agent',
+  'db_migration_safety_agent',
+  'config_drift_agent',
+  'secret_rotation_risk_agent',
+  'performance_slo_agent',
   'observability_recovery_agent',
+  'orchestrator_analysis_agent',
   'ownership_change_risk_agent',
   'issue_memory_agent'
 ] as const;

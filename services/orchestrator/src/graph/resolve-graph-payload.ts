@@ -1,8 +1,11 @@
 import type { GraphSnapshotPayload } from '@premortem/graph-model';
-import { readGraphSnapshotFromNeo4j } from '@premortem/integrations';
+import { isProductionMode } from '@premortem/domain';
 import type { GitHistorySnapshot, SourceFileSnapshot, OwnershipHint } from '../ingestion/ingest-project';
 
+import { readGraphSnapshotFromNeo4j } from '@premortem/integrations';
+
 import { buildGraphFromIngestion } from './build-graph-snapshot';
+import { buildGraphGroundingContext, GraphGroundingError } from './graph-grounding';
 import { EMPTY_CI_HISTORY } from '../ingestion/ingest-project';
 
 type GraphMetadata = Record<string, unknown> | null | undefined;
@@ -65,10 +68,9 @@ export function rebuildGraphFromSnapshotMetadata(input: {
 export async function resolveGraphSnapshotPayload(input: {
   auditRunId: string;
   projectId: string;
-  storageRef?: string | null;
   metadata: GraphMetadata;
   payload?: unknown;
-  download: (storageRef: string) => Promise<unknown | null>;
+  storageRef?: string | null;
 }): Promise<GraphSnapshotPayload | null> {
   if (isGraphPayload(input.payload)) {
     return input.payload;
@@ -81,17 +83,6 @@ export async function resolveGraphSnapshotPayload(input: {
         return fromNeo4j;
       }
     } catch {
-      // fall through to storage/metadata rebuild
-    }
-  }
-
-  if (input.storageRef?.startsWith('supabase://')) {
-    try {
-      const downloaded = await input.download(input.storageRef);
-      if (isGraphPayload(downloaded)) {
-        return downloaded;
-      }
-    } catch {
       // fall through to metadata rebuild
     }
   }
@@ -101,4 +92,31 @@ export async function resolveGraphSnapshotPayload(input: {
     projectId: input.projectId,
     metadata: input.metadata
   });
+}
+
+export async function resolveStrictGraphSnapshotPayload(input: {
+  auditRunId: string;
+  projectId: string;
+  metadata: GraphMetadata;
+  payload?: unknown;
+  storageRef?: string | null;
+  sourcePaths?: string[];
+}): Promise<GraphSnapshotPayload> {
+  if (isProductionMode() && !input.storageRef?.startsWith('neo4j://')) {
+    throw new GraphGroundingError(
+      `Production graph grounding requires Neo4j storage for audit run ${input.auditRunId}`
+    );
+  }
+
+  const payload = await resolveGraphSnapshotPayload(input);
+  if (!payload) {
+    throw new GraphGroundingError(`Unable to resolve graph snapshot payload for ${input.auditRunId}`);
+  }
+
+  buildGraphGroundingContext({
+    graph: payload,
+    sourcePaths: input.sourcePaths
+  });
+
+  return payload;
 }

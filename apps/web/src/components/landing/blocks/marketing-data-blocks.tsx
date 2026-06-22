@@ -7,7 +7,7 @@ import { body14, label14 } from '../text-styles';
 const statusLabels: Record<ScopeStatus, string> = {
   included: 'Included',
   scaffold: 'Scaffold',
-  soon: 'Soon'
+  roadmap: 'Roadmap'
 };
 
 type MarketingScopeTableProps = {
@@ -119,10 +119,10 @@ export function MarketingStepDetails({ steps }: { steps: readonly StepDetail[] }
           <p style={body14}>{step.body}</p>
           {step.links && step.links.length > 0 ? (
             <div className="landing-block-step-details__links">
-              {step.links.map((link) =>
+              {step.links.map((link, index) =>
                 link.external ? (
                   <a
-                    key={link.href}
+                    key={`${link.href}:${link.label}:${index}`}
                     className="landing-route-link"
                     href={link.href}
                     target="_blank"
@@ -131,7 +131,7 @@ export function MarketingStepDetails({ steps }: { steps: readonly StepDetail[] }
                     {link.label}
                   </a>
                 ) : (
-                  <Link key={link.href} className="landing-route-link" href={link.href}>
+                  <Link key={`${link.href}:${link.label}:${index}`} className="landing-route-link" href={link.href}>
                     {link.label}
                   </Link>
                 )

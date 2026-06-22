@@ -3,6 +3,12 @@ export interface VerifiedSupabaseUser {
   email?: string | null;
 }
 
+const SUPABASE_USER_CACHE_TTL_MS = 60_000;
+const supabaseUserCache = new Map<
+  string,
+  { expiresAt: number; user: VerifiedSupabaseUser | null }
+>();
+
 function supabaseAuthConfig() {
   const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -40,6 +46,12 @@ export async function verifySupabaseAccessToken(
   const config = supabaseAuthConfig();
   if (!config || !accessToken) return null;
 
+  const cached = supabaseUserCache.get(accessToken);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    return cached.user;
+  }
+
   const response = await fetch(`${config.url}/auth/v1/user`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -52,5 +64,10 @@ export async function verifySupabaseAccessToken(
   const user = (await response.json()) as { id?: string; email?: string | null };
   if (!user?.id) return null;
 
-  return { id: user.id, email: user.email ?? null };
+  const verified = { id: user.id, email: user.email ?? null };
+  supabaseUserCache.set(accessToken, {
+    expiresAt: now + SUPABASE_USER_CACHE_TTL_MS,
+    user: verified
+  });
+  return verified;
 }

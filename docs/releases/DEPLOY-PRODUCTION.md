@@ -37,6 +37,8 @@ cd apps/api && pnpm run deploy
 
 Wrangler 4 requires Node.js 22 or newer for the deploy step.
 
+The API deploy wrapper also loads repo-root `.env.production` and sets `CLOUDFLARE_ENV=production` before `wrangler deploy` runs.
+
 Set Worker secrets in Cloudflare (not in git):
 
 ```bash
@@ -71,6 +73,8 @@ Recommended monorepo settings:
 | Build command | `pnpm install --frozen-lockfile && pnpm run build:pages` |
 | Build output | Use Cloudflare **Next.js** preset (dashboard auto-detect) or OpenNext adapter when added |
 
+The `pnpm run build:pages` wrapper loads repo-root `.env.production` and sets `CLOUDFLARE_ENV=production` before the Pages build starts.
+
 Pages environment variables (production):
 
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
@@ -84,7 +88,7 @@ Pages environment variables (production):
 - `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`
 - Do **not** set `PREMORTEM_AUTH_DISABLED` in production
 
-Stripe webhook endpoint: `https://premortem.jstn.site/api/webhooks/stripe`
+Stripe webhook endpoint: `https://premortem.jstn.site/api/stripe/webhook`
 
 ## 4. Stripe (verified)
 

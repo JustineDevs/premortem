@@ -12,7 +12,7 @@ export const howItWorksPage = {
         'Authorize Premortem and select the project you want to audit. Repository context, CI data, and issue APIs are wired through GitLab MCP and REST integrations.',
       links: [
         { label: 'GitLab MCP docs', href: marketingLinks.docsIntegrationsGitlab, external: true },
-        { label: 'Integration guide', href: marketingLinks.docsIntegrationsGitlab, external: false }
+        { label: 'Integration guide', href: marketingLinks.docsGuidesConnectGitlab, external: false }
       ]
     },
     {
@@ -35,7 +35,7 @@ export const howItWorksPage = {
   ],
   developerCallout: {
     title: 'Local development',
-    body: 'Run pnpm run dev to sync Prisma, start the API runtime, and launch the web app. Use pnpm run smoke:local to verify health, landing, app console, and audit detail routes.',
+    body: 'Run pnpm run dev to sync Prisma, start the API runtime, and launch the web app. Use pnpm run smoke:local to verify health, landing, app console, and audit detail routes in a local environment.',
     href: marketingLinks.docsGettingStarted
   },
   screenshot: {

@@ -7,7 +7,10 @@ export const AuditEvent = {
     ISSUE_VALIDATION_REJECTED: 'audit.issue_validation_rejected',
     COMPLETED: 'audit.completed',
     FAILED: 'audit.failed',
-  CANCELLED: 'audit.cancelled'
+    CANCELLED: 'audit.cancelled',
+    PAUSED: 'audit.paused',
+    RESUMED: 'audit.resumed',
+    CHECKPOINT_SAVED: 'audit.checkpoint_saved'
 };
 export const AUDIT_PIPELINE_EVENTS = [
     AuditEvent.ENQUEUED,

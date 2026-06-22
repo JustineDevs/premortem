@@ -1,6 +1,6 @@
 # Core Release Rules
 
-- Required status fields live in `.ma/decisions.json` and `.ma/release.json`.
+- Required status fields live in the workspace-local decision and release state files.
 - `$build` is blocked unless:
   - `idea_status = CLEAR`
   - `architecture_status = APPROVED`

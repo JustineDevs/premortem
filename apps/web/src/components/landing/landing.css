@@ -365,7 +365,7 @@ body:has(.landing-root) {
   flex: none;
 }
 
-/* Connect / Coming soon buttons */
+/* Connect / roadmap buttons */
 .landing a.framer-akk7mv,
 .landing a.framer-mlk6bw,
 .landing .framer-akk7mv,
@@ -436,6 +436,14 @@ body:has(.landing-root) {
   cursor: pointer;
 }
 
+.landing-auth-terms--plain {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: default;
+}
+
 .landing-auth-terms__input {
   margin-top: 3px;
   width: 14px;
@@ -447,6 +455,27 @@ body:has(.landing-root) {
 .landing-auth-terms__copy {
   color: rgb(79, 79, 79);
   line-height: 1.45;
+}
+
+.landing-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.landing-auth-captcha {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.landing-auth-captcha .cf-turnstile {
+  min-height: 65px;
 }
 
 /* Ecosystem cards: desktop uses original absolute positions (no flex padding) */
@@ -1469,6 +1498,11 @@ body:has(.landing-root) {
 }
 
 .landing-block-scope-table__badge--soon {
+  color: rgb(79, 79, 79);
+  background: rgb(245, 244, 239);
+}
+
+.landing-block-scope-table__badge--roadmap {
   color: rgb(79, 79, 79);
   background: rgb(245, 244, 239);
 }
@@ -3357,6 +3391,27 @@ body:has(.landing-root) {
   color: rgb(92, 101, 96);
 }
 
+.landing-os-demo__trigger-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.landing-os-demo__trigger-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 3px 7px;
+  border: 1px solid rgb(228, 227, 222);
+  border-radius: 999px;
+  background: rgb(251, 251, 250);
+  color: rgb(92, 101, 96);
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .landing-os-demo__badge {
   font-size: 8px;
   font-weight: 700;
@@ -3391,6 +3446,19 @@ body:has(.landing-root) {
   background: rgb(237, 108, 2);
   color: rgb(255, 255, 255);
   padding: 8px 10px;
+}
+
+.landing-os-demo__btn--ghost {
+  background: rgb(251, 251, 250);
+  color: rgb(30, 37, 34);
+  border: 1px solid rgb(228, 227, 222);
+}
+
+.landing-os-demo__action-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .landing-os-demo__toast {

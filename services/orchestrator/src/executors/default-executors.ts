@@ -1,18 +1,34 @@
 import type { AgentExecutor, CanonicalFinding } from '@premortem/agent-kit';
-import { makeMockFinding, synthesizeMockIssues } from '@premortem/agent-kit';
+import {
+  isCanonicalFinding,
+  isIssueCandidate,
+  makeMockFinding,
+  synthesizeMockIssues
+} from '@premortem/agent-kit';
 
 const specialistCategories: Record<string, string> = {
   repo_topology_agent: 'topology',
+  ci_regression_agent: 'ci_regression',
+  cross_repo_boundary_agent: 'cross_repo_boundary',
   release_safety_agent: 'release_safety',
   integration_boundary_agent: 'integration_boundary',
+  supply_chain_vulnerability_agent: 'supply_chain_vulnerability',
   artifact_integrity_agent: 'artifact_integrity',
+  api_deprecation_risk_agent: 'api_deprecation_risk',
   trust_boundary_agent: 'trust_boundary',
+  security_threat_model_agent: 'security_threat_model',
   onboarding_operability_agent: 'onboarding_operability',
+  db_migration_safety_agent: 'db_migration_safety',
+  config_drift_agent: 'config_drift',
+  secret_rotation_risk_agent: 'secret_rotation_risk',
   test_adequacy_agent: 'test_adequacy',
+  performance_slo_agent: 'performance_slo',
   observability_recovery_agent: 'observability_recovery',
+  orchestrator_analysis_agent: 'orchestrator_analysis',
   dependency_supply_chain_agent: 'dependency_supply_chain',
   ownership_change_risk_agent: 'ownership_change_risk',
-  issue_memory_agent: 'issue_memory'
+  issue_memory_agent: 'issue_memory',
+  product_gap_agent: 'product_gap'
 };
 
 interface GitLabIssueSummary {
@@ -121,12 +137,19 @@ export function createDefaultExecutors(): Record<string, AgentExecutor> {
 
   executors.finding_synthesizer_agent = {
     kind: 'synthesizer',
-    run: async (_context, findings) => synthesizeMockIssues(findings)
+    run: async (_context, findings) => synthesizeMockIssues(findings.filter(isCanonicalFinding))
   };
 
   executors.issue_validator_agent = {
     kind: 'synthesizer',
-    run: async (_context, findings) => synthesizeMockIssues(findings)
+    run: async (_context, inputs) => {
+      const issues = inputs.filter(isIssueCandidate);
+      if (issues.length > 0) {
+        return issues.map((issue) => ({ ...issue }));
+      }
+
+      return synthesizeMockIssues(inputs.filter(isCanonicalFinding));
+    }
   };
 
   return executors;

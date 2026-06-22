@@ -40,8 +40,8 @@ export function AuditRuntimeConsole({
   isResumePending = false
 }: AuditRuntimeConsoleProps) {
   const [controlError, setControlError] = useState<string | null>(null);
-  const { activeStepIndex, animating } = derivePipelineProgress({ auditStatus, agentRuns });
-  const logs = buildConsoleLogLines({ events, agentRuns });
+  const { activeStepIndex, animating } = derivePipelineProgress({ auditStatus, agentRuns, summary });
+  const logs = buildConsoleLogLines({ events, agentRuns, summary });
   const progressPct = Math.round(((activeStepIndex + 1) / AUDIT_PIPELINE_STEPS.length) * 100);
   const checkpoint = parseAuditCheckpoint(summary);
   const canStopAll = showStopAll && Boolean(onStopAll);
@@ -119,9 +119,16 @@ export function AuditRuntimeConsole({
             RUN ID · {auditId}
           </p>
           {checkpoint ? (
-            <p className="text-[10px] font-mono text-amber-800">
-              Checkpoint · {checkpoint.phase.replace(/_/g, ' ')} · {checkpoint.completedSpecialists.length} agents
-            </p>
+            <div className="grid grid-cols-1 gap-1 text-[10px] font-mono text-amber-800">
+              <p>
+                Checkpoint · {checkpoint.phase.replace(/_/g, ' ')} · {checkpoint.completedSpecialists.length} agents
+              </p>
+              <p className="text-[#5C6560]">
+                Findings {checkpoint.findingCount} · Clusters {checkpoint.clusterCount} · Saved{' '}
+                {new Date(checkpoint.savedAt).toLocaleTimeString()}
+              </p>
+              {checkpoint.reason ? <p className="text-[#8A958F]">{checkpoint.reason}</p> : null}
+            </div>
           ) : null}
           {controlError ? (
             <p className="text-[10px] font-mono text-rose-700">{controlError}</p>

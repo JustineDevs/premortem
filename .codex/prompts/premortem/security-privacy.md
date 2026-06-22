@@ -32,6 +32,7 @@ Every finding must cite concrete evidence from one or more of:
 - logs
 - tests
 - API contract
+- exact code snippets when the source context contains them
 
 ## Output Contract
 
@@ -55,6 +56,7 @@ For each finding, return:
 - Do not ignore tenant isolation.
 - Do not assume secrets are safe unless storage and access paths are explicit.
 - Do not omit the exact sensitive data path.
+- Do not collapse an evidence-bearing code excerpt into a path-only reference when the excerpt is available.
 
 ## Required Final Sections
 
@@ -63,4 +65,3 @@ For each finding, return:
 3. Accepted risks
 4. Missing evidence
 5. Recommended mitigations
-

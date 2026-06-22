@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import { once } from 'node:events';
 import net from 'node:net';
 import path from 'node:path';
@@ -13,6 +14,18 @@ import {
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 loadPremortemLocalEnv(repoRoot);
+
+if (!process.env.ENCRYPTION_KEY) {
+  const productionEnvPath = path.join(repoRoot, '.env.production');
+  if (fs.existsSync(productionEnvPath)) {
+    for (const line of fs.readFileSync(productionEnvPath, 'utf8').split(/\r?\n/)) {
+      const match = line.match(/^ENCRYPTION_KEY=(.*)$/);
+      if (!match) continue;
+      process.env.ENCRYPTION_KEY = match[1].replace(/^"/, '').replace(/"$/, '');
+      break;
+    }
+  }
+}
 
 const rootCommand = ['npx', '-y', 'pnpm@9.12.0'];
 
@@ -74,6 +87,40 @@ async function runStep(args) {
   });
 }
 
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function warmRoute(url, attempts = 20) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, { cache: 'no-store' });
+      if (response.ok) {
+        await response.arrayBuffer().catch(() => undefined);
+        return;
+      }
+    } catch {
+      // Retry until the route is online and compiled.
+    }
+
+    await sleep(500);
+  }
+}
+
+async function warmWebBffRoutes(webPort) {
+  const baseUrl = `http://127.0.0.1:${webPort}`;
+  await warmRoute(`${baseUrl}/api/health`);
+
+  await Promise.all([
+    warmRoute(`${baseUrl}/api/workspace`),
+    warmRoute(`${baseUrl}/api/projects`),
+    warmRoute(`${baseUrl}/api/audits?hydrate=0&limit=12`),
+    warmRoute(`${baseUrl}/api/reconciliation`)
+  ]).catch((error) => {
+    console.error('local-stack.web-warmup-error', error);
+  });
+}
+
 async function main() {
   const dockerResult = await ensureDockerServices({ strict: false });
   if (dockerResult.unavailable && process.env.PREMORTEM_PRODUCTION_MODE === '1') {
@@ -93,13 +140,27 @@ async function main() {
   const requestedWebPort = process.env.PREMORTEM_WEB_PORT;
   const apiPort = requestedApiPort ?? String(await findAvailablePort(18787));
   const webPort = requestedWebPort ?? String(await findAvailablePort(13000));
+  const explicitAuthBypass = process.env.PREMORTEM_AUTH_DISABLED === '1';
   const useFixtureDefaults =
-    process.env.PREMORTEM_PRODUCTION_MODE !== '1' && !hasConfiguredRuntimeCredentials(process.env);
+    process.env.PREMORTEM_PRODUCTION_MODE !== '1' &&
+    (explicitAuthBypass || !hasConfiguredRuntimeCredentials(process.env));
 
   const sharedEnv = {
     PREMORTEM_API_PORT: apiPort,
     PREMORTEM_WEB_PORT: webPort,
     PREMORTEM_API_BASE_URL: `http://127.0.0.1:${apiPort}`,
+    ...(process.env.PREMORTEM_AUTH_DISABLED
+      ? { PREMORTEM_AUTH_DISABLED: process.env.PREMORTEM_AUTH_DISABLED }
+      : {}),
+    ...(process.env.PREMORTEM_INGEST_LOCAL
+      ? { PREMORTEM_INGEST_LOCAL: process.env.PREMORTEM_INGEST_LOCAL }
+      : {}),
+    ...(process.env.PREMORTEM_FORCE_LOCAL_INGEST
+      ? { PREMORTEM_FORCE_LOCAL_INGEST: process.env.PREMORTEM_FORCE_LOCAL_INGEST }
+      : {}),
+    ...(process.env.PREMORTEM_PUBLISH_DRY_RUN
+      ? { PREMORTEM_PUBLISH_DRY_RUN: process.env.PREMORTEM_PUBLISH_DRY_RUN }
+      : {}),
     ...(useFixtureDefaults
       ? {
           PREMORTEM_AUTH_DISABLED: process.env.PREMORTEM_AUTH_DISABLED ?? '1',
@@ -109,7 +170,7 @@ async function main() {
       : {}),
     PREMORTEM_EXECUTOR:
       process.env.PREMORTEM_EXECUTOR ??
-      (process.env.GEMINI_API_KEY || process.env.AZURE_OPENAI_API_KEY ? 'llm' : undefined),
+      (hasConfiguredRuntimeCredentials(process.env) ? 'llm' : undefined),
     ...(useFixtureDefaults
       ? { PREMORTEM_PUBLISH_DRY_RUN: process.env.PREMORTEM_PUBLISH_DRY_RUN ?? '1' }
       : process.env.PREMORTEM_PUBLISH_DRY_RUN
@@ -130,6 +191,10 @@ async function main() {
 
   const api = spawnProcess('api', ['--filter', '@premortem/api', 'run', 'dev'], sharedEnv);
   const web = spawnProcess('web', ['--filter', '@premortem/web', 'run', 'dev'], sharedEnv);
+
+  void warmWebBffRoutes(webPort).catch((error) => {
+    console.error('local-stack.web-warmup-failed', error);
+  });
 
   const shutdown = () => {
     api.kill('SIGTERM');

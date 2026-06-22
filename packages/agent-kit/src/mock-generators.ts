@@ -90,8 +90,17 @@ export function synthesizeMockIssues(findings: CanonicalFinding[]): IssueCandida
 
   return [...grouped.entries()].map(([category, items]) => {
     const primaryAsset = items[0]?.affected_assets[0] ?? category;
-    const agents = [...new Set(items.map((item) => item.agent))];
+    const agents = [...new Set(items.map((item) => item.agent).filter((agent): agent is string => typeof agent === 'string' && agent.length > 0))];
     const categoryLabel = category.replaceAll('_', ' ');
+    const predictedFailures = items.flatMap((item) => {
+      const summary = item.predicted_failure?.summary;
+      const triggerConditions = item.predicted_failure?.trigger_conditions ?? [];
+      return summary ? [{ summary, triggerConditions }] : [];
+    });
+    const evidence = items.flatMap((item) => item.evidence ?? []);
+    const sourceFindings = items
+      .map((item) => item.finding_id)
+      .filter((findingId): findingId is string => typeof findingId === 'string' && findingId.length > 0);
 
     return {
       title: `Harden ${categoryLabel} around \`${primaryAsset}\` before the next production rollout`,
@@ -99,11 +108,11 @@ export function synthesizeMockIssues(findings: CanonicalFinding[]): IssueCandida
       severity: items.some((item) => item.severity === 'high') ? 'high' : 'medium',
       confidence: 0.78,
       predicted_failure_summary:
-        items[0]?.predicted_failure.summary ??
+        predictedFailures[0]?.summary ??
         `Changes to \`${primaryAsset}\` can break ${categoryLabel} during routine delivery.`,
       why_it_matters: `Multiple specialist signals converge on \`${primaryAsset}\` as the remediation surface for ${categoryLabel}.`,
-      trigger_conditions: items.flatMap((item) => item.predicted_failure.trigger_conditions).slice(0, 4),
-      evidence: items.flatMap((item) => item.evidence).slice(0, 4),
+      trigger_conditions: predictedFailures.flatMap((item) => item.triggerConditions).slice(0, 4),
+      evidence: evidence.slice(0, 4),
       recommended_action_summary: `Add durable controls around \`${primaryAsset}\` and related ${categoryLabel} paths before the next production change.`,
       implementation_steps: [
         `Add a CI validation gate covering \`${primaryAsset}\`.`,
@@ -117,7 +126,7 @@ export function synthesizeMockIssues(findings: CanonicalFinding[]): IssueCandida
       ],
       affected_assets: [...new Set(items.flatMap((item) => item.affected_assets))],
       source_agents: agents,
-      source_findings: items.map((item) => item.finding_id)
+      source_findings: sourceFindings
     };
   });
 }

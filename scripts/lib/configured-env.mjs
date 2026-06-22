@@ -5,13 +5,11 @@
 export function hasConfiguredRuntimeCredentials(env = process.env) {
   const hasDb = Boolean(env.DATABASE_URL?.trim());
   const hasGitlab = Boolean(env.GITLAB_TOKEN?.trim());
-  const hasLlm =
-    Boolean(env.GEMINI_API_KEY?.trim()) ||
-    Boolean(
-      env.AZURE_OPENAI_ENDPOINT?.trim() &&
-        env.AZURE_OPENAI_API_KEY?.trim() &&
-        (env.AZURE_OPENAI_DEPLOYMENT?.trim() || env.AZURE_OPENAI_MODEL?.trim())
-    );
+  const hasLlm = Boolean(
+    env.GEMINI_API_KEY?.trim() ||
+      env.OPENAI_API_KEY?.trim() ||
+      env.ANTHROPIC_API_KEY?.trim()
+  );
   return hasDb && hasGitlab && hasLlm;
 }
 
@@ -30,7 +28,11 @@ export function applyConfiguredDevDefaults(env = process.env) {
     env.NEXT_PUBLIC_SUPABASE_URL?.trim() && env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim()
   );
   // Real integrations + Supabase: onboard actual users; smoke harness sets PREMORTEM_SMOKE_USE_FIXTURE=1.
-  if (hasSupabase && env.PREMORTEM_SMOKE_USE_FIXTURE !== '1') {
+  if (
+    hasSupabase &&
+    env.PREMORTEM_SMOKE_USE_FIXTURE !== '1' &&
+    env.PREMORTEM_AUTH_DISABLED !== '1'
+  ) {
     delete env.PREMORTEM_AUTH_DISABLED;
   }
 

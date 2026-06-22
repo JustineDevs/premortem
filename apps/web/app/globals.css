@@ -1,12 +1,14 @@
+@import '@xyflow/react/dist/style.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@import '@xyflow/react/dist/style.css';
-
 @layer components {
   .premortem-workflow-flow,
   .premortem-repo-graph-flow {
+    height: 100%;
+    width: 100%;
     --xy-background-color: #faf8f5;
     --xy-node-border-radius: 0.5rem;
   }

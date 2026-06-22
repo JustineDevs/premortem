@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 
+import { verifyUserIdSignature } from '@premortem/security';
+
 const buckets = new Map<string, { count: number; resetAt: number }>();
 
 const RATE_LIMIT = Number.parseInt(process.env.PREMORTEM_API_RATE_LIMIT ?? '180', 10);
@@ -61,10 +63,18 @@ export async function checkRateLimit(
 }
 
 export function rateLimitKey(request: Request, pathname: string): string {
+  const secret = process.env.IDENTITY_HMAC_SECRET?.trim() ?? null;
+  const signedUserId = request.headers.get('x-user-id')?.trim();
+  const signature = request.headers.get('x-user-id-sig')?.trim();
   const actor =
-    request.headers.get('x-premortem-actor-id')?.trim() ||
-    request.headers.get('cf-connecting-ip')?.trim() ||
-    'anonymous';
+    secret &&
+    signedUserId &&
+    signature &&
+    verifyUserIdSignature(signedUserId, signature, secret)
+      ? signedUserId
+      : request.headers.get('cf-connecting-ip')?.trim() ||
+        request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+        'anonymous';
   return `${actor}:${pathname}`;
 }
 
