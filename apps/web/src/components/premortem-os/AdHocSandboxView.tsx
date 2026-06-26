@@ -1,5 +1,7 @@
+'use client';
+
 import React, { useState } from 'react';
-import { Finding } from '@/lib/premortem-os/types';
+import { Finding, type TraceStep } from '@/lib/premortem-os/types';
 import { 
   Terminal, 
   Play, 
@@ -13,6 +15,70 @@ import {
   FileCode
 } from 'lucide-react';
 import { OsStepper, type OsStep } from './os-stepper';
+
+const SANDBOX_EDITOR_ID = 'adhoc-sandbox-source-code';
+const SANDBOX_TEMPLATES = [
+  {
+    name: 'SQL injection and secret logging',
+    code: `// Paste or select a custom backend code block here
+import mysql from 'mysql2/promise';
+
+export async function processLogin(req, res) {
+  const { user, password } = req.body;
+  
+  // VULNERABILITY: SQL Injection
+  const connection = await mysql.createConnection({ host: 'localhost', user: 'admin_root' });
+  const [rows] = await connection.query(
+    "SELECT * FROM accounts WHERE username = '" + user + "' AND pw = '" + password + "'"
+  );
+  
+  // VULNERABILITY: plaintext credential logging
+  console.log("Authenticated username match payload: ", user, " pw: ", password);
+
+  res.json({ match: rows.length > 0 });
+}`
+  },
+  {
+    name: 'Plain HTTP Vital Dispatch',
+    code: `// Patient Vital broadcast over plain-text network
+import http from 'http';
+
+export function sendVitals(patientId, records) {
+  const body = JSON.stringify({ patientId, records });
+  
+  // Port 80 unencrypted transit
+  const req = http.request({
+    hostname: "internal-dispatch.vitals.local",
+    port: 80,
+    path: "/metrics/submit",
+    method: "POST"
+  });
+  
+  req.write(body);
+  req.end();
+}`
+  },
+  {
+    name: 'Hardcoded AWS Config Keys',
+    code: `// AWS bucket storage loader
+import S3Client from 'aws-sdk/clients/s3';
+
+const accessID = "AKIAID8481EXAMPLE2";
+const secretKEY = "yJb/M719YHD9+D19YJD81FEXAMPLEHOLDER_KEY";
+
+export function initializeS3() {
+  return new S3Client({
+    accessKeyId: accessID,
+    secretAccessKey: secretKEY,
+    region: 'us-west-2'
+  });
+}`
+  }
+] as const;
+
+function traceStepKey(step: TraceStep) {
+  return `${step.step}-${step.location}-${step.description}`;
+}
 
 interface AdHocSandboxViewProps {
   onAnalyzeSnippet: (code: string) => Promise<any>;
@@ -40,65 +106,6 @@ export async function processLogin(req, res) {
   const [isLoading, setIsLoading] = useState(false);
   const [scanResult, setScanResult] = useState<any | null>(null);
   const [errorWord, setErrorWord] = useState<string | null>(null);
-
-  const templates = [
-    {
-      name: "SQL injection and secret logging",
-      code: `// Paste or select a custom backend code block here
-import mysql from 'mysql2/promise';
-
-export async function processLogin(req, res) {
-  const { user, password } = req.body;
-  
-  // VULNERABILITY: SQL Injection
-  const connection = await mysql.createConnection({ host: 'localhost', user: 'admin_root' });
-  const [rows] = await connection.query(
-    "SELECT * FROM accounts WHERE username = '" + user + "' AND pw = '" + password + "'"
-  );
-  
-  // VULNERABILITY: plaintext credential logging
-  console.log("Authenticated username match payload: ", user, " pw: ", password);
-
-  res.json({ match: rows.length > 0 });
-}`
-    },
-    {
-      name: "Plain HTTP Vital Dispatch",
-      code: `// Patient Vital broadcast over plain-text network
-import http from 'http';
-
-export function sendVitals(patientId, records) {
-  const body = JSON.stringify({ patientId, records });
-  
-  // Port 80 unencrypted transit
-  const req = http.request({
-    hostname: "internal-dispatch.vitals.local",
-    port: 80,
-    path: "/metrics/submit",
-    method: "POST"
-  });
-  
-  req.write(body);
-  req.end();
-}`
-    },
-    {
-      name: "Hardcoded AWS Config Keys",
-      code: `// AWS bucket storage loader
-import S3Client from 'aws-sdk/clients/s3';
-
-const accessID = "AKIAID8481EXAMPLE2";
-const secretKEY = "yJb/M719YHD9+D19YJD81FEXAMPLEHOLDER_KEY";
-
-export function initializeS3() {
-  return new S3Client({
-    accessKeyId: accessID,
-    secretAccessKey: secretKEY,
-    region: 'us-west-2'
-  });
-}`
-    }
-  ];
 
   const handleScan = async () => {
     setIsLoading(true);
@@ -174,7 +181,10 @@ export function initializeS3() {
         {/* Left Side: Code Editor pasting console */}
         <div className="space-y-4">
           <div className="flex justify-between items-center text-xs">
-            <label className="block font-mono font-bold uppercase tracking-wider text-[#717A75]">
+            <label
+              htmlFor={SANDBOX_EDITOR_ID}
+              className="block font-mono font-bold uppercase tracking-wider text-[#717A75]"
+            >
               Source Script Input Console
             </label>
             
@@ -182,9 +192,9 @@ export function initializeS3() {
             <div className="flex items-center gap-1">
               <span className="text-[10px] text-[#8A958F]">Samples:</span>
               <div className="flex gap-1.5">
-                {templates.map((temp, idx) => (
+                {SANDBOX_TEMPLATES.map((temp, idx) => (
                   <button
-                    key={idx}
+                    key={temp.name}
                     type="button"
                     onClick={() => setCode(temp.code)}
                     className="p-1 px-2 border border-[#EAE6DF] rounded bg-[#FAF8F5] text-[10px] text-neutral-700 hover:border-emerald-950 hover:bg-white transition-all cursor-pointer font-semibold"
@@ -206,6 +216,7 @@ export function initializeS3() {
             </div>
             
             <textarea
+              id={SANDBOX_EDITOR_ID}
               rows={16}
               value={code}
               onChange={(e) => setCode(e.target.value)}
@@ -215,6 +226,7 @@ export function initializeS3() {
           </div>
 
           <button
+            type="button"
             onClick={handleScan}
             disabled={isLoading || !code.trim()}
             className="w-full py-3 bg-emerald-950 text-white rounded font-semibold text-xs hover:bg-emerald-900 transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-50"
@@ -238,9 +250,9 @@ export function initializeS3() {
 
         {/* Right Side: analysis results */}
         <div className="space-y-4">
-          <label className="block font-mono font-bold uppercase tracking-wider text-[#717A75] text-xs">
+          <div className="block font-mono font-bold uppercase tracking-wider text-[#717A75] text-xs">
             Analysis results
-          </label>
+          </div>
 
           {isLoading ? (
             <div className="border border-[#EAE6DF] rounded bg-[#FAF8F5] p-12 text-center flex flex-col items-center justify-center h-[420px] gap-3">
@@ -283,11 +295,14 @@ export function initializeS3() {
 
               {/* Finding items list overflow select to read */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {scanResult.findings.map((finding: Finding, idx: number) => {
+                {scanResult.findings.map((finding: Finding) => {
                   const traceSteps = Array.isArray(finding.trace) ? finding.trace : [];
 
                   return (
-                    <div key={idx} className="border border-[#EAE6DF] bg-[#FAF8F5]/50 rounded p-4 space-y-3 shrink-0">
+                    <div
+                      key={`${finding.title}-${finding.filepath}-${finding.line}-${finding.category}`}
+                      className="border border-[#EAE6DF] bg-[#FAF8F5]/50 rounded p-4 space-y-3 shrink-0"
+                    >
                       <div className="flex justify-between items-center text-[10px] font-mono">
                         <span className="p-1 px-2 rounded-sm bg-rose-50 border border-rose-200 font-bold text-rose-800">
                           {finding.severity}
@@ -310,8 +325,8 @@ export function initializeS3() {
                             Execution Path Node Traced
                           </span>
                           <div className="text-[11px] text-zinc-800 space-y-1 pl-2 border-l border-emerald-800 border-dashed">
-                            {traceSteps.map((step, sIdx) => (
-                              <div key={sIdx} className="flex gap-1.5 items-baseline">
+                            {traceSteps.map((step) => (
+                              <div key={traceStepKey(step)} className="flex gap-1.5 items-baseline">
                                 <span className="font-bold font-mono text-emerald-900">{step.step}.</span>
                                 <span className="leading-snug select-text">
                                   <span className="font-bold underline uppercase text-[9px]">{step.location}</span>: {step.description}

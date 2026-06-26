@@ -29,6 +29,10 @@ interface WorkflowStepWorkbenchProps {
   isCollapsed?: boolean;
 }
 
+function stableStringKey(value: string, prefix: string) {
+  return `${prefix}-${value}`;
+}
+
 export function WorkflowStepWorkbench({
   activeNode,
   activeEdge,
@@ -296,7 +300,7 @@ export function WorkflowStepWorkbench({
                 <div className="space-y-1.5 font-mono text-[10.5px]">
                   {activeNode.metadata.inputs.map((input, index) => (
                     <div
-                      key={index}
+                      key={stableStringKey(input, 'workflow-input')}
                       className="select-text rounded border border-[#EAE6DF] bg-[#FAF8F5] p-2 font-bold text-[#1E2522]"
                     >
                       <span className="mr-1 rounded border bg-white px-1.5 py-0.2 text-[9px] text-zinc-400">
@@ -317,7 +321,7 @@ export function WorkflowStepWorkbench({
                 <div className="space-y-1.5 font-mono text-[10.5px]">
                   {activeNode.metadata.outputs.map((output, index) => (
                     <div
-                      key={index}
+                      key={stableStringKey(output, 'workflow-output')}
                       className="select-text rounded border border-emerald-200/50 bg-emerald-50/25 p-2 font-medium text-emerald-950"
                     >
                       <span className="mr-2 rounded border bg-white px-1.5 py-0.2 text-[9px] font-bold text-emerald-700">
@@ -344,7 +348,10 @@ export function WorkflowStepWorkbench({
                 </h4>
                 <div className="space-y-1.5 rounded bg-neutral-900 p-3 font-mono text-[9px] text-[#FAF8F5] shadow-inner select-text">
                   {activeNode.metadata.logs.map((log, index) => (
-                    <div key={index} className="flex gap-2">
+                    <div
+                      key={stableStringKey(log, 'workflow-log')}
+                      className="flex gap-2"
+                    >
                       <span className="select-none font-bold text-zinc-500">[{index + 1}]</span>
                       <span className="leading-normal">{log}</span>
                     </div>

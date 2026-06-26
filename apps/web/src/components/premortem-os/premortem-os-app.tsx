@@ -9,7 +9,6 @@ import { ProjectsView } from './ProjectsView';
 import { AuditsView } from './AuditsView';
 import { AdHocSandboxView } from './AdHocSandboxView';
 import { SettingsView } from './SettingsView';
-import { AuditHistoryView } from './AuditHistoryView';
 import { Project, AuditRun, ProviderType, Finding, RiskCluster } from '@/lib/premortem-os/types';
 import type { RuntimeAuditSnapshot } from '@/lib/premortem-api/client';
 import { ConsoleReviewAction, consoleStatusAfterReviewAction, ConsoleIssueStatus } from '@premortem/domain';
@@ -37,6 +36,18 @@ const WorkflowCanvasView = dynamic(
     loading: () => (
       <div className="flex flex-1 items-center justify-center p-8 font-mono text-xs text-[#5C6560]">
         Loading workflow canvas…
+      </div>
+    ),
+    ssr: false
+  }
+);
+
+const AuditHistoryView = dynamic(
+  () => import('./AuditHistoryView').then((module) => module.AuditHistoryView),
+  {
+    loading: () => (
+      <div className="flex flex-1 items-center justify-center p-8 font-mono text-xs text-[#5C6560]">
+        Loading audit history…
       </div>
     ),
     ssr: false

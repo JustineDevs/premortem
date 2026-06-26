@@ -50,7 +50,8 @@
     "docker:status": "node ./scripts/docker/verify-services.mjs",
     "docker:test-neo4j": "npx tsx --tsconfig tsconfig.base.json ./scripts/docker/test-neo4j.mjs",
     "premortem": "node ./packages/cli/dist/index.js",
-    "prepare": "node ./scripts/setup-husky.mjs"
+    "prepare": "node ./scripts/setup-husky.mjs",
+    "doctor": "npx react-doctor@latest"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",

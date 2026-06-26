@@ -1,4 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
+'use client';
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AuditRun, Finding, SeverityType } from "@/lib/premortem-os/types";
 import {
   History,
@@ -31,6 +33,24 @@ import {
 import { OsChartTooltip } from "./chart-tooltip";
 import { OsToast } from "./os-toast";
 
+const traceHref = (auditId: string) =>
+  `/app?tab=audits&audit=${encodeURIComponent(auditId)}`;
+const COMPARISON_RUN_A_ID = 'audit-history-comparison-run-a';
+const COMPARISON_RUN_B_ID = 'audit-history-comparison-run-b';
+
+function getSeverityStyle(severity: SeverityType) {
+  switch (severity) {
+    case "CRITICAL":
+      return "bg-rose-50 text-rose-800 border-rose-200";
+    case "HIGH":
+      return "bg-amber-50 text-amber-800 border-amber-200";
+    case "MEDIUM":
+      return "bg-indigo-50 text-indigo-800 border-indigo-200";
+    default:
+      return "bg-emerald-50 text-emerald-800 border-emerald-200";
+  }
+}
+
 interface AuditHistoryViewProps {
   audits: AuditRun[];
   onFetchAuditDetail: (auditId: string) => Promise<AuditRun | null>;
@@ -56,9 +76,8 @@ export function AuditHistoryView({
   const [isComparing, setIsComparing] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const chartViewportRef = useRef<HTMLDivElement>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [chartWidth, setChartWidth] = useState(0);
-  const traceHref = (auditId: string) =>
-    `/app?tab=audits&audit=${encodeURIComponent(auditId)}`;
 
   useEffect(() => {
     const viewport = chartViewportRef.current;
@@ -81,90 +100,74 @@ export function AuditHistoryView({
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 3050);
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => setToastMsg(null), 3050);
   };
-
-  const exportHistoryCsv = () => {
-    const header = [
-      "id",
-      "project",
-      "date",
-      "score",
-      "critical",
-      "high",
-      "medium",
-      "low",
-    ];
-    const rows = filteredAudits.map((a) => [
-      a.id,
-      a.projectName,
-      new Date(a.date).toISOString(),
-      String(a.score),
-      String(a.criticalCount ?? 0),
-      String(a.highCount ?? 0),
-      String(a.mediumCount ?? 0),
-      String(a.lowCount ?? 0),
-    ]);
-    const csv = [header, ...rows]
-      .map((row) =>
-        row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","),
-      )
-      .join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `premortem-audit-history-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-    showToast("Audit history exported as CSV.");
-  };
-
-  // Filter historical audits based on project selection & search term
-  const filteredAudits = audits.filter((a) => {
-    const matchesProj =
-      selectedProjectId === "ALL" || a.projectId === selectedProjectId;
-    const matchesSearch =
-      a.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      a.id.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesProj && matchesSearch;
-  });
-
-  // Sort chronologically for timeline charts (oldest to newest)
-  const chartData = [...audits]
-    .filter(
-      (a) => selectedProjectId === "ALL" || a.projectId === selectedProjectId,
-    )
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-    .map((a) => ({
-      date: new Date(a.date).toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-      }),
-      score: a.score,
-      projectName: a.projectName,
-      risks: a.findings?.length || 0,
-    }));
-
-  // Unique projects list for dropdown filtering
-  const uniqueProjectsMap = new Map();
-  audits.forEach((a) => {
-    uniqueProjectsMap.set(a.projectId, a.projectName);
-  });
-  const projectsList = Array.from(uniqueProjectsMap.entries()).map(
-    ([id, name]) => ({ id, name }),
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    },
+    []
   );
 
-  // Run comparative audit calculations
-  const runA =
-    comparisonAudits.runA ?? audits.find((a) => a.id === comparisonRunAId);
-  const runB =
-    comparisonAudits.runB ?? audits.find((a) => a.id === comparisonRunBId);
+  // Filter historical audits based on project selection & search term.
+  const filteredAudits = useMemo(
+    () =>
+      audits.filter((a) => {
+        const matchesProj =
+          selectedProjectId === "ALL" || a.projectId === selectedProjectId;
+        const matchesSearch =
+          a.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          a.id.toLowerCase().includes(searchTerm.toLowerCase());
+        return matchesProj && matchesSearch;
+      }),
+    [audits, selectedProjectId, searchTerm]
+  );
 
-  // Perform audit comparison math
-  let comparisonResults = null;
-  if (runA && runB) {
-    // Sort chronologically: determine older run vs newer run
+  // Sort chronologically for timeline charts (oldest to newest).
+  const chartData = useMemo(
+    () =>
+      [...audits]
+        .filter((a) => selectedProjectId === "ALL" || a.projectId === selectedProjectId)
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+        .map((a) => ({
+          date: new Date(a.date).toLocaleDateString(undefined, {
+            month: "short",
+            day: "numeric"
+          }),
+          score: a.score,
+          projectName: a.projectName,
+          risks: a.findings?.length || 0
+        })),
+    [audits, selectedProjectId]
+  );
+
+  // Unique projects list for dropdown filtering.
+  const projectsList = useMemo(() => {
+    const uniqueProjectsMap = new Map<string, string>();
+    audits.forEach((a) => {
+      uniqueProjectsMap.set(a.projectId, a.projectName);
+    });
+    return Array.from(uniqueProjectsMap.entries()).map(([id, name]) => ({ id, name }));
+  }, [audits]);
+
+  // Run comparative audit calculations.
+  const runA = useMemo(
+    () => comparisonAudits.runA ?? audits.find((a) => a.id === comparisonRunAId),
+    [comparisonAudits.runA, audits, comparisonRunAId]
+  );
+  const runB = useMemo(
+    () => comparisonAudits.runB ?? audits.find((a) => a.id === comparisonRunBId),
+    [comparisonAudits.runB, audits, comparisonRunBId]
+  );
+  const comparisonResults = useMemo(() => {
+    if (!runA || !runB) return null;
+
+    // Sort chronologically: determine older run vs newer run.
     const timeA = new Date(runA.date).getTime();
     const timeB = new Date(runB.date).getTime();
     const olderRun = timeA <= timeB ? runA : runB;
@@ -174,25 +177,24 @@ export function AuditHistoryView({
     const oldFindings = olderRun.findings || [];
     const newFindings = newerRun.findings || [];
 
-    // Find "Secured" findings (exist in old, but marked RESOLVED or absent in new)
+    // Find "Secured" findings (exist in old, but marked RESOLVED or absent in new).
     const securedVulnerabilities = oldFindings.filter((oldF) => {
       const matchInNew = newFindings.find(
-        (newF) => newF.title === oldF.title && newF.filepath === oldF.filepath,
+        (newF) => newF.title === oldF.title && newF.filepath === oldF.filepath
       );
       return !matchInNew || matchInNew.status === "RESOLVED";
     });
 
-    // Find "New" findings introduced in the newer run
+    // Find "New" findings introduced in the newer run.
     const newVulnerabilitiesIntroduced = newFindings.filter((newF) => {
-      if (newF.status === "RESOLVED" || newF.status === "DISMISSED")
-        return false;
+      if (newF.status === "RESOLVED" || newF.status === "DISMISSED") return false;
       const existedInOld = oldFindings.find(
-        (oldF) => oldF.title === newF.title && oldF.filepath === newF.filepath,
+        (oldF) => oldF.title === newF.title && oldF.filepath === newF.filepath
       );
       return !existedInOld || existedInOld.status === "RESOLVED";
     });
 
-    comparisonResults = {
+    return {
       olderRun,
       newerRun,
       scoreDelta,
@@ -203,9 +205,34 @@ export function AuditHistoryView({
       oldHigh: olderRun.highCount || 0,
       newHigh: newerRun.highCount || 0,
       oldMedium: olderRun.mediumCount || 0,
-      newMedium: newerRun.mediumCount || 0,
+      newMedium: newerRun.mediumCount || 0
     };
-  }
+  }, [runA, runB]);
+
+  const exportHistoryCsv = () => {
+    const header = ["id", "project", "date", "score", "critical", "high", "medium", "low"];
+    const rows = filteredAudits.map((a) => [
+      a.id,
+      a.projectName,
+      new Date(a.date).toISOString(),
+      String(a.score),
+      String(a.criticalCount ?? 0),
+      String(a.highCount ?? 0),
+      String(a.mediumCount ?? 0),
+      String(a.lowCount ?? 0)
+    ]);
+    const csv = [header, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `premortem-audit-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast("Audit history exported as CSV.");
+  };
 
   const triggerComparison = async () => {
     if (!comparisonRunAId || !comparisonRunBId) {
@@ -237,19 +264,6 @@ export function AuditHistoryView({
       showToast("Failed to load audit snapshots for comparison.");
     } finally {
       setIsComparing(false);
-    }
-  };
-
-  const getSeverityStyle = (severity: SeverityType) => {
-    switch (severity) {
-      case "CRITICAL":
-        return "bg-rose-50 text-rose-800 border-rose-200";
-      case "HIGH":
-        return "bg-amber-50 text-amber-800 border-amber-200";
-      case "MEDIUM":
-        return "bg-indigo-50 text-indigo-800 border-indigo-200";
-      default:
-        return "bg-emerald-50 text-emerald-800 border-emerald-200";
     }
   };
 
@@ -422,10 +436,14 @@ export function AuditHistoryView({
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-end text-xs">
           <div className="space-y-1.5">
-            <label className="block font-mono font-bold text-zinc-500 uppercase text-[9px] tracking-wider">
+            <label
+              htmlFor={COMPARISON_RUN_A_ID}
+              className="block font-mono font-bold text-zinc-500 uppercase text-[9px] tracking-wider"
+            >
               1. Base Audit Baseline Record
             </label>
             <select
+              id={COMPARISON_RUN_A_ID}
               value={comparisonRunAId}
               onChange={(e) => {
                 setComparisonRunAId(e.target.value);
@@ -444,10 +462,14 @@ export function AuditHistoryView({
           </div>
 
           <div className="space-y-1.5">
-            <label className="block font-mono font-bold text-zinc-500 uppercase text-[9px] tracking-wider">
+            <label
+              htmlFor={COMPARISON_RUN_B_ID}
+              className="block font-mono font-bold text-zinc-500 uppercase text-[9px] tracking-wider"
+            >
               2. Target / Succeeding Audit Milestone
             </label>
             <select
+              id={COMPARISON_RUN_B_ID}
               value={comparisonRunBId}
               onChange={(e) => {
                 setComparisonRunBId(e.target.value);
@@ -467,6 +489,7 @@ export function AuditHistoryView({
 
           <div>
             <button
+              type="button"
               onClick={() => void triggerComparison()}
               disabled={isComparing}
               className="w-full p-2.5 text-center bg-emerald-950 font-bold hover:bg-emerald-900 text-[#FAF8F5] rounded transition-all cursor-pointer uppercase font-mono tracking-wider text-[11px] h-[38px] flex items-center justify-center gap-2 select-none disabled:opacity-50"
@@ -607,7 +630,7 @@ export function AuditHistoryView({
                   ) : (
                     comparisonResults.securedVulnerabilities.map((v, idx) => (
                       <div
-                        key={idx}
+                        key={v.id}
                         className="border border-emerald-100 bg-white p-3.5 rounded shadow-xs space-y-1.5 relative overflow-hidden group"
                       >
                         <div className="flex justify-between items-center font-mono text-[9px]">
@@ -658,9 +681,9 @@ export function AuditHistoryView({
                     </div>
                   ) : (
                     comparisonResults.newVulnerabilitiesIntroduced.map(
-                      (v, idx) => (
+                      (v) => (
                         <div
-                          key={idx}
+                          key={v.id}
                           className="border border-rose-200 bg-white p-3.5 rounded shadow-xs space-y-1.5 relative overflow-hidden group"
                         >
                           <div className="flex justify-between items-center font-mono text-[9px]">
@@ -759,6 +782,7 @@ export function AuditHistoryView({
                     <td className="p-3 text-right">
                       <div className="flex justify-end gap-1.5 select-none">
                         <button
+                          type="button"
                           onClick={() => {
                             if (!comparisonRunAId) {
                               setComparisonRunAId(a.id);

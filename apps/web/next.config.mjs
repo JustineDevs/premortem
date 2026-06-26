@@ -28,7 +28,8 @@ const nextConfig = {
   ],
   transpilePackages: workspacePackages,
   experimental: {
-    externalDir: true
+    externalDir: true,
+    optimizePackageImports: ['lucide-react']
   },
   webpack: (config) => {
     config.resolve.modules = [

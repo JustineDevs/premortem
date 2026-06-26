@@ -67,7 +67,11 @@ export function useWorkflowPhoenixSemanticGraph(
 ) {
   const enabled = Boolean(auditRunId) && (options?.enabled ?? true);
 
-  const query = useQuery({
+  const {
+    data,
+    isLoading,
+    isFetching
+  } = useQuery({
     queryKey: ['os', 'audit-semantic-graph', auditRunId],
     enabled,
     staleTime: 60_000,
@@ -89,15 +93,15 @@ export function useWorkflowPhoenixSemanticGraph(
 
   const semanticGraph = useMemo(
     () =>
-      query.data ?? {
+      data ?? {
         nodes: [] as WorkflowGraphNode[],
         edges: [] as WorkflowGraphEdge[],
         configured: false,
         included: false,
         traceIds: [] as string[]
       },
-    [query.data]
+    [data]
   );
 
-  return { ...semanticGraph, loading: query.isLoading || query.isFetching };
+  return { ...semanticGraph, loading: isLoading || isFetching };
 }

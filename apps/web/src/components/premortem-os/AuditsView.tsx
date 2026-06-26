@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import { premortemBrand } from '@/lib/premortem-os/branding';
 import { AuditRun, Finding, TraceStep, SeverityType, ConsoleReviewActionValue, RiskCluster } from '@/lib/premortem-os/types';
@@ -45,6 +47,39 @@ import {
   Sparkle
 } from 'lucide-react';
 import { parseAuditCheckpoint } from '@premortem/domain';
+
+const synthesisField = (value: string | undefined, _emptyLabel?: string) =>
+  (value?.trim() ? value : '');
+
+function getSeverityStyles(severity: SeverityType) {
+  switch (severity) {
+    case 'CRITICAL':
+      return { text: 'text-rose-600', bg: 'bg-rose-50 border-rose-200', dot: 'bg-rose-600' };
+    case 'HIGH':
+      return { text: 'text-amber-600', bg: 'bg-amber-50 border-amber-200', dot: 'bg-amber-500' };
+    case 'MEDIUM':
+      return { text: 'text-indigo-600', bg: 'bg-indigo-50 border-indigo-200', dot: 'bg-indigo-500' };
+    case 'LOW':
+      return { text: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200', dot: 'bg-emerald-500' };
+  }
+}
+
+function getStatusBadge(status: string) {
+  switch (status) {
+    case 'OPEN':
+      return 'bg-zinc-100 text-zinc-700 border border-zinc-200';
+    case 'CONFIRMED':
+      return 'bg-amber-50 text-amber-700 border border-amber-200 uppercase font-bold';
+    case 'DISMISSED':
+      return 'bg-stone-100 text-stone-500 border border-stone-200 line-through';
+    case 'RESOLVED':
+      return 'bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold';
+    case 'PUBLISHED':
+      return 'bg-orange-50 text-orange-800 border border-orange-200 font-bold uppercase';
+    default:
+      return 'bg-zinc-100 text-zinc-700';
+  }
+}
 
 interface AuditsViewProps {
   audits: AuditRun[];
@@ -252,38 +287,6 @@ export function AuditsView({
   });
 
   const activeFinding = findings.find(f => f.id === selectedFindingId) || filteredFindings[0] || findings[0];
-
-  const synthesisField = (value: string | undefined, emptyLabel: string) => value?.trim() ? value : '';
-
-  const getSeverityStyles = (severity: SeverityType) => {
-    switch (severity) {
-      case 'CRITICAL':
-        return { text: 'text-rose-600', bg: 'bg-rose-50 border-rose-200', dot: 'bg-rose-600' };
-      case 'HIGH':
-        return { text: 'text-amber-600', bg: 'bg-amber-50 border-amber-200', dot: 'bg-amber-500' };
-      case 'MEDIUM':
-        return { text: 'text-indigo-600', bg: 'bg-indigo-50 border-indigo-200', dot: 'bg-indigo-500' };
-      case 'LOW':
-        return { text: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200', dot: 'bg-emerald-500' };
-    }
-  };
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'OPEN':
-        return 'bg-zinc-100 text-zinc-700 border border-zinc-200';
-      case 'CONFIRMED':
-        return 'bg-amber-50 text-amber-700 border border-amber-200 uppercase font-bold';
-      case 'DISMISSED':
-        return 'bg-stone-100 text-stone-500 border border-stone-200 line-through';
-      case 'RESOLVED':
-        return 'bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold';
-      case 'PUBLISHED':
-        return 'bg-orange-50 text-orange-800 border border-orange-200 font-bold uppercase';
-      default:
-        return 'bg-zinc-100 text-zinc-700';
-    }
-  };
 
   // 1. Live Synthesis fields updates on parent state
   const handleFieldChange = (fieldName: string, val: string) => {
@@ -656,6 +659,7 @@ export function AuditsView({
                           {/* Hotkey Inspect */}
                           <td className="p-3 text-right">
                             <button
+                              type="button"
                               onClick={() => {
                                 setSelectedFindingId(f.id);
                                 setActiveTab('findings');
@@ -706,6 +710,7 @@ export function AuditsView({
                     return (
                       <button
                         key={f.id}
+                        type="button"
                         onClick={() => setSelectedFindingId(f.id)}
                         className={`w-full text-left p-4 cursor-pointer text-xs transition-all ${
                           isSel
@@ -843,7 +848,7 @@ export function AuditsView({
 
                           <div className="relative border border-[#EAE6DF] rounded bg-[#FAF8F5]/30 p-4 space-y-4">
                             {activeFinding.trace.map((step, idx) => (
-                              <div key={idx} className="relative flex gap-4">
+                              <div key={`${step.step}-${step.location}`} className="relative flex gap-4">
                                 {idx < activeFinding.trace.length - 1 && (
                                   <div className="w-[1px] absolute left-2.5 top-6 bottom-0 bg-[#EAE6DF] border-dashed border-l" />
                                 )}
@@ -872,8 +877,8 @@ export function AuditsView({
                             ))}
                             {lineageEntries
                               .filter((entry) => entry.id === activeFinding.id || entry.parentId === activeFinding.id)
-                              .map((entry, idx) => (
-                                <div key={`lineage-${entry.id}-${idx}`} className="relative flex gap-4">
+                              .map((entry) => (
+                                <div key={`lineage-${entry.id}`} className="relative flex gap-4">
                                   <div className="w-5 h-5 rounded-full bg-orange-700 text-white flex items-center justify-center font-mono text-[10px] font-bold shrink-0 mt-0.5">
                                     L
                                   </div>
@@ -929,6 +934,7 @@ export function AuditsView({
                       <div className="border-t border-[#EAE6DF] pt-6 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-4">
                         <div className="flex gap-2 text-xs">
                           <button
+                            type="button"
                             onClick={() => onUpdateFindingStatus(selectedAudit.id, activeFinding.id, ConsoleReviewAction.CONFIRM)}
                             disabled={activeFinding.status === ConsoleIssueStatus.CONFIRMED}
                             className="py-2 px-3 border border-[#EAE6DF] rounded font-semibold text-[#1E2522] hover:bg-[#FAF8F5] transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
@@ -938,6 +944,7 @@ export function AuditsView({
                           </button>
 
                           <button
+                            type="button"
                             onClick={() => onUpdateFindingStatus(selectedAudit.id, activeFinding.id, ConsoleReviewAction.DISMISS)}
                             disabled={activeFinding.status === ConsoleIssueStatus.DISMISSED}
                             className="py-2 px-3 border border-[#EAE6DF] rounded font-semibold text-[#1E2522] hover:bg-[#FAF8F5] transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
@@ -949,6 +956,7 @@ export function AuditsView({
 
                         {activeFinding.suggestedPatchCode && activeFinding.status !== 'RESOLVED' && (
                           <button
+                            type="button"
                             onClick={() => onDeployPatch(selectedAudit.id, activeFinding.id)}
                             disabled={isPatching}
                             className="py-2 px-4 bg-emerald-950 text-white rounded font-semibold hover:bg-emerald-900 transition-all flex items-center justify-center gap-1.5 text-xs shadow-sm cursor-pointer disabled:opacity-50"
@@ -1320,9 +1328,9 @@ export function AuditsView({
 
                   <div className="bg-neutral-950 font-mono text-[11px] text-zinc-300 rounded-lg p-5 overflow-hidden shadow-inner border border-neutral-800 leading-relaxed max-h-48 overflow-y-auto">
                     <div className="space-y-1 selection:bg-zinc-700 select-text">
-                      {selectedAgent.logs.map((log, idx) => (
+                      {selectedAgent.logs.map((log) => (
                         <p
-                          key={idx}
+                          key={log}
                           className={
                             log.includes('CRITICAL') || log.includes('HIGH')
                               ? 'text-rose-500 font-bold'

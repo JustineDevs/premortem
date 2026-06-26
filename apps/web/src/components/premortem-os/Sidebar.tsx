@@ -61,6 +61,7 @@ export function Sidebar({
 
           return (
             <button
+              type="button"
               key={item.id}
               onClick={() => setActiveTab(item.id)}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded text-xs font-medium transition-all group border-0 cursor-pointer ${

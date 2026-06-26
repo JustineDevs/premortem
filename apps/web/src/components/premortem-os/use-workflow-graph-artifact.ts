@@ -54,7 +54,11 @@ export function useWorkflowGraphArtifact(
 ) {
   const enabled = Boolean(auditRunId) && (options?.enabled ?? true);
 
-  const query = useQuery({
+  const {
+    data,
+    isLoading,
+    isFetching
+  } = useQuery({
     queryKey: ['os', 'audit-graph', auditRunId],
     enabled,
     staleTime: 60_000,
@@ -71,10 +75,7 @@ export function useWorkflowGraphArtifact(
     }
   });
 
-  const artifactGraph = useMemo(
-    () => query.data ?? { nodes: [], edges: [] },
-    [query.data]
-  );
+  const artifactGraph = useMemo(() => data ?? { nodes: [], edges: [] }, [data]);
 
-  return { ...artifactGraph, loading: query.isLoading || query.isFetching };
+  return { ...artifactGraph, loading: isLoading || isFetching };
 }

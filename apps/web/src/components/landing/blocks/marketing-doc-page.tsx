@@ -17,6 +17,10 @@ import {
 } from './marketing-doc-primitives';
 import type { StructuredDoc } from '@/content/marketing/docs-types';
 
+function stableDocFragmentKey(prefix: string, value: unknown) {
+  return `${prefix}-${JSON.stringify(value)}`;
+}
+
 export function MarketingStructuredDocPage({ doc }: { doc: StructuredDoc & { description?: string } }) {
   const toc = (doc.toc ?? []) as DocTocItem[];
 
@@ -30,26 +34,35 @@ export function MarketingStructuredDocPage({ doc }: { doc: StructuredDoc & { des
         relatedLinks={doc.relatedLinks}
         toc={toc}
       >
-        {doc.callouts?.map((callout, index) => (
-          <MarketingDocCallout key={`doc-callout-${index}`} {...callout} />
+        {doc.callouts?.map((callout) => (
+          <MarketingDocCallout key={stableDocFragmentKey('doc-callout', callout)} {...callout} />
         ))}
 
         {doc.screenshot ? <MarketingDocScreenshot {...doc.screenshot} /> : null}
 
-        {doc.codeBlocks?.map((block, index) => (
-          <MarketingDocCodeBlock key={block.id ?? `doc-code-${index}`} {...block} />
+        {doc.codeBlocks?.map((block) => (
+          <MarketingDocCodeBlock
+            key={block.id ?? stableDocFragmentKey('doc-code', block)}
+            {...block}
+          />
         ))}
 
         {doc.sections?.map((section) => (
           <MarketingDocSection key={section.id} id={section.id} title={section.heading}>
             {section.bullets ? <MarketingBulletList items={section.bullets} /> : null}
             {section.body ? <MarketingParagraph>{section.body}</MarketingParagraph> : null}
-            {section.callouts?.map((callout, index) => (
-              <MarketingDocCallout key={`${section.id}-callout-${index}`} {...callout} />
+            {section.callouts?.map((callout) => (
+              <MarketingDocCallout
+                key={stableDocFragmentKey(`${section.id}-callout`, callout)}
+                {...callout}
+              />
             ))}
             {section.screenshot ? <MarketingDocScreenshot {...section.screenshot} /> : null}
-            {section.codeBlocks?.map((block, index) => (
-              <MarketingDocCodeBlock key={block.id ?? `${section.id}-code-${index}`} {...block} />
+            {section.codeBlocks?.map((block) => (
+              <MarketingDocCodeBlock
+                key={block.id ?? stableDocFragmentKey(`${section.id}-code`, block)}
+                {...block}
+              />
             ))}
             {section.externalHref ? (
               <p>

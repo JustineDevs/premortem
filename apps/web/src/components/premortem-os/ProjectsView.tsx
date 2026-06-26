@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import { Project, ProviderType } from '@/lib/premortem-os/types';
 import { ProviderBadge } from './provider-badge';
@@ -127,6 +129,7 @@ export function ProjectsView({
         </div>
 
         <button
+          type="button"
           onClick={() => setShowAdvancedForm(!showAdvancedForm)}
           className="px-3 py-2 bg-white text-[#1E2522] hover:bg-[#FAF8F5] border border-[#EAE6DF] text-xs font-semibold rounded flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
         >
@@ -285,6 +288,7 @@ export function ProjectsView({
             const iconSlug = iconSlugs[type];
             return (
               <button
+                type="button"
                 key={type}
                 onClick={() => setFilterType(type)}
                 className={`px-2.5 py-1 text-[9.5px] uppercase tracking-wide font-mono font-bold rounded-sm border cursor-pointer flex items-center gap-1.5 transition-all ${
@@ -419,6 +423,7 @@ export function ProjectsView({
                   {/* Run audit triggers */}
                   <td className="p-4 text-right">
                     <button
+                      type="button"
                       onClick={() => onTriggerScan(p.id)}
                       disabled={p.status === 'SCANNING'}
                       className="p-1 px-3 border border-[#EAE6DF] hover:border-emerald-950 font-semibold text-[10px] rounded hover:bg-[#FAF8F5] transition-all inline-flex items-center gap-1 text-[#1C1D1B] font-sans disabled:opacity-50 cursor-pointer"

@@ -1,4 +1,7 @@
-import React, { useEffect, useState } from "react";
+'use client';
+
+import React, { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { premortemBrand } from "@/lib/premortem-os/branding";
 import { authLinks } from "@/lib/auth-links";
 import { formatIntegrationNotice } from "@/lib/integration-notices";
@@ -198,6 +201,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
   const [notificationInboxLoading, setNotificationInboxLoading] =
     useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState("");
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [projectSettingsDraft, setProjectSettingsDraft] =
     useState<ProjectAutomationDraft>({
       autoRunOnPush: false,
@@ -329,10 +333,22 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
 
   const showToast = (message: string) => {
     setSuccessToast(message);
-    setTimeout(() => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
       setSuccessToast(null);
     }, 3050);
   };
+
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    },
+    []
+  );
 
   const alert = (message: string) => {
     showToast(`Error: ${message}`);
@@ -617,6 +633,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
               return (
                 <button
                   key={subTab.id}
+                  type="button"
                   onClick={() => {
                     setActiveSubTab(subTab.id as typeof activeSubTab);
                   }}
@@ -1176,6 +1193,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       </div>
 
                       <button
+                        type="button"
                         onClick={() => togglePolicy(p.id)}
                         className={`w-10 h-6 shrink-0 rounded-full p-0.5 border cursor-pointer transition-all ${
                           p.active
@@ -1202,13 +1220,14 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       exports, and automation.
                     </p>
                   </div>
-                  <a
+                  <Link
                     href="/api/workspace/activity/export?format=csv"
+                    download
                     className="inline-flex items-center gap-2 py-2 px-4 bg-white border border-[#EAE6DF] font-bold text-[#1E2522] rounded hover:bg-zinc-50 transition-all cursor-pointer text-xs"
                   >
                     <Download size={14} />
                     Export Activity CSV
-                  </a>
+                  </Link>
                 </div>
 
                 {createdApiKeySecret ? (
@@ -1829,10 +1848,11 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                   </div>
 
                   <div className="flex justify-end border-t border-[#EAE6DF]/60 pt-4">
-                    <button
-                      onClick={async () => {
-                        try {
-                          await patchLlm({
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await patchLlm({
                             selectedGeminiModel,
                             maxTokens,
                             temperature,
@@ -1932,7 +1952,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                     <div className="space-y-2">
                       {customProviders.map((prov, pIdx) => (
                         <div
-                          key={pIdx}
+                          key={`${prov.name}-${prov.host}-${prov.model}`}
                           className="border border-[#EAE6DF] bg-white rounded p-3 flex justify-between items-center text-[11px]"
                         >
                           <div className="flex items-center gap-2">
@@ -1956,6 +1976,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
 
                           <div className="flex gap-2">
                             <button
+                              type="button"
                               onClick={() => {
                                 const updated = [...customProviders];
                                 updated[pIdx].active = !updated[pIdx].active;
@@ -2122,6 +2143,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                         </div>
                       </div>
                       <button
+                        type="button"
                         onClick={async () => {
                           try {
                             await patchBillingPlan("free");
@@ -2167,6 +2189,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                         ) : null}
                       </div>
                       <button
+                        type="button"
                         onClick={async () => {
                           try {
                             if (workspace?.billing.stripeConfigured) {
@@ -2220,6 +2243,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                         ) : null}
                       </div>
                       <button
+                        type="button"
                         onClick={async () => {
                           try {
                             if (workspace?.billing.stripeConfigured) {
@@ -2628,6 +2652,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
 
                     <div className="flex justify-end pt-1">
                       <button
+                        type="button"
                         onClick={async () => {
                           try {
                             await patchNotifications({
@@ -2709,6 +2734,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
 
                     <div className="flex justify-end pt-1">
                       <button
+                        type="button"
                         onClick={async () => {
                           try {
                             await patchNotifications({

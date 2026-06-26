@@ -60,9 +60,13 @@ export function WorkflowCanvasView({
   const [activeEdgeId, setActiveEdgeId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [selectedFindingIdForDetail, setSelectedFindingIdForDetail] = useState<string | null>(null);
-  const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<string | null>(null);
+  const [graphSelection, setGraphSelection] = useState<{ scope: string; nodeId: string | null }>({
+    scope: '',
+    nodeId: null
+  });
   const [isInspectionCollapsed, setIsInspectionCollapsed] = useState(false);
   const canvasRef = useRef<WorkflowCanvasBoardHandle>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationIndex, setSimulationIndex] = useState(-1);
@@ -79,8 +83,20 @@ export function WorkflowCanvasView({
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
-    setTimeout(() => setToastMessage(null), 3500);
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => setToastMessage(null), 3500);
   }, []);
+
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    },
+    []
+  );
 
   const registeredProjects = safeProjects;
   const effectiveProjects = useMemo(
@@ -108,8 +124,11 @@ export function WorkflowCanvasView({
   const matchingAudit = selectedProj
     ? pickLatestAuditForProject(safeAudits, selectedProjectId || selectedProj.id)
     : undefined;
+  const graphSelectionScope = `${selectedProjectId || selectedProj?.id || 'none'}:${matchingAudit?.id ?? 'none'}`;
+  const selectedGraphNodeId =
+    graphSelection.scope === graphSelectionScope ? graphSelection.nodeId : null;
 
-  const snapshotQuery = useQuery({
+  const { data: snapshotData } = useQuery({
     queryKey: ['os', 'audit-snapshot', matchingAudit?.id],
     enabled: Boolean(matchingAudit?.id),
     staleTime: 60_000,
@@ -124,12 +143,8 @@ export function WorkflowCanvasView({
     }
   });
 
-  const auditSnapshot = snapshotQuery.data ?? null;
+  const auditSnapshot = snapshotData ?? null;
   const runtimeEventTypes = auditSnapshot?.events?.map((event) => event.eventType) ?? [];
-
-  useEffect(() => {
-    setSelectedGraphNodeId(null);
-  }, [matchingAudit?.id, selectedProjectId]);
 
   const graphArtifactEnabled = Boolean(matchingAudit?.graphSnapshot);
   const { nodes: artifactNodes, edges: artifactEdges, loading: graphArtifactLoading } =
@@ -350,7 +365,9 @@ export function WorkflowCanvasView({
             emptyMessage={graphEmptyMessage}
             semanticIncluded={graphDisplay.semanticIncluded}
             phoenixConfigured={phoenixConfigured}
-            onSelectGraphNode={setSelectedGraphNodeId}
+            onSelectGraphNode={(nodeId) => {
+              setGraphSelection({ scope: graphSelectionScope, nodeId });
+            }}
             onNavigateTab={setActiveTab}
           />
         </div>

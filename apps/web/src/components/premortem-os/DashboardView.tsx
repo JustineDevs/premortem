@@ -542,6 +542,7 @@ export function DashboardView({
                         </td>
                         <td className="py-3 px-3 text-right">
                           <button 
+                            type="button"
                             onClick={() => onSelectAudit(audit.id)}
                             className="p-1 px-2 border border-[#EAE6DF] hover:border-emerald-950 text-[10px] rounded hover:bg-[#FAF8F5] transition-all inline-flex items-center gap-1 font-semibold text-[#1E2522]"
                           >
@@ -599,6 +600,7 @@ export function DashboardView({
                   ) : (
                   visibleProjects.map((proj) => (
                     <button
+                      type="button"
                       key={proj.id}
                       onClick={() => onTriggerScan(proj.id)}
                       disabled={proj.status === 'SCANNING'}
