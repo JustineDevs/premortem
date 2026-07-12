@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { LOCAL_DEV_FIXTURE } from '@premortem/db';
+import { LOCAL_DEV_FIXTURE } from '@premortem/domain';
+import { createClient } from '@supabase/supabase-js';
 
 const API_BASE_URL = process.env.PREMORTEM_API_BASE_URL ?? 'http://127.0.0.1:18787';
 const FIXTURE = LOCAL_DEV_FIXTURE;
@@ -36,6 +37,26 @@ async function api(path: string, init?: RequestInit, apiKey?: string) {
     throw new Error(`${path} failed: ${response.status} ${await response.text()}`);
   }
   return response.json();
+}
+
+function resolveSupabaseRealtimeConfig() {
+  const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.SUPABASE_ANON_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !key) {
+    throw new Error(
+      'Supabase realtime watch requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or anon key).'
+    );
+  }
+
+  return { url: url.replace(/\/$/, ''), key };
+}
+
+function isTerminalAuditStatus(status?: string | null) {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
 
 function parseArgs(argv: string[]) {
@@ -78,8 +99,15 @@ async function submitAudit(flags: Record<string, string>) {
 }
 
 async function watchAudit(auditRunId: string, apiKey?: string) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < 120000) {
+  const { url, key } = resolveSupabaseRealtimeConfig();
+  const supabase = createClient(url, key, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  });
+
+  const printSnapshot = async () => {
     const payload = await api(`/api/audits/${auditRunId}`, undefined, apiKey);
     const auditRun = payload.auditRun;
     console.log(
@@ -90,12 +118,70 @@ async function watchAudit(auditRunId: string, apiKey?: string) {
         latestEvent: auditRun.events.at(-1)?.eventType ?? null
       })
     );
-    if (auditRun.runStatus === 'completed' || auditRun.runStatus === 'failed') {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return auditRun;
+  };
+
+  const initialAuditRun = await printSnapshot();
+  if (isTerminalAuditStatus(initialAuditRun.runStatus)) {
+    return;
   }
-  throw new Error(`Timed out waiting for audit ${auditRunId}`);
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const timeout = setTimeout(async () => {
+      if (settled) return;
+      settled = true;
+      await supabase.removeChannel(channel);
+      reject(new Error(`Timed out waiting for audit ${auditRunId}`));
+    }, 120000);
+
+    const finish = async () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      await supabase.removeChannel(channel);
+      resolve();
+    };
+
+    const fail = async (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      await supabase.removeChannel(channel);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+
+    const channel = supabase
+      .channel(`audit-run-watch:${auditRunId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'audit_runs',
+          filter: `id=eq.${auditRunId}`
+        },
+        async () => {
+          try {
+            const auditRun = await printSnapshot();
+            if (isTerminalAuditStatus(auditRun.runStatus)) {
+              await finish();
+            }
+          } catch (error) {
+            await fail(error);
+          }
+        }
+      );
+
+    channel.subscribe((status, error) => {
+      if (status === 'SUBSCRIBED') {
+        return;
+      }
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        void fail(error ?? new Error(`Supabase realtime channel ${status.toLowerCase()}`));
+      }
+    });
+  });
 }
 
 async function approveIssue(issueId: string, apiKey?: string) {

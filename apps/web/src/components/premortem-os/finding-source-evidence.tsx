@@ -1,6 +1,5 @@
 'use client';
 
-import React from 'react';
 import { FileCode } from 'lucide-react';
 import { formatSourceCodeEvidence } from '@premortem/domain';
 

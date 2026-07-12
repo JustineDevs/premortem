@@ -4,7 +4,6 @@
 (^|/)\.next/
 (^|/)\.turbo/
 (^|/)\.open-next/
-(^|/)\.cloudflare-pages/
 (^|/)\.wrangler/
 (^|/)coverage/
 (^|/)dist/

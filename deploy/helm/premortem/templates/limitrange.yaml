@@ -1,0 +1,24 @@
+{{- if .Values.resources.limitRange.enabled }}
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: premortem-runtime-limits
+  namespace: {{ .Values.global.namespace | quote }}
+  labels:
+{{ include "premortem.labels" . | indent 4 }}
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: {{ .Values.resources.limitRange.defaultRequestCpu | quote }}
+        memory: {{ .Values.resources.limitRange.defaultRequestMemory | quote }}
+      default:
+        cpu: {{ .Values.resources.limitRange.defaultCpu | quote }}
+        memory: {{ .Values.resources.limitRange.defaultMemory | quote }}
+      min:
+        cpu: {{ .Values.resources.limitRange.minCpu | quote }}
+        memory: {{ .Values.resources.limitRange.minMemory | quote }}
+      max:
+        cpu: {{ .Values.resources.limitRange.maxCpu | quote }}
+        memory: {{ .Values.resources.limitRange.maxMemory | quote }}
+{{- end }}

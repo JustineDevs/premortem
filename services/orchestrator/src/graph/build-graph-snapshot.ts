@@ -1,9 +1,8 @@
 import path from 'node:path';
-import ts from 'typescript';
 import type { GraphSnapshotPayload } from '@premortem/graph-model';
 import type { IngestionBundle } from '../ingestion/ingest-project';
 
-const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts'];
+const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.ts', '.cjs', '.mts', '.cts'];
 
 function normalizePath(value: string) {
   return path.posix.normalize(value.replace(/\\/g, '/')).replace(/^\.\//, '');
@@ -37,45 +36,20 @@ function resolveRelativeImport(fromPath: string, specifier: string, availablePat
 
 function extractImports(content: string) {
   const imports = new Set<string>();
-  const sourceFile = ts.createSourceFile(
-    'preview.ts',
-    content,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS
-  );
+  const patterns = [
+    /(?:^|\n)\s*import\s+[^'"\n]+?from\s+['"]([^'"]+)['"]/g,
+    /(?:^|\n)\s*import\s+['"]([^'"]+)['"]/g,
+    /(?:^|\n)\s*export\s+[^'"\n]+?from\s+['"]([^'"]+)['"]/g,
+    /require\(\s*['"]([^'"]+)['"]\s*\)/g
+  ];
 
-  const visit = (node: ts.Node) => {
-    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
-      const moduleSpecifier = node.moduleSpecifier;
-      if (moduleSpecifier && ts.isStringLiteralLike(moduleSpecifier)) {
-        imports.add(moduleSpecifier.text);
-      }
+  for (const pattern of patterns) {
+    for (const match of content.matchAll(pattern)) {
+      if (match[1]) imports.add(match[1]);
     }
+  }
 
-    if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === 'require' &&
-      node.arguments.length > 0
-    ) {
-      const first = node.arguments[0];
-      if (ts.isStringLiteralLike(first)) {
-        imports.add(first.text);
-      }
-    }
-
-    ts.forEachChild(node, visit);
-  };
-
-  visit(sourceFile);
   return [...imports];
-}
-
-function scriptKindForPath(filePath: string): ts.ScriptKind {
-  if (filePath.endsWith('.tsx')) return ts.ScriptKind.TSX;
-  if (filePath.endsWith('.jsx')) return ts.ScriptKind.JSX;
-  return ts.ScriptKind.TS;
 }
 
 function isParseableSourcePreview(filePath: string) {
@@ -90,120 +64,82 @@ type SourceSymbol = {
   endLine: number;
 };
 
-function lineNumberAt(sourceFile: ts.SourceFile, position: number) {
-  return sourceFile.getLineAndCharacterOfPosition(position).line + 1;
-}
-
-function extractSourceSymbols(filePath: string, content: string): {
+function extractSourceSymbols(content: string): {
   imports: string[];
   symbols: SourceSymbol[];
 } {
-  const sourceFile = ts.createSourceFile(
-    filePath,
-    content,
-    ts.ScriptTarget.Latest,
-    true,
-    scriptKindForPath(filePath)
-  );
-
   const imports = extractImports(content);
   const symbols: SourceSymbol[] = [];
+  const lines = content.split(/\r?\n/);
+  const pushSymbol = (
+    name: string,
+    kind: SourceSymbol['kind'],
+    exported: boolean,
+    lineIndex: number,
+    endLine?: number
+  ) => {
+    const startLine = lineIndex + 1;
+    symbols.push({
+      name,
+      kind,
+      exported,
+      startLine,
+      endLine: endLine ?? startLine
+    });
+  };
 
-  const exported = (node: ts.Node) =>
-    Boolean(
-      ts.canHaveModifiers(node) &&
-        ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!.trim();
+    const exported = /\bexport\b/.test(line);
+
+    const functionMatch =
+      line.match(/^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)/) ??
+      line.match(/^(?:export\s+)?const\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z0-9_$]+)\s*=>/);
+    if (functionMatch) {
+      pushSymbol(functionMatch[1]!, 'function', exported, index);
+      continue;
+    }
+
+    const classMatch = line.match(/^(?:export\s+)?class\s+([A-Za-z0-9_$]+)/);
+    if (classMatch) {
+      pushSymbol(classMatch[1]!, 'class', exported, index);
+      continue;
+    }
+
+    const interfaceMatch = line.match(/^(?:export\s+)?interface\s+([A-Za-z0-9_$]+)/);
+    if (interfaceMatch) {
+      pushSymbol(interfaceMatch[1]!, 'interface', exported, index);
+      continue;
+    }
+
+    const typeMatch = line.match(/^(?:export\s+)?type\s+([A-Za-z0-9_$]+)/);
+    if (typeMatch) {
+      pushSymbol(typeMatch[1]!, 'type', exported, index);
+      continue;
+    }
+
+    const enumMatch = line.match(/^(?:export\s+)?enum\s+([A-Za-z0-9_$]+)/);
+    if (enumMatch) {
+      pushSymbol(enumMatch[1]!, 'enum', exported, index);
+      continue;
+    }
+
+    const variableMatch = line.match(
+      /^(?:export\s+)?(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*=\s*(.+)$/
     );
-
-  for (const statement of sourceFile.statements) {
-    if (ts.isFunctionDeclaration(statement) && statement.name) {
-      symbols.push({
-        name: statement.name.text,
-        kind: 'function',
-        exported: exported(statement),
-        startLine: lineNumberAt(sourceFile, statement.getStart(sourceFile)),
-        endLine: lineNumberAt(sourceFile, statement.getEnd())
-      });
+    if (variableMatch) {
+      const initializer = variableMatch[2];
+      const initializerKind = /=>/.test(initializer) || /\bfunction\b/.test(initializer)
+        ? 'function'
+        : /\bclass\b/.test(initializer)
+          ? 'class'
+          : 'variable';
+      pushSymbol(variableMatch[1]!, initializerKind, exported, index);
       continue;
     }
 
-    if (ts.isClassDeclaration(statement) && statement.name) {
-      symbols.push({
-        name: statement.name.text,
-        kind: 'class',
-        exported: exported(statement),
-        startLine: lineNumberAt(sourceFile, statement.getStart(sourceFile)),
-        endLine: lineNumberAt(sourceFile, statement.getEnd())
-      });
-      continue;
-    }
-
-    if (ts.isInterfaceDeclaration(statement)) {
-      symbols.push({
-        name: statement.name.text,
-        kind: 'interface',
-        exported: exported(statement),
-        startLine: lineNumberAt(sourceFile, statement.getStart(sourceFile)),
-        endLine: lineNumberAt(sourceFile, statement.getEnd())
-      });
-      continue;
-    }
-
-    if (ts.isTypeAliasDeclaration(statement)) {
-      symbols.push({
-        name: statement.name.text,
-        kind: 'type',
-        exported: exported(statement),
-        startLine: lineNumberAt(sourceFile, statement.getStart(sourceFile)),
-        endLine: lineNumberAt(sourceFile, statement.getEnd())
-      });
-      continue;
-    }
-
-    if (ts.isEnumDeclaration(statement)) {
-      symbols.push({
-        name: statement.name.text,
-        kind: 'enum',
-        exported: exported(statement),
-        startLine: lineNumberAt(sourceFile, statement.getStart(sourceFile)),
-        endLine: lineNumberAt(sourceFile, statement.getEnd())
-      });
-      continue;
-    }
-
-    if (ts.isVariableStatement(statement)) {
-      for (const declaration of statement.declarationList.declarations) {
-        if (!ts.isIdentifier(declaration.name)) continue;
-
-        const initializer = declaration.initializer;
-        const initializerKind =
-          initializer && ts.isArrowFunction(initializer)
-            ? 'function'
-            : initializer && ts.isFunctionExpression(initializer)
-              ? 'function'
-              : initializer && ts.isClassExpression(initializer)
-                ? 'class'
-                : 'variable';
-
-        symbols.push({
-          name: declaration.name.text,
-          kind: initializerKind,
-          exported: exported(statement),
-          startLine: lineNumberAt(sourceFile, declaration.getStart(sourceFile)),
-          endLine: lineNumberAt(sourceFile, declaration.getEnd())
-        });
-      }
-      continue;
-    }
-
-    if (ts.isExportAssignment(statement)) {
-      symbols.push({
-        name: 'default',
-        kind: 'default-export',
-        exported: true,
-        startLine: lineNumberAt(sourceFile, statement.getStart(sourceFile)),
-        endLine: lineNumberAt(sourceFile, statement.getEnd())
-      });
+    if (/^export\s+default\s+/.test(line)) {
+      pushSymbol('default', 'default-export', true, index);
     }
   }
 
@@ -228,6 +164,7 @@ export function buildGraphFromIngestion(input: {
   ];
   const edges: GraphSnapshotPayload['edges'] = [];
   const seenEdges = new Set<string>();
+  const seenNodeIds = new Set(nodes.map((node) => node.id));
   const availablePaths = new Set(input.bundle.repo_tree.map((entry) => normalizePath(entry)));
 
   const addEdge = (from: string, to: string, type: string, props?: Record<string, unknown>) => {
@@ -235,6 +172,13 @@ export function buildGraphFromIngestion(input: {
     if (seenEdges.has(key)) return;
     seenEdges.add(key);
     edges.push({ from, to, type, props });
+  };
+
+  const addNode = (node: GraphSnapshotPayload['nodes'][number]) => {
+    if (seenNodeIds.has(node.id)) return false;
+    seenNodeIds.add(node.id);
+    nodes.push(node);
+    return true;
   };
 
   for (const manifest of input.bundle.package_manifests) {
@@ -301,7 +245,7 @@ export function buildGraphFromIngestion(input: {
 
   for (const appName of input.bundle.apps) {
     const nodeId = `app:${appName}`;
-    nodes.push({ id: nodeId, label: appName, kind: 'package', props: { layer: 'app' } });
+    nodes.push({ id: nodeId, label: appName, kind: 'app', props: { layer: 'app' } });
     addEdge(`repo:${input.projectId}`, nodeId, 'owns');
   }
 
@@ -315,7 +259,7 @@ export function buildGraphFromIngestion(input: {
     const history = input.bundle.git_history.find((entry) => entry.path === source.path);
     const nodeId = `source:${source.path}`;
     const sourceGraph = isParseableSourcePreview(source.path)
-      ? extractSourceSymbols(source.path, source.preview)
+      ? extractSourceSymbols(source.preview)
       : { imports: [] as string[], symbols: [] as SourceSymbol[] };
     nodes.push({
       id: nodeId,
@@ -379,6 +323,18 @@ export function buildGraphFromIngestion(input: {
     for (const specifier of sourceGraph.imports) {
       const resolved = resolveRelativeImport(source.path, specifier, availablePaths);
       if (!resolved) continue;
+      const resolvedNodeId = `source:${resolved}`;
+      if (!seenNodeIds.has(resolvedNodeId)) {
+        addNode({
+          id: resolvedNodeId,
+          label: resolved,
+          kind: 'file',
+          props: {
+            role: 'imported_asset',
+            importedBy: source.path
+          }
+        });
+      }
       addEdge(nodeId, `source:${resolved}`, 'imports', { specifier });
     }
   }
@@ -397,6 +353,36 @@ export function buildGraphFromIngestion(input: {
       pattern: hint.pattern,
       source: hint.path
     });
+  }
+
+  for (const hit of input.bundle.vulnerability_context.hits) {
+    const vulnerabilityNodeId = `vuln:${hit.id}`;
+    addNode({
+      id: vulnerabilityNodeId,
+      label: hit.id,
+      kind: 'vulnerability',
+      props: {
+        cve: hit.cve ?? null,
+        cvss: hit.cvss ?? null,
+        epss: hit.epss ?? null,
+        kev: hit.kev,
+        summary: hit.summary,
+        fixedVersion: hit.fixedVersion ?? null
+      }
+    });
+
+    const packageNodeId = `pkg:${hit.package}@${hit.installedVersion}`;
+    addNode({
+      id: packageNodeId,
+      label: `${hit.package}@${hit.installedVersion}`,
+      kind: 'package',
+      props: {
+        ecosystem: hit.ecosystem,
+        installedVersion: hit.installedVersion,
+        package: hit.package
+      }
+    });
+    addEdge(packageNodeId, vulnerabilityNodeId, 'VULNERABLE_TO');
   }
 
   return {

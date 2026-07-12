@@ -8,8 +8,12 @@ import {
   severityToConsole
 } from '@premortem/domain';
 
-export function mapSnapshotToAuditRun(snapshot: RuntimeAuditSnapshot, projectName: string): AuditRun {
-  const projected = projectSnapshotToConsoleAudit(snapshot, projectName);
+export function mapSnapshotToAuditRun(
+  snapshot: RuntimeAuditSnapshot,
+  projectName: string,
+  createdAt?: string
+): AuditRun {
+  const projected = projectSnapshotToConsoleAudit(snapshot, projectName, createdAt);
   return {
     ...projected,
     agentRuns: snapshot.agentRuns,
@@ -61,17 +65,47 @@ export function mapRuntimeProject(project: Record<string, unknown>): Project {
 
 export function mapAuditListItemToAuditRun(
   item: {
-    auditRunId: string;
+    auditRunId?: string;
+    id?: string;
     projectId: string;
     branch: string;
-    runStatus: string;
-    createdAt: string;
-    reviewableIssueCount: number;
-    rejectedIssueCount: number;
+    runStatus?: string;
+    status?: string;
+    createdAt?: string;
+    date?: string;
+    findingCount?: number;
+    criticalCount?: number;
+    highCount?: number;
+    mediumCount?: number;
+    lowCount?: number;
+    reviewableIssueCount?: number;
+    reviewableCount?: number;
+    rejectedIssueCount?: number;
+    rejectedCount?: number;
   },
   projectName: string
 ): AuditRun {
-  return projectAuditListItemToConsoleAudit(item, projectName) as AuditRun;
+  const auditRunId = item.auditRunId ?? item.id ?? '';
+  const runStatus = item.runStatus ?? item.status ?? 'failed';
+  const reviewableIssueCount = item.reviewableIssueCount ?? item.reviewableCount ?? 0;
+  const rejectedIssueCount = item.rejectedIssueCount ?? item.rejectedCount ?? 0;
+
+  return projectAuditListItemToConsoleAudit(
+    {
+      ...item,
+      auditRunId,
+      runStatus,
+      findingCount: item.findingCount,
+      criticalCount: item.criticalCount,
+      highCount: item.highCount,
+      mediumCount: item.mediumCount,
+      lowCount: item.lowCount,
+      reviewableIssueCount,
+      rejectedIssueCount,
+      createdAt: item.createdAt ?? item.date ?? new Date().toISOString()
+    },
+    projectName
+  ) as AuditRun;
 }
 
 export function mapFindingComplianceFromAudit(audit: AuditRun): Project['status'] {

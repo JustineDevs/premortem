@@ -9,7 +9,10 @@ export function resolvePostHogProjectKey() {
     const trimmed = key?.trim();
     if (trimmed?.startsWith('phc_')) return trimmed;
   }
-  return null;
+
+  throw new Error(
+    'PostHog is required. Set POSTHOG_API_KEY or NEXT_PUBLIC_POSTHOG_KEY to a phc_ project key.'
+  );
 }
 
 function getPostHogClient() {
@@ -17,8 +20,6 @@ function getPostHogClient() {
 
   const apiKey = resolvePostHogProjectKey();
   const host = process.env.POSTHOG_HOST ?? process.env.NEXT_PUBLIC_POSTHOG_HOST ?? 'https://us.i.posthog.com';
-
-  if (!apiKey) return null;
 
   client = new PostHog(apiKey, { host, flushAt: 1, flushInterval: 0 });
   return client;
@@ -30,7 +31,6 @@ export function trackServerEvent(
   properties?: Record<string, unknown>
 ) {
   const posthog = getPostHogClient();
-  if (!posthog) return;
 
   posthog.capture({
     distinctId,
@@ -47,6 +47,18 @@ export async function shutdownPostHog() {
     await client.shutdown();
     client = null;
   }
+}
+
+export async function probePostHogDelivery(
+  distinctId = `premortem-smoke-${Date.now().toString(36)}`,
+  event = 'premortem_observability_smoke',
+  properties?: Record<string, unknown>
+) {
+  trackServerEvent(distinctId, event, {
+    ...properties,
+    smoke: true
+  });
+  await shutdownPostHog();
 }
 
 export { getPostHogClient };

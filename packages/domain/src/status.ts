@@ -17,16 +17,21 @@ export const ConsoleRunStatus = {
   RUNNING: 'RUNNING',
   PAUSED: 'PAUSED',
   COMPLETED: 'COMPLETED',
-  FAILED: 'FAILED'
+  FAILED: 'FAILED',
+  CANCELLED: 'CANCELLED'
 } as const;
 
 export type ConsoleRunStatusValue =
   (typeof ConsoleRunStatus)[keyof typeof ConsoleRunStatus];
 
 export function runStatusToConsoleRunStatus(runStatus: string): ConsoleRunStatusValue {
-  if (runStatus === RunStatus.COMPLETED) return ConsoleRunStatus.COMPLETED;
-  if (runStatus === RunStatus.FAILED) return ConsoleRunStatus.FAILED;
-  if (runStatus === RunStatus.PAUSED || runStatus === RunStatus.PARTIAL) {
+  const normalized = runStatus.toLowerCase();
+  if (normalized === RunStatus.COMPLETED) return ConsoleRunStatus.COMPLETED;
+  if (normalized === RunStatus.FAILED) return ConsoleRunStatus.FAILED;
+  if (normalized === RunStatus.CANCELLED || normalized === RunStatus.SKIPPED) {
+    return ConsoleRunStatus.CANCELLED;
+  }
+  if (normalized === RunStatus.PAUSED || normalized === RunStatus.PARTIAL) {
     return ConsoleRunStatus.PAUSED;
   }
   return ConsoleRunStatus.RUNNING;

@@ -2,7 +2,8 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { isLocalAuthBypassEnabled } from '@premortem/domain';
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { resolveSupabaseRuntimeConfig } from '@/lib/supabase/server-config';
+// @ts-ignore Next/Vercel resolves this through the app webpack pipeline.
+import { resolveSupabaseRuntimeConfig } from './src/lib/supabase/server-config';
 
 function isProtectedRoute(pathname: string): boolean {
   return (
@@ -25,9 +26,6 @@ export async function middleware(request: NextRequest) {
   }
 
   const config = await resolveSupabaseRuntimeConfig();
-  if (!config) {
-    return NextResponse.redirect(loginRedirectUrl(request));
-  }
 
   const pendingCookies: Array<{ name: string; value: string; options?: CookieOptions }> = [];
   const supabase = createServerClient(config.url, config.anonKey, {
@@ -48,10 +46,10 @@ export async function middleware(request: NextRequest) {
   });
 
   const {
-    data: { user }
-  } = await supabase.auth.getUser();
+    data: { session }
+  } = await supabase.auth.getSession();
 
-  if (!user) {
+  if (!session?.user) {
     const response = NextResponse.redirect(loginRedirectUrl(request));
     for (const cookie of pendingCookies) {
       response.cookies.set(cookie.name, cookie.value, cookie.options);

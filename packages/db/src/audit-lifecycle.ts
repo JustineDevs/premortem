@@ -6,6 +6,7 @@ import {
   type AuditCheckpointPhaseValue
 } from '@premortem/domain';
 import type { Prisma } from '@prisma/client';
+import { captureServerException } from '@premortem/observability/server';
 
 import { prisma } from './client';
 import { createAuditRunEvent, invalidateRecentAuditRunsCache } from './repositories';
@@ -33,6 +34,32 @@ function mergeAuditSummary(
   patch: Record<string, unknown>
 ): Prisma.JsonObject {
   return { ...asSummaryObject(summary), ...patch } as Prisma.JsonObject;
+}
+
+function fallbackCheckpointFromRun(input: {
+  runStatus: string;
+  summary: unknown;
+}): AuditCheckpoint {
+  const existing = parseAuditCheckpoint(input.summary);
+  if (existing) {
+    return existing;
+  }
+
+  const phase =
+    input.runStatus === 'queued'
+      ? AuditCheckpointPhase.QUEUED
+      : input.runStatus === 'paused'
+        ? AuditCheckpointPhase.SPECIALISTS
+        : AuditCheckpointPhase.INGESTION;
+
+  return {
+    phase,
+    completedSpecialists: [],
+    findingCount: 0,
+    clusterCount: 0,
+    graphSnapshotId: null,
+    savedAt: new Date().toISOString()
+  };
 }
 
 function inferCheckpointPhase(input: {
@@ -82,15 +109,33 @@ function inferCheckpointPhase(input: {
 export async function inferCheckpointFromAuditRun(auditRunId: string): Promise<AuditCheckpoint> {
   const auditRun = await prisma.auditRun.findUnique({
     where: { id: auditRunId },
-    include: {
-      agentRuns: { select: { agentName: true, status: true } },
+    select: {
+      projectId: true,
+      branch: true,
+      commitSha: true,
+      runStatus: true,
+      summary: true,
+      agentRuns: {
+        orderBy: { createdAt: 'asc' },
+        take: 100,
+        select: { agentName: true, status: true }
+      },
       graphSnapshot: { select: { id: true } },
-      events: { select: { eventType: true } },
+      events: {
+        where: {
+          eventType: {
+            in: [AuditEvent.INGESTION_COMPLETED, AuditEvent.GRAPH_BUILT]
+          }
+        },
+        take: 2,
+        select: { eventType: true }
+      },
       _count: {
         select: {
           dedupeClusters: true,
           issueCandidates: true,
-          findings: true
+          findings: true,
+          events: true
         }
       }
     }
@@ -128,6 +173,9 @@ export async function inferCheckpointFromAuditRun(auditRunId: string): Promise<A
     findingCount: Math.max(existing?.findingCount ?? 0, auditRun._count.findings),
     clusterCount: Math.max(existing?.clusterCount ?? 0, auditRun._count.dedupeClusters),
     graphSnapshotId: auditRun.graphSnapshot?.id ?? existing?.graphSnapshotId ?? null,
+    projectId: existing?.projectId ?? auditRun.projectId,
+    branch: existing?.branch ?? auditRun.branch,
+    commitSha: existing?.commitSha ?? auditRun.commitSha,
     savedAt: new Date().toISOString()
   };
 }
@@ -137,36 +185,35 @@ export async function saveAuditCheckpoint(
   checkpoint: AuditCheckpoint,
   reason?: string
 ) {
-  const auditRun = await prisma.auditRun.findUnique({
-    where: { id: auditRunId },
-    select: { summary: true }
-  });
-  if (!auditRun) {
-    throw new Error('Audit run not found');
-  }
-
   const payload: AuditCheckpoint = {
     ...checkpoint,
     savedAt: new Date().toISOString(),
     reason: reason ?? checkpoint.reason
   };
 
-  await prisma.auditRun.update({
-    where: { id: auditRunId },
-    data: {
-      summary: mergeAuditSummary(auditRun.summary, { checkpoint: payload })
-    }
-  });
+  await prisma.$transaction(async (tx) => {
+    const updated = await tx.$executeRaw`
+      UPDATE "audit_runs"
+      SET summary = jsonb_set(COALESCE(summary, '{}'::jsonb), '{checkpoint}', ${payload}::jsonb, true)
+      WHERE id = CAST(${auditRunId} AS uuid)
+    `;
 
-  await createAuditRunEvent({
-    auditRunId,
-    eventType: AuditEvent.CHECKPOINT_SAVED,
-    payload: {
-      phase: payload.phase,
-      completedSpecialists: payload.completedSpecialists,
-      findingCount: payload.findingCount,
-      clusterCount: payload.clusterCount
+    if (updated === 0) {
+      throw new Error('Audit run not found');
     }
+
+    await tx.auditRunEvent.create({
+      data: {
+        auditRunId,
+        eventType: AuditEvent.CHECKPOINT_SAVED,
+        payload: {
+          phase: payload.phase,
+          completedSpecialists: payload.completedSpecialists,
+          findingCount: payload.findingCount,
+          clusterCount: payload.clusterCount
+        }
+      }
+    });
   });
 
   return payload;
@@ -202,7 +249,7 @@ export async function extendAuditLease(auditRunId: string, leaseMs = DEFAULT_LEA
 export async function pauseAuditRun(auditRunId: string, reason = 'Paused by operator') {
   const auditRun = await prisma.auditRun.findUnique({
     where: { id: auditRunId },
-    select: { runStatus: true, summary: true }
+    select: { runStatus: true, summary: true, organizationId: true, projectId: true, branch: true, commitSha: true }
   });
 
   if (!auditRun) {
@@ -221,8 +268,23 @@ export async function pauseAuditRun(auditRunId: string, reason = 'Paused by oper
     return prisma.auditRun.findUniqueOrThrow({ where: { id: auditRunId } });
   }
 
-  const checkpoint = await inferCheckpointFromAuditRun(auditRunId);
+  let checkpoint: AuditCheckpoint;
+  try {
+    checkpoint = await inferCheckpointFromAuditRun(auditRunId);
+  } catch (error) {
+    captureServerException(error, {
+      auditRunId,
+      stage: 'pause-checkpoint-inference'
+    });
+    checkpoint = fallbackCheckpointFromRun({
+      runStatus: auditRun.runStatus,
+      summary: auditRun.summary
+    });
+  }
   checkpoint.reason = reason;
+  checkpoint.projectId = checkpoint.projectId ?? auditRun.projectId;
+  checkpoint.branch = checkpoint.branch ?? auditRun.branch;
+  checkpoint.commitSha = checkpoint.commitSha ?? auditRun.commitSha;
 
   const updated = await prisma.auditRun.update({
     where: { id: auditRunId },
@@ -242,13 +304,14 @@ export async function pauseAuditRun(auditRunId: string, reason = 'Paused by oper
     payload: { reason, phase: checkpoint.phase }
   });
 
+  invalidateRecentAuditRunsCache(auditRun.organizationId);
   return updated;
 }
 
 export async function resumeAuditRun(auditRunId: string) {
   const auditRun = await prisma.auditRun.findUnique({
     where: { id: auditRunId },
-    select: { runStatus: true, summary: true }
+    select: { runStatus: true, summary: true, organizationId: true, projectId: true, branch: true, commitSha: true }
   });
 
   if (!auditRun) {
@@ -264,11 +327,27 @@ export async function resumeAuditRun(auditRunId: string) {
     throw new Error('Cannot resume audit run without a checkpoint');
   }
 
+  if (checkpoint.projectId && checkpoint.projectId !== auditRun.projectId) {
+    throw new Error('Cannot resume audit run because the checkpoint target project no longer matches');
+  }
+  if (checkpoint.branch && checkpoint.branch !== auditRun.branch) {
+    throw new Error('Cannot resume audit run because the checkpoint target branch no longer matches');
+  }
+  if (checkpoint.commitSha && checkpoint.commitSha !== auditRun.commitSha) {
+    throw new Error('Cannot resume audit run because the checkpoint target commit no longer matches');
+  }
+
   const updated = await prisma.auditRun.update({
     where: { id: auditRunId },
     data: {
       runStatus: 'queued',
       summary: mergeAuditSummary(auditRun.summary, {
+        checkpoint: {
+          ...checkpoint,
+          projectId: checkpoint.projectId ?? auditRun.projectId,
+          branch: checkpoint.branch ?? auditRun.branch,
+          commitSha: checkpoint.commitSha ?? auditRun.commitSha
+        },
         pauseReason: null,
         resumedAt: new Date().toISOString()
       })
@@ -281,11 +360,15 @@ export async function resumeAuditRun(auditRunId: string) {
     payload: { phase: checkpoint.phase }
   });
 
+  invalidateRecentAuditRunsCache(auditRun.organizationId);
   return updated;
 }
 
 export async function cancelAuditRun(auditRunId: string, reason = 'Cancelled by reviewer') {
-  const auditRun = await prisma.auditRun.findUnique({ where: { id: auditRunId } });
+  const auditRun = await prisma.auditRun.findUnique({
+    where: { id: auditRunId },
+    select: { id: true, organizationId: true, runStatus: true, projectId: true, branch: true, commitSha: true }
+  });
   if (!auditRun) {
     throw new Error('Audit run not found');
   }

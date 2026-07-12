@@ -32,6 +32,13 @@ const WORKER_AGENT_DEFINITIONS = [
     mergeOwnerPriority: 90
   },
   {
+    name: 'pr_diff_agent',
+    description: 'Reviews merge request diffs for risky code changes before the full repository audit finishes.',
+    runMode: 'conditional' as const,
+    promptPath: '.agents/prompts/pr-diff.md',
+    mergeOwnerPriority: 91
+  },
+  {
     name: 'ci_regression_agent',
     description: 'Detects flaky CI behavior, masked failures, and regression-prone delivery sequences.',
     runMode: 'conditional' as const,
@@ -51,6 +58,28 @@ const WORKER_AGENT_DEFINITIONS = [
     runMode: 'conditional' as const,
     promptPath: '.agents/prompts/supply-chain-vulnerability.md',
     mergeOwnerPriority: 87
+  },
+  {
+    name: 'security_prediction_agent',
+    description:
+      'Predicts undiscovered vulnerabilities from CWE/OWASP code patterns, dependency age, and exploit probability signals.',
+    runMode: 'always' as const,
+    promptPath: '.agents/prompts/security-prediction.md',
+    mergeOwnerPriority: 98
+  },
+  {
+    name: 'threat_model_agent',
+    description: 'Applies STRIDE-per-Element to the inferred system architecture.',
+    runMode: 'always' as const,
+    promptPath: '.agents/prompts/threat-model.md',
+    mergeOwnerPriority: 96
+  },
+  {
+    name: 'llm_security_agent',
+    description: 'Predicts LLM-specific threats (T1-T10) against the agentic architecture.',
+    runMode: 'conditional' as const,
+    promptPath: '.agents/prompts/llm-security.md',
+    mergeOwnerPriority: 97
   },
   {
     name: 'artifact_integrity_agent',

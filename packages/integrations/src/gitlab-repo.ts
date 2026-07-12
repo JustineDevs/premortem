@@ -31,11 +31,6 @@ async function gitlabRequest(baseUrl: string, token: string, apiPath: string) {
   return response;
 }
 
-export async function fetchGitLabUser(baseUrl: string, token: string) {
-  const response = await gitlabRequest(baseUrl, token, '/user');
-  return response.json() as Promise<{ id: number; username: string; name?: string }>;
-}
-
 export async function fetchRepositoryTree(input: {
   baseUrl: string;
   token: string;
@@ -54,7 +49,7 @@ export async function fetchRepositoryTree(input: {
       input.token,
       `/projects/${encodedProject}/repository/tree?ref=${encodeURIComponent(input.ref)}&recursive=true&per_page=100&page=${page}`
     );
-    const batch = (await response.json()) as GitLabTreeEntry[];
+    const batch: GitLabTreeEntry[] = await response.json();
     entries.push(...batch);
     if (batch.length < 100) break;
     page += 1;
@@ -103,7 +98,7 @@ export async function fetchRepositoryCommitsByPath(input: {
     `/projects/${encodedProject}/repository/commits?${params.toString()}`
   );
 
-  const rows = (await response.json()) as Array<{
+  const rows: Array<{
     id: string;
     short_id?: string;
     title: string;
@@ -111,7 +106,7 @@ export async function fetchRepositoryCommitsByPath(input: {
     authored_date: string;
     committed_date: string;
     web_url: string;
-  }>;
+  }> = await response.json();
 
   return rows.map(
     (row): GitLabCommitSummary => ({

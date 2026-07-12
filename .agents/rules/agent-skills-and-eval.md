@@ -41,7 +41,7 @@ pnpm run eval:prompts
 
 Builds `@premortem/llm`, `@premortem/observability`, `@premortem/evals`, runs promptfoo against `packages/evals/promptfoo/promptfooconfig.yaml`.
 
-Provider: `packages/evals/promptfoo/provider.mjs` (imports `@premortem/llm` preset builder).
+Provider: `packages/evals/promptfoo/provider.ts` (imports `@premortem/llm` preset builder).
 
 Validate only:
 

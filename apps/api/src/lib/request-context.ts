@@ -3,15 +3,10 @@ import {
   resolveActorOrganization,
   extractApiKeyToken,
   extractBearerToken,
-  getOrganizationMembershipRole,
   verifyOrganizationApiKey,
   verifySupabaseAccessToken
 } from '@premortem/db';
 import type { AppRole } from '@premortem/db';
-import {
-  verifyActorContextSignature,
-  verifyUserIdSignature
-} from '@premortem/security';
 
 export interface ApiActorContext {
   profileId: string;
@@ -33,49 +28,11 @@ export interface ApiAuthIdentity {
   accessToken?: string | null;
 }
 
-function hasValidSignedIdentity(request: Request, profileId: string): boolean {
-  const secret = process.env.IDENTITY_HMAC_SECRET?.trim() ?? null;
-  if (!secret) return false;
-
-  const signedUserId = request.headers.get('x-user-id')?.trim();
-  const signature = request.headers.get('x-user-id-sig')?.trim();
-  if (!signedUserId || !signature || signedUserId !== profileId) {
-    return false;
-  }
-
-  return verifyUserIdSignature(profileId, signature, secret);
-}
-
-function readSignedActorContext(request: Request) {
-  const secret = process.env.IDENTITY_HMAC_SECRET?.trim() ?? null;
-  if (!secret) return null;
-
-  const profileId = request.headers.get('x-user-id')?.trim();
-  const organizationId = request.headers.get('x-premortem-organization-id')?.trim();
-  const role = request.headers.get('x-premortem-role')?.trim() as AppRole | null;
-  const signature = request.headers.get('x-premortem-context-sig')?.trim();
-  if (!profileId || !organizationId || !role || !signature) return null;
-
-  if (!verifyActorContextSignature(profileId, organizationId, role, signature, secret)) return null;
-
-  return { profileId, organizationId, role };
-}
-
 export async function resolveApiAuthIdentity(request: Request): Promise<ApiAuthIdentity> {
   if (isLocalAuthBypassEnabled()) {
     return {
       profileId: LOCAL_DEV_FIXTURE.profileId,
       email: LOCAL_DEV_FIXTURE.email,
-      accessToken: null
-    };
-  }
-
-  const signedProfileId = request.headers.get('x-user-id')?.trim();
-  const signedSignature = request.headers.get('x-user-id-sig')?.trim();
-  if (signedProfileId && signedSignature && hasValidSignedIdentity(request, signedProfileId)) {
-    return {
-      profileId: signedProfileId,
-      email: request.headers.get('x-premortem-user-email'),
       accessToken: null
     };
   }
@@ -99,41 +56,19 @@ export async function resolveApiAuthIdentity(request: Request): Promise<ApiAuthI
 
 async function resolveFromHeaders(request: Request): Promise<ApiActorContext> {
   const profileId = request.headers.get('x-premortem-actor-id')?.trim();
-  if (!profileId) {
-    if (isLocalAuthBypassEnabled()) {
-      return {
-        profileId: LOCAL_DEV_FIXTURE.profileId,
-        organizationId: LOCAL_DEV_FIXTURE.organizationId,
-        email: LOCAL_DEV_FIXTURE.email,
-        role: 'owner'
-      };
-    }
+    if (!profileId) {
+      if (isLocalAuthBypassEnabled()) {
+        return {
+          profileId: LOCAL_DEV_FIXTURE.profileId,
+          organizationId: LOCAL_DEV_FIXTURE.organizationId,
+          email: LOCAL_DEV_FIXTURE.email,
+          role: 'member'
+        };
+      }
     throw new ApiUnauthorizedError('Missing x-premortem-actor-id');
   }
   const hintedOrg = request.headers.get('x-premortem-organization-id')?.trim() || undefined;
   const email = request.headers.get('x-premortem-user-email');
-
-  const signedActorContext = readSignedActorContext(request);
-  if (signedActorContext) {
-    return {
-      profileId: signedActorContext.profileId,
-      organizationId: signedActorContext.organizationId,
-      email,
-      role: signedActorContext.role
-    };
-  }
-
-  if (hasValidSignedIdentity(request, profileId)) {
-    const resolved = await resolveActorOrganization(profileId, hintedOrg, {
-      email: email ?? null
-    });
-    return {
-      profileId: resolved.profileId,
-      organizationId: resolved.organizationId,
-      email,
-      role: resolved.role
-    };
-  }
 
   const resolved = await resolveActorOrganization(profileId, hintedOrg, {
     email: email ?? null
@@ -148,31 +83,12 @@ async function resolveFromHeaders(request: Request): Promise<ApiActorContext> {
 
 export async function resolveApiActorContext(request: Request): Promise<ApiActorContext> {
   if (isLocalAuthBypassEnabled()) {
-    return resolveFromHeaders(request);
-  }
-
-  const signedActorContext = readSignedActorContext(request);
-  if (signedActorContext) {
-    return {
-      profileId: signedActorContext.profileId,
-      organizationId: signedActorContext.organizationId,
-      email: request.headers.get('x-premortem-user-email'),
-      role: signedActorContext.role
-    };
-  }
-
-  const signedProfileId = request.headers.get('x-user-id')?.trim();
-  const signedSignature = request.headers.get('x-user-id-sig')?.trim();
-  if (signedProfileId && signedSignature && hasValidSignedIdentity(request, signedProfileId)) {
-    const hintedOrg = request.headers.get('x-premortem-organization-id')?.trim() || undefined;
-    const email = request.headers.get('x-premortem-user-email');
-    const resolved = await resolveActorOrganization(signedProfileId, hintedOrg, {
-      email: email ?? null
+    const context = await resolveFromHeaders(request);
+    const resolved = await resolveActorOrganization(context.profileId, context.organizationId, {
+      email: context.email ?? null
     });
     return {
-      profileId: resolved.profileId,
-      organizationId: resolved.organizationId,
-      email,
+      ...context,
       role: resolved.role
     };
   }
@@ -181,16 +97,12 @@ export async function resolveApiActorContext(request: Request): Promise<ApiActor
   if (apiKeyToken) {
     const resolved = await verifyOrganizationApiKey(apiKeyToken);
     if (resolved) {
-      const role =
-        (await getOrganizationMembershipRole({
-          organizationId: resolved.organizationId,
-          userId: resolved.profileId
-        })) ?? 'member';
+      const actor = await resolveActorOrganization(resolved.profileId, resolved.organizationId);
       return {
-        profileId: resolved.profileId,
-        organizationId: resolved.organizationId,
+        profileId: actor.profileId,
+        organizationId: actor.organizationId,
         email: null,
-        role
+        role: actor.role
       };
     }
   }

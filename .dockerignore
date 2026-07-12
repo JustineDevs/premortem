@@ -1,0 +1,17 @@
+.git
+.github
+.cursor
+.omx
+.vscode
+.turbo
+.next
+.wrangler
+node_modules
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/*.log
+docs
+apps/web
+.internal

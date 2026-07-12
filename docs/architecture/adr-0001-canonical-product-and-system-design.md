@@ -184,10 +184,15 @@ The canonical technology direction is:
 - `Supabase Postgres` as the only database
 - `Supabase Storage` for artifacts when required
 - `Prisma` for schema ownership and application data access
-- `Cloudflare Queues` for bounded async audit execution
+- `Alibaba Cloud ECS` for bounded async audit execution
 - `TanStack Query` for reviewer-console server state
+- `OpenTelemetry` as the transport for traces, metrics, and log correlation
 - `Sentry` for runtime errors, traces, and failure visibility
 - `PostHog` for analytics, feature flags, and product telemetry
+- `Prometheus` for metrics storage and querying
+- `Grafana Loki` for log aggregation
+- `Grafana Tempo` for distributed trace storage
+- `Grafana` for unified operational visualization
 - `Stripe` for billing, subscriptions, and commercial state
 - `GitLab` as the only provider in `v0.1.0`
 
@@ -202,10 +207,15 @@ Each subsystem has one job:
 | Supabase Postgres | product data and relational source of truth |
 | Supabase Storage | artifacts and evidence blobs |
 | Prisma | data modeling and repository access layer |
-| Cloudflare Queues | audit fan-out and bounded async execution |
+| Alibaba Cloud ECS | audit fan-out and bounded async execution |
 | TanStack Query | reviewer mutations, invalidation, and queue refresh state |
+| OpenTelemetry | signal transport and span/metric correlation |
 | Sentry | operational failure visibility |
 | PostHog | product behavior analytics and flags |
+| Prometheus | metrics store and queries |
+| Grafana Loki | log aggregation backend |
+| Grafana Tempo | distributed tracing backend |
+| Grafana | operational dashboard and drill-down surface |
 | Stripe | billing and commercial state |
 | GitLab | repository, CI, issue provider |
 
@@ -603,6 +613,8 @@ Observability is required for both product and runtime trust.
 
 ### Runtime observability
 
+OpenTelemetry is the transport layer for request context, spans, logs, and metrics.
+
 Use Sentry for:
 
 - server route errors
@@ -610,6 +622,30 @@ Use Sentry for:
 - publish errors
 - reconciliation failures
 - trace correlation across audit runs
+
+Use Prometheus for:
+
+- request and queue metrics
+- SLA and throughput measurement
+- latency histograms and error rates
+
+Use Grafana Loki for:
+
+- structured log aggregation
+- correlation-based log drill-down
+- audit and worker log slicing
+
+Use Grafana Tempo for:
+
+- distributed trace storage
+- span timelines
+- cross-service request investigation
+
+Use Grafana for:
+
+- operator dashboards
+- trace and log pivoting
+- metrics visualization and alert routing
 
 ### Product observability
 
@@ -628,7 +664,7 @@ Telemetry must not become a second source of truth for core workflow state. Prod
 
 ## 20. Queueing and Async Execution
 
-Cloudflare Queues is the canonical async mechanism for `v0.1.0`.
+Alibaba Cloud ECS-hosted queue processing is the canonical async mechanism for `v0.1.0`.
 
 ### Queue model
 
@@ -752,7 +788,7 @@ Premortem will be built as a reviewer-first, GitLab-first, swarm-orchestrated re
 - Supabase Postgres
 - Supabase Storage
 - Prisma
-- Cloudflare Queues
+- Alibaba Cloud ECS queue runner
 - TanStack Query
 - Sentry
 - PostHog
@@ -765,5 +801,6 @@ The architecture is explicitly designed to preserve:
 - one bounded async runtime
 - one reviewer-controlled publication model
 - one full auditability chain
+- one observable telemetry chain across OpenTelemetry, Prometheus, Loki, Tempo, Grafana, Sentry, PostHog, Phoenix, and Langfuse
 
 That is the canonical system design direction unless a later ADR supersedes it.

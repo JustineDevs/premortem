@@ -1,4 +1,4 @@
-import { CanonicalEvents } from '@/lib/canonical/events';
+import { CanonicalEvents } from '@premortem/observability/events';
 
 export { CanonicalEvents };
 
@@ -8,7 +8,10 @@ function resolvePostHogProjectKey() {
     const trimmed = key?.trim();
     if (trimmed?.startsWith('phc_')) return trimmed;
   }
-  return null;
+
+  throw new Error(
+    'PostHog is required. Set POSTHOG_API_KEY or NEXT_PUBLIC_POSTHOG_KEY to a phc_ project key.'
+  );
 }
 
 function resolvePostHogHost() {
@@ -25,25 +28,23 @@ export async function trackServerEvent(
   properties?: Record<string, unknown>
 ) {
   const apiKey = resolvePostHogProjectKey();
-  if (!apiKey) return;
+  const response = await fetch(`${resolvePostHogHost()}/capture/`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      api_key: apiKey,
+      distinct_id: distinctId,
+      event,
+      properties: {
+        source: 'server',
+        ...properties
+      },
+      timestamp: new Date().toISOString()
+    }),
+    cache: 'no-store'
+  });
 
-  try {
-    await fetch(`${resolvePostHogHost()}/capture/`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        api_key: apiKey,
-        distinct_id: distinctId,
-        event,
-        properties: {
-          source: 'server',
-          ...properties
-        },
-        timestamp: new Date().toISOString()
-      }),
-      cache: 'no-store'
-    });
-  } catch (error) {
-    console.error('trackServerEvent failed', error);
+  if (!response.ok) {
+    throw new Error(`PostHog capture failed: ${response.status} ${await response.text()}`);
   }
 }

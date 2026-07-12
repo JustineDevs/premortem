@@ -4,7 +4,7 @@ import type { AppRole, InvitationStatus, OrganizationInvitation } from '@prisma/
 
 import { prisma } from './client';
 import { assertOrganizationSeatAvailability } from './organization-memberships';
-import { ensureProfileMembership } from './workspace';
+import { ensureProfileMembership } from './workspace-auth';
 
 export interface OrganizationInvitationSummary {
   id: string;
@@ -62,7 +62,21 @@ export async function createOrganizationInvitation(input: {
       email: input.email,
       status: 'pending'
     },
-    orderBy: { createdAt: 'desc' }
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      organizationId: true,
+      email: true,
+      role: true,
+      token: true,
+      status: true,
+      invitedById: true,
+      expiresAt: true,
+      acceptedById: true,
+      acceptedAt: true,
+      createdAt: true,
+      updatedAt: true
+    }
   });
 
   const invitation = existing
@@ -127,7 +141,13 @@ export async function acceptOrganizationInvitation(input: {
 }) {
   const invitation = await prisma.organizationInvitation.findUnique({
     where: { token: input.token },
-    include: {
+    select: {
+      id: true,
+      organizationId: true,
+      role: true,
+      status: true,
+      email: true,
+      expiresAt: true,
       organization: { select: { id: true } }
     }
   });

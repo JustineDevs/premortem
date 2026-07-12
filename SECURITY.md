@@ -57,7 +57,7 @@ Canonical trust-boundary reference: [docs/architecture/adr-0001-canonical-produc
 | Component | Security responsibility |
 |-----------|-------------------------|
 | **Marketing & auth** | Public pages and Supabase Auth sign-in; session tokens stay in browser cookie/session storage patterns supported by `@supabase/ssr`. |
-| **Reviewer console (`/app`)** | Thin client over BFF routes; displays only data permitted by org membership and entitlements. |
+| **Reviewer console (`/app`)** | Thin client over BFF routes; displays only data permitted by org membership, role-aware settings, and entitlements. |
 | **Provider connect** | OAuth completion flows; tokens are persisted server-side, not exposed to client bundles. |
 | **LLM configuration** | Provider keys and deployment settings are submitted over HTTPS to server routes; never embedded in client JavaScript. |
 | **CORS** | Production reviewer origin is constrained via `CORS_ORIGIN` on the API runtime. |
@@ -116,7 +116,7 @@ Orchestrator never logs raw LLM keys or provider OAuth secrets.
 |-------|-------------------------|
 | **Supabase Postgres** | Canonical product schema via Prisma: orgs, memberships, provider connections, audit runs, findings, candidates, review actions, published issues, reconciliation, billing accounts. RLS and backend authorization must agree on the same user identity basis. |
 | **Supabase Storage** | Artifact bucket (`SUPABASE_STORAGE_BUCKET`); no secrets in pinned objects. |
-| **Provider token storage** | GitLab (and future provider) tokens stored as backend references; browser receives connection status, not plaintext tokens. |
+| **Provider token storage** | GitLab (and future provider) tokens stay server-side through backend-managed storage; browser receives connection status, not raw tokens. |
 | **Audit events** | Structured lifecycle events for inspectability and support reconstruction. |
 
 Storage policy: public docs stay non-sensitive; internal security assessments and customer notes belong in gitignored `/internal`, `/.internal`, or `/docs/internal` (see [docs/security/public-vs-private-docs.md](./docs/security/public-vs-private-docs.md)).
@@ -188,12 +188,12 @@ Non-negotiable product gates (see [.agents/rules/production-boundaries.md](./.ag
 2. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and server-only `SUPABASE_SERVICE_ROLE_KEY`.
 3. Disable `PREMORTEM_AUTH_DISABLED` in production; verify Supabase JWT validation on API routes.
 4. Set `CORS_ORIGIN` to the production web origin (e.g. `https://premortem.jstn.site` per `.env.example`).
-5. Configure GitLab OAuth or token vars; verify repo read and issue write separately before onboarding.
+5. Configure GitLab OAuth or token vars for repository access; verify repo read and issue write separately before onboarding. Sign-in remains separate through Supabase Auth.
 6. Set `GEMINI_API_KEY` server-side only.
 7. Set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` when billing is enabled; test webhooks in Stripe test mode first.
 8. Configure Sentry and PostHog with appropriate public vs server key split.
 9. Confirm entitlements enforcement (`PLAN_LIMITS`) for repo count, monthly audits, and publish capability.
-10. Run smoke verification: `scripts/smoke/verify-runtime-pipeline.mjs`, `scripts/smoke/verify-web-bff.mjs`, and `pnpm run smoke:production-readiness`.
+10. Run smoke verification: `scripts/smoke/verify-runtime-pipeline.ts`, `scripts/smoke/verify-web-bff.ts`, and `pnpm run smoke:production-readiness`.
 11. Keep internal-only security detail out of public docs and tracked markdown when it exposes operational weaknesses or customer data.
 
 ---

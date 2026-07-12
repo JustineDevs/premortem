@@ -72,7 +72,7 @@ Rules:
 
 - Runtime console must show failed stage truthfully ([ux-behavior.md](ux-behavior.md))
 - Sentry captures unhandled exceptions; PostHog for product funnels, not secret payloads
-- Smoke verification: `pnpm run smoke:production-readiness`, `scripts/smoke/verify-web-bff.mjs`
+- Smoke verification: `pnpm run smoke:production-readiness`, `scripts/smoke/verify-web-bff.ts`
 
 ## Minimum failure gate
 

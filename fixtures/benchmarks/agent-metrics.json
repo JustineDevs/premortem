@@ -1,3 +1,0 @@
-{
-  "metrics": ["precision", "merge_quality", "duplicate_suppression", "false_positive_rate"]
-}

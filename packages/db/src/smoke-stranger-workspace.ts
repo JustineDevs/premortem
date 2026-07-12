@@ -7,7 +7,9 @@ import {
   enableDiscoveredRepositories,
   listDiscoveredRepositories
 } from './repository-discovery';
-import { createPersonalWorkspaceForProfile, upsertProviderConnectionFromOAuth } from './workspace';
+import { createPersonalWorkspaceForProfile } from './workspace-auth';
+import { upsertProviderConnectionFromOAuth } from './workspace';
+import { fetchGitLabUser } from '@premortem/integrations';
 
 export interface StrangerSmokeWorkspace {
   profileId: string;
@@ -16,16 +18,6 @@ export interface StrangerSmokeWorkspace {
   connectionId: string;
   externalProjectId: string;
   email: string;
-}
-
-async function resolveGitLabProfile(baseUrl: string, token: string) {
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/v4/user`, {
-    headers: { 'PRIVATE-TOKEN': token }
-  });
-  if (!response.ok) {
-    throw new Error(`GitLab token validation failed (${response.status}).`);
-  }
-  return (await response.json()) as { id: number; username: string; name?: string };
 }
 
 /** Simulates stranger onboarding: personal workspace + OAuth token + enabled repo (smoke/CI only). */
@@ -39,7 +31,7 @@ export async function provisionStrangerSmokeWorkspace(input: {
   }
 
   const baseUrl = (process.env.GITLAB_BASE_URL ?? 'https://gitlab.com').replace(/\/$/, '');
-  const profile = await resolveGitLabProfile(baseUrl, token);
+  const profile = await fetchGitLabUser(baseUrl, token);
   const profileId = randomUUID();
   const email = `smoke-stranger-${Date.now()}@premortem.jstn.site`;
   const username = `smoke_${profile.username}_${Date.now().toString(36)}`;

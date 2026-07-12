@@ -1,6 +1,19 @@
+import { fetchWithTimeout } from './fetch-with-timeout';
+
 export interface GitHubRepoRef {
   owner: string;
   repo: string;
+}
+
+export interface GitHubDiscoveredProject {
+  externalProjectId: string;
+  name: string;
+  repoUrl: string;
+  defaultBranch: string;
+  visibility: 'private' | 'internal' | 'public' | 'unknown';
+  accessLevel: number;
+  canRead: boolean;
+  canWriteIssues: boolean;
 }
 
 export interface GitHubLabelDefinition {
@@ -33,6 +46,58 @@ export function parseGitHubRepoFromUrl(repoUrl: string | null | undefined): GitH
   }
 }
 
+export function parseGitHubRepoFromReference(reference: string | null | undefined): GitHubRepoRef | null {
+  if (!reference) return null;
+  const trimmed = reference.trim();
+  if (!trimmed) return null;
+  if (trimmed.includes('://') || trimmed.startsWith('git@')) {
+    return parseGitHubRepoFromUrl(trimmed);
+  }
+
+  const parts = trimmed.replace(/^\/+/, '').split('/').filter(Boolean);
+  if (parts.length < 2) return null;
+  return {
+    owner: parts[0]!,
+    repo: parts[1]!.replace(/\.git$/, '')
+  };
+}
+
+export async function resolveGitHubProjectByReference(reference: string): Promise<GitHubDiscoveredProject> {
+  const repo = parseGitHubRepoFromReference(reference);
+  if (!repo) {
+    throw new Error('Enter a valid GitHub URL or owner/repo path.');
+  }
+
+  const response = await fetchWithTimeout(`https://api.github.com/repos/${repo.owner}/${repo.repo}`, {
+    headers: {
+      accept: 'application/vnd.github+json',
+      'x-github-api-version': '2022-11-28'
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub API failed: ${response.status} ${await response.text()}`);
+  }
+
+  const row = await response.json();
+  const visibility =
+    row?.visibility === 'private' || row?.visibility === 'internal' || row?.visibility === 'public'
+      ? row.visibility
+      : 'unknown';
+  const accessLevel = visibility === 'public' ? 10 : 0;
+
+  return {
+    externalProjectId: `${repo.owner}/${repo.repo}`,
+    name: String(row?.name ?? repo.repo),
+    repoUrl: String(row?.html_url ?? `https://github.com/${repo.owner}/${repo.repo}`),
+    defaultBranch: String(row?.default_branch ?? 'main'),
+    visibility,
+    accessLevel,
+    canRead: visibility === 'public',
+    canWriteIssues: false
+  };
+}
+
 async function githubRequest<T>(
   token: string,
   path: string,
@@ -54,7 +119,7 @@ async function githubRequest<T>(
   }
 
   if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  return response.json();
 }
 
 export async function ensureGitHubLabels(
@@ -110,4 +175,3 @@ export async function fetchGitHubIssue(
     html_url: string;
   }>(token, `/repos/${repo.owner}/${repo.repo}/issues/${issueNumber}`);
 }
-import { fetchWithTimeout } from './fetch-with-timeout';

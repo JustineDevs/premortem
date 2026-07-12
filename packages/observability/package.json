@@ -9,6 +9,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./events": {
+      "types": "./dist/events.d.ts",
+      "default": "./dist/events.js"
+    },
     "./sentry": {
       "types": "./dist/sentry.d.ts",
       "default": "./dist/sentry.js"
@@ -16,6 +20,14 @@
     "./server": {
       "types": "./dist/server.d.ts",
       "default": "./dist/server.js"
+    },
+    "./boot": {
+      "types": "./dist/boot.d.ts",
+      "default": "./dist/boot.js"
+    },
+    "./telemetry-topology": {
+      "types": "./dist/telemetry-topology.d.ts",
+      "default": "./dist/telemetry-topology.js"
     },
     "./phoenix": {
       "types": "./dist/phoenix.d.ts",
@@ -44,15 +56,17 @@
   },
   "scripts": {
     "build": "pnpm --filter @premortem/security build && tsc -p tsconfig.json",
-    "postbuild": "node ../../scripts/fix-esm-imports.mjs dist",
+    "postbuild": "tsx --tsconfig ../../tsconfig.base.json ../../scripts/fix-esm-imports.ts dist",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.83",
     "@arizeai/phoenix-client": "^6.10.0",
     "@arizeai/phoenix-otel": "^1.0.2",
     "@langfuse/client": "^4.6.1",
     "@sentry/node": "^9.47.1",
     "@premortem/security": "workspace:^",
+    "ai": "^6.0.0",
     "posthog-node": "^5.11.2"
   },
   "devDependencies": {

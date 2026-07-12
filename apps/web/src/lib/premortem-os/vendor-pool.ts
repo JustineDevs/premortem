@@ -38,7 +38,7 @@ export const DEFAULT_VENDOR_ROUTING: VendorRoutingTier[] = [
 
 export function normalizeVendorRouting(
   value: unknown,
-  customProviderNames: string[] = []
+  activeProviderNames: string[] = []
 ): VendorRoutingTier[] {
   if (!Array.isArray(value) || value.length === 0) {
     return DEFAULT_VENDOR_ROUTING.map((tier) => ({ ...tier }));
@@ -55,8 +55,8 @@ export function normalizeVendorRouting(
     let providerRef =
       typeof row.providerRef === 'string' ? row.providerRef : fallback.providerRef;
 
-    if (kind === 'custom' && providerRef && !customProviderNames.includes(providerRef)) {
-      providerRef = customProviderNames[0] ?? '';
+    if (kind === 'custom' && providerRef && !activeProviderNames.includes(providerRef)) {
+      providerRef = activeProviderNames[0] ?? '';
     }
 
     return {

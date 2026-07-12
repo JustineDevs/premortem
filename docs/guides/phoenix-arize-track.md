@@ -52,7 +52,7 @@ Phoenix Cloud free tier: [Phoenix Cloud](https://phoenix.arize.com/).
 
 ```bash
 pnpm run smoke:arize          # alias for smoke:hackathon
-node scripts/mcp/verify-all.mjs
+node scripts/mcp/verify-all.ts
 ```
 
 With `PHOENIX_API_KEY` set, traces export to your Phoenix project and Cursor can call Phoenix MCP tools (traces, prompts, datasets, experiments).
@@ -71,13 +71,13 @@ With `PHOENIX_API_KEY` set, traces export to your Phoenix project and Cursor can
 - `packages/observability/src/phoenix-prompts.ts` — `@arizeai/phoenix-client/prompts`
 - `packages/observability/src/phoenix-code-evaluator.ts` — shared code eval logic
 - `packages/observability/phoenix-evaluators/premortem-audit-mission.eval.ts` — Phoenix UI evaluator source
-- `scripts/phoenix/bootstrap-platform.mjs` — register dataset + prompt in Phoenix
+- `scripts/phoenix/bootstrap-platform.ts` — register dataset + prompt in Phoenix
 - `services/agent-builder/src/phoenix-mcp.ts` — runtime Phoenix MCP connection
 - `services/agent-builder/src/index.ts` — ADK agent with GitLab + Phoenix MCP toolsets
 - `services/agent-builder/src/server.ts` — Cloud Run-ready runtime entrypoint with health and run endpoints
 - `services/agent-builder/Dockerfile` — container recipe for managed deployment
 - `scripts/mcp/run-phoenix-mcp.sh` — Cursor MCP launcher
-- `scripts/smoke/verify-hackathon-readiness.mjs` — hackathon gate
+- `scripts/smoke/verify-production-readiness.mjs` — production readiness gate
 
 ## Further reading
 

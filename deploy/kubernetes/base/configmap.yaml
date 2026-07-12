@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: premortem-runtime-config
+  namespace: premortem
+data:
+  NODE_ENV: production
+  PREMORTEM_RUNTIME_MODE: kubernetes
+  PREMORTEM_WEB_URL: https://premortem.jstn.site
+  PREMORTEM_API_URL: https://api.jstn.site
+  PREMORTEM_API_PORT: "18787"
+  PORT: "8080"
+  PHOENIX_OTEL_ENABLED: "1"
+  LANGFUSE_ENABLED: "1"
+  POSTHOG_ENABLED: "1"

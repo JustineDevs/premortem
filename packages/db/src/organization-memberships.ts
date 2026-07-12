@@ -20,6 +20,42 @@ export async function getOrganizationMembershipRole(input: {
   return membership?.role ?? null;
 }
 
+export async function setOrganizationMembershipRole(input: {
+  organizationId: string;
+  userId: string;
+  role: AppRole;
+  fromRoles?: AppRole[];
+}): Promise<boolean> {
+  const membership = await prisma.organizationMembership.findUnique({
+    where: {
+      organizationId_userId: {
+        organizationId: input.organizationId,
+        userId: input.userId
+      }
+    },
+    select: { role: true }
+  });
+
+  if (
+    !membership ||
+    membership.role === input.role ||
+    (input.fromRoles && !input.fromRoles.includes(membership.role))
+  ) {
+    return false;
+  }
+
+  await prisma.organizationMembership.update({
+    where: {
+      organizationId_userId: {
+        organizationId: input.organizationId,
+        userId: input.userId
+      }
+    },
+    data: { role: input.role }
+  });
+  return true;
+}
+
 export async function assertOrganizationSeatAvailability(input: {
   organizationId: string;
   userId?: string;

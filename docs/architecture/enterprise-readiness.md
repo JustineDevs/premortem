@@ -33,7 +33,7 @@ If the system cannot point at a real file, route, config key, graph edge, or CI 
 ## Provider support matrix
 
 - GitLab: supported for connect, ingest, publish, and reconciliation.
-- GitHub: sign-in and auth primitives exist; repository integration is roadmap.
+- GitHub: repository integration remains roadmap.
 - Bitbucket: roadmap.
 - Azure DevOps: roadmap.
 - Gitea: roadmap.
@@ -55,3 +55,4 @@ If the system cannot point at a real file, route, config key, graph edge, or CI 
 - SaaS is the default operational mode.
 - The web, API, orchestrator, database, and graph layers are separated so a private-cloud deployment can be reasoned about cleanly.
 - Self-hosted or BYOK packaging is a separate delivery track and should be documented before any enterprise commitment.
+- Vercel frontend and Alibaba Cloud ECS backend deployment modes are documented separately so support teams can verify runtime ownership.

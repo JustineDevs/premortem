@@ -24,7 +24,8 @@ export interface UploadArtifactInput {
   organizationId: string;
   projectId: string;
   auditRunId: string;
-  kind: 'graph' | 'evidence';
+  kind: 'graph' | 'evidence' | 'skill-coverage' | 'skill-draft';
+  artifactId?: string;
   payload: unknown;
   contentType?: string;
 }
@@ -34,7 +35,8 @@ export async function uploadArtifact(input: UploadArtifactInput): Promise<string
   if (!client) return null;
 
   const bucket = process.env.SUPABASE_STORAGE_BUCKET ?? DEFAULT_BUCKET;
-  const path = `${input.organizationId}/${input.projectId}/${input.auditRunId}/${input.kind}.json`;
+  const artifactId = input.artifactId ?? input.kind;
+  const path = `${input.organizationId}/${input.projectId}/${input.auditRunId}/${input.kind}/${artifactId}.json`;
   const body = JSON.stringify(input.payload);
 
   const { error } = await client.storage.from(bucket).upload(path, body, {

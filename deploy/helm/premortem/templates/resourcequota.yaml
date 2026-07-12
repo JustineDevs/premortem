@@ -1,0 +1,17 @@
+{{- if .Values.resources.quota.enabled }}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: premortem-runtime-quota
+  namespace: {{ .Values.global.namespace | quote }}
+  labels:
+{{ include "premortem.labels" . | indent 4 }}
+spec:
+  hard:
+    requests.cpu: {{ .Values.resources.quota.requestsCpu | quote }}
+    requests.memory: {{ .Values.resources.quota.requestsMemory | quote }}
+    limits.cpu: {{ .Values.resources.quota.limitsCpu | quote }}
+    limits.memory: {{ .Values.resources.quota.limitsMemory | quote }}
+    pods: {{ .Values.resources.quota.pods | quote }}
+    persistentvolumeclaims: {{ .Values.resources.quota.pvc | quote }}
+{{- end }}

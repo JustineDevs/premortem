@@ -2,10 +2,13 @@ import { NextResponse, type NextRequest } from 'next/server';
 import type { User, UserIdentity } from '@supabase/supabase-js';
 
 import { isLocalAuthBypassEnabled } from '@premortem/domain';
-import { hasActiveProviderConnection, markProfileOnboardingCompleted, resolveActorOrganization } from '@premortem/db';
+import {
+  hasActiveProviderConnection,
+  markProfileOnboardingCompleted
+} from '@premortem/db/workspace-auth';
+import { resolveActorOrganization } from '@premortem/db/actor-context';
 
 import { authLinks, type AuthMode } from '@/lib/auth-links';
-import { isSupabaseAuthConfigured } from '@/lib/supabase/server-config';
 import {
   getCanonicalLoopbackOrigin,
   getPublicAppOrigin,
@@ -84,12 +87,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(canonicalUrl, 303);
   }
 
-  if (!(await isSupabaseAuthConfigured())) {
-    const redirectUrl = new URL(fallbackPath, origin);
-    redirectUrl.searchParams.set('error', 'config');
-    return NextResponse.redirect(redirectUrl);
-  }
-
   if (isLocalAuthBypassEnabled()) {
     const redirectUrl = new URL(next, origin);
     redirectUrl.searchParams.set('mode', 'local_fixture');
@@ -97,11 +94,6 @@ export async function GET(request: NextRequest) {
   }
 
   const authClient = await createRouteHandlerSupabaseClient(request);
-  if (!authClient) {
-    const redirectUrl = new URL(fallbackPath, origin);
-    redirectUrl.searchParams.set('error', 'config');
-    return NextResponse.redirect(redirectUrl);
-  }
 
   if (callbackError) {
     const redirectUrl = new URL(fallbackPath, origin);
@@ -154,7 +146,7 @@ export async function GET(request: NextRequest) {
     user?.app_metadata?.provider === 'gitlab' ||
     user?.identities?.some((identity: UserIdentity) => identity.provider === 'gitlab');
 
-  await markProfileOnboardingCompleted(user.id).catch((error) => {
+  await markProfileOnboardingCompleted(user.id).catch((error: unknown) => {
     if (process.env.NODE_ENV !== 'production') {
       console.error('[auth/callback] onboarding completion failed:', error instanceof Error ? error.message : error);
     }

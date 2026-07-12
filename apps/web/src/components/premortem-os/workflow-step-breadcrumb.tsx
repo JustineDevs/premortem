@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import { Fragment } from 'react';
 import { ChevronRight } from 'lucide-react';
 
 import {
@@ -32,7 +32,7 @@ export function WorkflowStepBreadcrumb({
             : -1;
         const completed = activeIndex > index;
         return (
-          <React.Fragment key={stepId}>
+          <Fragment key={stepId}>
             {index > 0 && (
               <ChevronRight size={10} className="shrink-0 text-[#CDC7BD]" aria-hidden />
             )}
@@ -49,7 +49,7 @@ export function WorkflowStepBreadcrumb({
             >
               {WORKFLOW_STEP_LABELS[stepId]}
             </button>
-          </React.Fragment>
+          </Fragment>
         );
       })}
       {activeNode && (

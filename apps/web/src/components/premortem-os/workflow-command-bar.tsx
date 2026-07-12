@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
 import { Play, Workflow } from 'lucide-react';
+
 import type { Project } from '@/lib/premortem-os/types';
 import type { WorkflowCanvasViewMode } from '@premortem/domain';
 import type { CanvasEdge } from './workflow-canvas.types';
@@ -12,8 +12,13 @@ import { WorkflowViewModeToggle } from './workflow-view-mode-toggle';
 interface WorkflowCommandBarProps {
   viewMode: WorkflowCanvasViewMode;
   onViewModeChange: (mode: WorkflowCanvasViewMode) => void;
-  isSimulating: boolean;
-  onToggleSimulation: () => void;
+  realtimeConnectionState: 'idle' | 'connecting' | 'connected' | 'error';
+  currentRunStatus: string;
+  diffMode: boolean;
+  onToggleDiffMode: () => void;
+  baselineAuditId: string;
+  baselineAuditOptions: Array<{ id: string; label: string }>;
+  onBaselineAuditChange: (auditId: string) => void;
   onResetLayout: () => void;
   onResetCamera: () => void;
   projects: Project[];
@@ -25,11 +30,30 @@ interface WorkflowCommandBarProps {
   onExecuteStream: () => void;
 }
 
+function statusPillClass(status: string) {
+  const normalized = status.toLowerCase();
+  if (normalized === 'connected' || normalized === 'completed') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-900';
+  }
+  if (normalized === 'running' || normalized === 'connecting') {
+    return 'border-amber-200 bg-amber-50 text-amber-900';
+  }
+  if (normalized === 'failed' || normalized === 'error') {
+    return 'border-rose-200 bg-rose-50 text-rose-900';
+  }
+  return 'border-[#EAE6DF] bg-[#FAF8F5] text-[#5C6560]';
+}
+
 export function WorkflowCommandBar({
   viewMode,
   onViewModeChange,
-  isSimulating,
-  onToggleSimulation,
+  realtimeConnectionState,
+  currentRunStatus,
+  diffMode,
+  onToggleDiffMode,
+  baselineAuditId,
+  baselineAuditOptions,
+  onBaselineAuditChange,
   onResetLayout,
   onResetCamera,
   projects,
@@ -41,6 +65,7 @@ export function WorkflowCommandBar({
   onExecuteStream
 }: WorkflowCommandBarProps) {
   const safeProjects = Array.isArray(projects) ? projects : [];
+
   return (
     <div className="z-20 flex shrink-0 flex-col items-stretch justify-between gap-4 border-b border-[#EAE6DF] bg-white p-4 sm:flex-row sm:items-center">
       <div className="space-y-0.5">
@@ -65,23 +90,41 @@ export function WorkflowCommandBar({
       <div className="flex flex-wrap items-center gap-3.5 select-none">
         <WorkflowViewModeToggle mode={viewMode} onChange={(mode) => onViewModeChange(mode)} />
 
-        <div className="flex items-center gap-1.5 rounded border border-[#EAE6DF] bg-[#FAF8F5] p-1 px-2.5 shadow-xs">
-          <span className="mr-1 font-mono text-[9px] font-bold uppercase text-[#8A958F]">Step replay:</span>
-          <button
-            type="button"
-            onClick={onToggleSimulation}
-            className={`flex cursor-pointer items-center gap-1 rounded py-1 px-2.5 font-mono text-[9.5px] font-bold uppercase leading-none transition-all ${
-              isSimulating
-                ? 'bg-amber-700 text-white hover:bg-amber-800'
-                : 'bg-emerald-950 text-white hover:bg-emerald-900'
-            }`}
-          >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${isSimulating ? 'bg-amber-300 motion-safe:animate-ping' : 'bg-emerald-300'}`}
-            />
-            <span>{isSimulating ? 'Stop replay' : 'Replay steps'}</span>
-          </button>
+        <div className={`flex items-center gap-2 rounded border px-3 py-2 font-mono text-[9px] font-bold uppercase tracking-wide ${statusPillClass(realtimeConnectionState)}`}>
+          <span className="h-1.5 w-1.5 rounded-full bg-current" />
+          <span>Realtime {realtimeConnectionState}</span>
+          <span className="text-[8.5px] font-semibold normal-case tracking-normal opacity-80">
+            run {currentRunStatus}
+          </span>
         </div>
+
+        <button
+          type="button"
+          onClick={onToggleDiffMode}
+          className={`rounded border px-3 py-2 font-mono text-[9px] font-bold uppercase tracking-wide transition-colors ${
+            diffMode
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+              : 'border-[#EAE6DF] bg-[#FAF8F5] text-[#5C6560] hover:bg-white hover:text-[#1E2522]'
+          }`}
+        >
+          {diffMode ? 'Diff mode on' : 'Diff mode off'}
+        </button>
+
+        {diffMode && baselineAuditOptions.length > 0 ? (
+          <select
+            value={baselineAuditId}
+            onChange={(event) => onBaselineAuditChange(event.target.value)}
+            aria-label="Select diff baseline audit"
+            className="max-w-[18rem] rounded border border-[#EAE6DF] bg-white px-3 py-2 font-mono text-[9px] font-bold uppercase tracking-wide text-[#1E2522] focus:border-emerald-950 focus:outline-none"
+          >
+            <option value="">Choose diff baseline</option>
+            {baselineAuditOptions.map((audit) => (
+              <option key={audit.id} value={audit.id}>
+                {audit.label}
+              </option>
+            ))}
+          </select>
+        ) : null}
 
         <WorkflowCanvasControls onResetLayout={onResetLayout} onResetCamera={onResetCamera} />
 

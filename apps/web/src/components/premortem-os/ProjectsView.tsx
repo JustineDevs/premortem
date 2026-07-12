@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Project, ProviderType } from '@/lib/premortem-os/types';
+import { type OsQueryScope } from '@/hooks/use-os-console-data';
 import { ProviderBadge } from './provider-badge';
 import { ProviderIcon } from './ProviderIcon';
 import { OsEmptyState } from './os-empty-state';
 import { RepositoryDiscoveryPanel } from './repository-discovery-panel';
 import type { WorkspaceIntegration } from '@/hooks/workspace-types';
-import { 
+import {
   FolderGit2, 
   GitBranch, 
   Plus, 
@@ -23,7 +24,10 @@ import {
   GitPullRequest
 } from 'lucide-react';
 
+const EMPTY_PROJECTS: Project[] = [];
+
 interface ProjectsViewProps {
+  queryScope?: OsQueryScope;
   projects: Project[];
   gitlabIntegration?: WorkspaceIntegration | null;
   gitlabAccessPhase?: 'identity_only' | 'repository_access';
@@ -39,6 +43,7 @@ interface ProjectsViewProps {
 }
 
 export function ProjectsView({
+  queryScope = null,
   projects,
   gitlabIntegration = null,
   gitlabAccessPhase = 'identity_only',
@@ -46,22 +51,25 @@ export function ProjectsView({
   onTriggerScan,
   onRegisterProject
 }: ProjectsViewProps) {
-  const safeProjects = Array.isArray(projects) ? projects : [];
+  const safeProjects = useMemo(
+    () => (Array.isArray(projects) ? projects : EMPTY_PROJECTS),
+    [projects]
+  );
   const [filterType, setFilterType] = useState<'all' | ProviderType>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAdvancedForm, setShowAdvancedForm] = useState(false);
-  const [autoDiscoverCatalog, setAutoDiscoverCatalog] = useState(false);
+  const [autoDiscoverCatalog, setAutoDiscoverCatalog] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return new URLSearchParams(window.location.search).get('discover') === '1';
+  });
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (!autoDiscoverCatalog || typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get('discover') === '1') {
-      setAutoDiscoverCatalog(true);
-      params.delete('discover');
-      const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
-      window.history.replaceState({}, '', nextUrl);
-    }
-  }, []);
+    params.delete('discover');
+    const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
+    window.history.replaceState({}, '', nextUrl);
+  }, [autoDiscoverCatalog]);
 
   const [newProjName, setNewProjName] = useState('');
   const [newProjUrl, setNewProjUrl] = useState('');
@@ -69,15 +77,22 @@ export function ProjectsView({
   const [newProjProvider, setNewProjProvider] = useState<ProviderType>('gitlab');
   const [formErrors, setFormErrors] = useState<{ name?: string; url?: string }>({});
   const [newProjSnippet, setNewProjSnippet] = useState('');
+  const discoveredRepoCount = gitlabIntegration?.projectCount ?? 0;
 
-  const filteredProjects = safeProjects.filter((p) => {
-    const matchesProvider = filterType === 'all' || p.provider === filterType;
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          p.repoUrl.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesProvider && matchesSearch;
-  });
+  const filteredProjects = useMemo(
+    () =>
+      safeProjects.filter((project) => {
+        const matchesProvider =
+          filterType === 'all' || project.provider === filterType;
+        const matchesSearch =
+          project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          project.repoUrl.toLowerCase().includes(searchQuery.toLowerCase());
+        return matchesProvider && matchesSearch;
+      }),
+    [filterType, safeProjects, searchQuery]
+  );
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     const errors: { name?: string; url?: string } = {};
     if (!newProjName.trim()) errors.name = 'Project name is required.';
@@ -144,6 +159,7 @@ export function ProjectsView({
         autoDiscoverOnMount={autoDiscoverCatalog}
         skipDiscoverSessionCache={autoDiscoverCatalog}
         onProjectsChanged={onProjectsChanged}
+        queryScope={queryScope}
       />
 
       {/* Advanced manual registration */}
@@ -156,10 +172,14 @@ export function ProjectsView({
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               <div className="space-y-1.5">
-                <label className="block font-mono font-bold uppercase tracking-wider text-[#717A75]">
+                <label
+                  htmlFor="project-registration-name"
+                  className="block font-mono font-bold uppercase tracking-wider text-[#717A75]"
+                >
                   Project name
                 </label>
                 <input
+                  id="project-registration-name"
                   type="text"
                   required
                   placeholder="e.g. Identity Management Core"
@@ -177,10 +197,14 @@ export function ProjectsView({
               </div>
 
               <div className="space-y-1.5">
-                <label className="block font-mono font-bold uppercase tracking-wider text-[#5C6560]">
+                <label
+                  htmlFor="project-registration-url"
+                  className="block font-mono font-bold uppercase tracking-wider text-[#5C6560]"
+                >
                   Repository URL
                 </label>
                 <input
+                  id="project-registration-url"
                   type="url"
                   required
                   placeholder="e.g. https://gitlab.com/org/repo"
@@ -198,10 +222,14 @@ export function ProjectsView({
               </div>
 
               <div className="space-y-1.5">
-                <label className="block font-mono font-bold uppercase tracking-wider text-[#717A75]">
+                <label
+                  htmlFor="project-registration-branch"
+                  className="block font-mono font-bold uppercase tracking-wider text-[#717A75]"
+                >
                   Tracking branch
                 </label>
                 <input
+                  id="project-registration-branch"
                   type="text"
                   required
                   placeholder="e.g. main"
@@ -212,10 +240,14 @@ export function ProjectsView({
               </div>
 
               <div className="space-y-1.5">
-                <label className="block font-mono font-bold uppercase tracking-wider text-[#717A75]">
+                <label
+                  htmlFor="project-registration-provider"
+                  className="block font-mono font-bold uppercase tracking-wider text-[#717A75]"
+                >
                   Provider
                 </label>
                 <select
+                  id="project-registration-provider"
                   value={newProjProvider}
                   onChange={(e) => setNewProjProvider(e.target.value as ProviderType)}
                   className="w-full p-2.5 bg-[#FDFDFD] border border-[#EAE6DF] rounded focus:outline-none focus:border-emerald-950 font-sans cursor-pointer text-xs font-semibold"
@@ -235,7 +267,10 @@ export function ProjectsView({
             {/* Optional snippet for users who want to attach a representative code sample */}
             <div className="space-y-2">
               <div className="flex justify-between items-center text-xs">
-                <label className="block font-mono font-bold uppercase tracking-wider text-[#717A75]">
+                <label
+                  htmlFor="project-registration-snippet"
+                  className="block font-mono font-bold uppercase tracking-wider text-[#717A75]"
+                >
                   Source code snippet
                 </label>
                 <span className="text-[10px] text-[#868A81] font-mono">
@@ -243,6 +278,7 @@ export function ProjectsView({
                 </span>
               </div>
               <textarea
+                id="project-registration-snippet"
                 rows={7}
                 value={newProjSnippet}
                 onChange={(e) => setNewProjSnippet(e.target.value)}
@@ -311,7 +347,11 @@ export function ProjectsView({
 
         {/* Search input bar */}
         <div className="relative w-full sm:w-64 text-xs">
+          <label htmlFor="project-search-query" className="sr-only">
+            Search projects
+          </label>
           <input
+            id="project-search-query"
             type="text"
             placeholder="Search projects..."
             value={searchQuery}
@@ -326,16 +366,33 @@ export function ProjectsView({
       {safeProjects.length === 0 ? (
         <OsEmptyState
           icon={FolderGit2}
-          title="No projects registered yet"
-          description="Connect a repository to start continuous security audits and compliance tracking."
+          title={discoveredRepoCount > 0 ? 'No enabled projects yet' : 'No projects registered yet'}
+          description={
+            discoveredRepoCount > 0
+              ? `GitLab is connected and ${discoveredRepoCount} ${discoveredRepoCount === 1 ? 'repository was' : 'repositories were'} discovered. Use the catalog above to enable one and make it appear here.`
+              : 'Connect a repository to start continuous security audits and compliance tracking.'
+          }
           action={
-            <button
-              type="button"
-              onClick={() => setShowAdvancedForm(true)}
-              className="cursor-pointer rounded bg-emerald-950 px-4 py-2 text-xs font-semibold text-[#FAF8F5] hover:bg-emerald-900"
-            >
-              Register first repository
-            </button>
+            discoveredRepoCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setAutoDiscoverCatalog(true);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="cursor-pointer rounded bg-emerald-950 px-4 py-2 text-xs font-semibold text-[#FAF8F5] hover:bg-emerald-900"
+              >
+                Open repository catalog
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowAdvancedForm(true)}
+                className="cursor-pointer rounded bg-emerald-950 px-4 py-2 text-xs font-semibold text-[#FAF8F5] hover:bg-emerald-900"
+              >
+                Register first repository
+              </button>
+            )
           }
         />
       ) : (
@@ -355,7 +412,7 @@ export function ProjectsView({
             {filteredProjects.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center p-8 text-[#5C6560] italic">
-                  No registered repository assets matched of current filters.
+                  No registered repository assets matched the current filters.
                 </td>
               </tr>
             ) : (

@@ -83,7 +83,7 @@ export async function listAccessibleGitLabProjects(input: {
       input.token,
       `/projects?${params.toString()}`
     );
-    const batch = (await response.json()) as GitLabProjectApiRow[];
+    const batch = await response.json();
     if (batch.length === 0) break;
 
     for (const row of batch) {
@@ -102,14 +102,37 @@ export function parseGitLabExternalProjectId(repoUrlOrPath: string, baseUrl?: st
   const trimmed = repoUrlOrPath.trim();
   if (!trimmed) return '';
 
+  const baseHost = baseUrl ? new URL(baseUrl).host : 'gitlab.com';
+  const normalizePath = (value: string) =>
+    value
+      .replace(/\.git$/, '')
+      .replace(/^\//, '')
+      .replace(/\/-$/, '')
+      .replace(/\/-\/.*$/, '')
+      .replace(/\/$/, '');
+
+  const stripHostPrefix = (value: string) => {
+    const hostMatch = value.match(/^([A-Za-z0-9.-]+)(?:[:/](.*))?$/);
+    if (!hostMatch) return value;
+    const host = hostMatch[1]?.toLowerCase() ?? '';
+    const rest = hostMatch[2] ?? '';
+    if (
+      host === baseHost.toLowerCase() ||
+      host === `www.${baseHost.toLowerCase()}` ||
+      (baseHost.toLowerCase() === 'gitlab.com' && host.endsWith('.gitlab.com'))
+    ) {
+      return rest;
+    }
+    return value;
+  };
+
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
     try {
       const url = new URL(trimmed);
-      const baseHost = baseUrl ? new URL(baseUrl).host : 'gitlab.com';
       if (url.host !== baseHost && !url.host.endsWith('.gitlab.com') && baseHost !== 'gitlab.com') {
         throw new Error('Repository host does not match configured GitLab base URL.');
       }
-      return url.pathname.replace(/^\//, '').replace(/\.git$/, '').replace(/\/-$/, '');
+      return normalizePath(url.pathname);
     } catch (error) {
       if (error instanceof Error && error.message.includes('GitLab base URL')) {
         throw error;
@@ -118,7 +141,12 @@ export function parseGitLabExternalProjectId(repoUrlOrPath: string, baseUrl?: st
     }
   }
 
-  return trimmed.replace(/\.git$/, '').replace(/^\//, '');
+  if (trimmed.includes('@') && trimmed.includes(':')) {
+    const sshPath = trimmed.replace(/^.+?:/, '');
+    return normalizePath(sshPath);
+  }
+
+  return normalizePath(stripHostPrefix(trimmed));
 }
 
 export async function resolveGitLabProjectByReference(input: {
@@ -133,6 +161,6 @@ export async function resolveGitLabProjectByReference(input: {
 
   const encoded = encodeURIComponent(externalProjectId);
   const response = await gitlabApiGet(input.baseUrl, input.token, `/projects/${encoded}`);
-  const row = (await response.json()) as GitLabProjectApiRow;
+  const row = await response.json();
   return mapGitLabProject(row);
 }

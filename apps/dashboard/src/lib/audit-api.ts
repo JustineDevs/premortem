@@ -1,4 +1,4 @@
-import type { AuditRunListItem, AuditRunSnapshot } from '@premortem/orchestrator';
+import type { AuditRunListItem, AuditRunSnapshot } from '@premortem/orchestrator/read-model';
 
 export interface AuditApiClientOptions {
   apiBaseUrl?: string;
@@ -22,7 +22,7 @@ export async function loadAuditRunSnapshot(
     throw new Error(`Failed to load audit ${auditRunId}: ${response.status}`);
   }
 
-  const payload = (await response.json()) as { auditRun: AuditRunSnapshot };
+  const payload = await response.json();
   return payload.auditRun;
 }
 
@@ -42,6 +42,6 @@ export async function loadRecentAuditRuns(
     throw new Error(`Failed to load recent audits: ${response.status}`);
   }
 
-  const payload = (await response.json()) as { auditRuns: AuditRunListItem[] };
+  const payload = await response.json();
   return payload.auditRuns;
 }

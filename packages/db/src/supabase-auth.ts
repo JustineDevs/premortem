@@ -1,3 +1,5 @@
+import { createClient } from '@supabase/supabase-js';
+
 export interface VerifiedSupabaseUser {
   id: string;
   email?: string | null;
@@ -8,12 +10,35 @@ const supabaseUserCache = new Map<
   string,
   { expiresAt: number; user: VerifiedSupabaseUser | null }
 >();
+let supabaseAuthClient: ReturnType<typeof createClient> | undefined;
 
 function supabaseAuthConfig() {
   const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anonKey) return null;
   return { url: url.replace(/\/$/, ''), anonKey };
+}
+
+function getSupabaseAuthClient() {
+  if (supabaseAuthClient !== undefined) {
+    return supabaseAuthClient;
+  }
+
+  const config = supabaseAuthConfig();
+  if (!config) {
+    throw new Error(
+      'Supabase auth is required. Set SUPABASE_URL and SUPABASE_ANON_KEY or their NEXT_PUBLIC_ equivalents.'
+    );
+  }
+
+  supabaseAuthClient = createClient(config.url, config.anonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+      detectSessionInUrl: false
+    }
+  });
+  return supabaseAuthClient;
 }
 
 export function extractBearerToken(request: Request): string | null {
@@ -43,8 +68,8 @@ export function extractApiKeyToken(request: Request): string | null {
 export async function verifySupabaseAccessToken(
   accessToken: string
 ): Promise<VerifiedSupabaseUser | null> {
-  const config = supabaseAuthConfig();
-  if (!config || !accessToken) return null;
+  const client = getSupabaseAuthClient();
+  if (!accessToken) return null;
 
   const cached = supabaseUserCache.get(accessToken);
   const now = Date.now();
@@ -52,16 +77,11 @@ export async function verifySupabaseAccessToken(
     return cached.user;
   }
 
-  const response = await fetch(`${config.url}/auth/v1/user`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      apikey: config.anonKey
-    }
-  });
-
-  if (!response.ok) return null;
-
-  const user = (await response.json()) as { id?: string; email?: string | null };
+  const { data, error } = await client.auth.getUser(accessToken);
+  const user = data.user;
+  if (error) {
+    throw new Error(`Supabase auth failed to verify access token: ${error.message}`);
+  }
   if (!user?.id) return null;
 
   const verified = { id: user.id, email: user.email ?? null };

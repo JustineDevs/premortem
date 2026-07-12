@@ -85,38 +85,48 @@ export function buildConsoleLogLines(input: {
   agentRuns: Array<{ agentName: string; status: string; startedAt?: string | null }>;
   summary?: unknown;
 }): Array<{ time: string; msg: string }> {
-  const lines: Array<{ time: string; msg: string }> = [];
+  const lines: Array<{ time: string; msg: string; ts: number }> = [];
   const checkpoint = parseAuditCheckpoint(input.summary);
 
   if (checkpoint) {
     lines.push({
       time: checkpoint.savedAt,
+      ts: new Date(checkpoint.savedAt).getTime(),
       msg: `checkpoint · ${checkpoint.phase} · ${checkpoint.completedSpecialists.length} specialists · ${checkpoint.findingCount} findings`
     });
 
     if (typeof checkpoint.clusterCount === 'number') {
       lines.push({
         time: checkpoint.savedAt,
+        ts: new Date(checkpoint.savedAt).getTime(),
         msg: `clusters · ${checkpoint.clusterCount} · graph ${checkpoint.graphSnapshotId ?? 'inline'}`
       });
     }
   }
 
   for (const run of input.agentRuns) {
-    if (run.startedAt) {
-      lines.push({
-        time: new Date(run.startedAt).toLocaleTimeString(),
-        msg: `${run.agentName} → ${run.status}`
-      });
-    }
+    if (!run.startedAt) continue;
+    const ts = new Date(run.startedAt).getTime();
+    if (Number.isNaN(ts)) continue;
+    lines.push({
+      time: new Date(ts).toLocaleTimeString(),
+      ts,
+      msg: `${run.agentName} → ${run.status}`
+    });
   }
 
-  for (const event of input.events.slice(0, 16)) {
+  for (const event of input.events) {
+    const ts = new Date(event.createdAt).getTime();
+    if (Number.isNaN(ts)) continue;
     lines.push({
-      time: new Date(event.createdAt).toLocaleTimeString(),
+      time: new Date(ts).toLocaleTimeString(),
+      ts,
       msg: `${event.eventType} · ${event.actor}`
     });
   }
 
-  return lines.slice(-20);
+  return lines
+    .sort((a, b) => a.ts - b.ts)
+    .slice(-20)
+    .map(({ ts, ...line }) => line);
 }

@@ -3,6 +3,12 @@ export declare function getOrganizationMembershipRole(input: {
     organizationId: string;
     userId: string;
 }): Promise<AppRole | null>;
+export declare function setOrganizationMembershipRole(input: {
+    organizationId: string;
+    userId: string;
+    role: AppRole;
+    fromRoles?: AppRole[];
+}): Promise<boolean>;
 export declare function assertOrganizationSeatAvailability(input: {
     organizationId: string;
     userId?: string;

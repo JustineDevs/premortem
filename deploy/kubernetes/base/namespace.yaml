@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: premortem
+  labels:
+    app.kubernetes.io/name: premortem
+    app.kubernetes.io/part-of: premortem

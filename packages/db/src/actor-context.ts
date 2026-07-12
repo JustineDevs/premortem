@@ -5,8 +5,9 @@ import { prisma } from './client';
 import {
   createPersonalWorkspaceForProfile,
   ensureProfileMembership,
+  resolveEffectiveWorkspaceRole,
   type ProfileProvisionHints
-} from './workspace';
+} from './workspace-auth';
 
 const ACTOR_ORG_CACHE_TTL_MS = 120_000;
 const actorOrganizationCache = new Map<
@@ -27,16 +28,34 @@ export async function resolveActorOrganization(
   }
 
   async function organizationExists(organizationId: string) {
-    return Boolean(await prisma.organization.findUnique({ where: { id: organizationId }, select: { id: true } }));
+    return prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: {
+        id: true,
+        plan: true,
+        createdById: true,
+        billingAccount: { select: { plan: true } }
+      }
+    });
   }
 
   if (hintedOrganizationId) {
-    const role = await getOrganizationMembershipRole({
+    const membershipRole = await getOrganizationMembershipRole({
       userId: profileId,
       organizationId: hintedOrganizationId
     });
-    if (role && (await organizationExists(hintedOrganizationId))) {
-      const resolved = { profileId, organizationId: hintedOrganizationId, role };
+    const organization = await organizationExists(hintedOrganizationId);
+    if (membershipRole && organization) {
+      const resolved = {
+        profileId,
+        organizationId: hintedOrganizationId,
+        role: resolveEffectiveWorkspaceRole({
+          organization,
+          billingPlan: organization.billingAccount?.plan ?? organization.plan,
+          membershipRole,
+          profileId
+        })
+      };
       actorOrganizationCache.set(cacheKey, {
         expiresAt: now + ACTOR_ORG_CACHE_TTL_MS,
         value: resolved
@@ -47,12 +66,22 @@ export async function resolveActorOrganization(
 
   const profile = await prisma.profile.findUnique({ where: { id: profileId } });
   if (profile?.defaultOrgId) {
-    const role = await getOrganizationMembershipRole({
+    const membershipRole = await getOrganizationMembershipRole({
       userId: profileId,
       organizationId: profile.defaultOrgId
     });
-    if (role && (await organizationExists(profile.defaultOrgId))) {
-      const resolved = { profileId, organizationId: profile.defaultOrgId, role };
+    const organization = await organizationExists(profile.defaultOrgId);
+    if (membershipRole && organization) {
+      const resolved = {
+        profileId,
+        organizationId: profile.defaultOrgId,
+        role: resolveEffectiveWorkspaceRole({
+          organization,
+          billingPlan: organization.billingAccount?.plan ?? organization.plan,
+          membershipRole,
+          profileId
+        })
+      };
       actorOrganizationCache.set(cacheKey, {
         expiresAt: now + ACTOR_ORG_CACHE_TTL_MS,
         value: resolved
@@ -66,11 +95,19 @@ export async function resolveActorOrganization(
     select: { organizationId: true, role: true },
     orderBy: { createdAt: 'asc' }
   });
-  if (firstMembership && (await organizationExists(firstMembership.organizationId))) {
+  const firstOrganization = firstMembership
+    ? await organizationExists(firstMembership.organizationId)
+    : null;
+  if (firstMembership && firstOrganization) {
     const resolved = {
       profileId,
       organizationId: firstMembership.organizationId,
-      role: firstMembership.role
+      role: resolveEffectiveWorkspaceRole({
+        organization: firstOrganization,
+        billingPlan: firstOrganization.billingAccount?.plan ?? firstOrganization.plan,
+        membershipRole: firstMembership.role,
+        profileId
+      })
     };
     actorOrganizationCache.set(cacheKey, {
       expiresAt: now + ACTOR_ORG_CACHE_TTL_MS,
@@ -80,7 +117,7 @@ export async function resolveActorOrganization(
   }
 
   const organizationId = await createPersonalWorkspaceForProfile(profileId, profileHints);
-  const resolved = { profileId, organizationId, role: 'owner' as const };
+  const resolved = { profileId, organizationId, role: 'member' as const };
   actorOrganizationCache.set(cacheKey, {
     expiresAt: now + ACTOR_ORG_CACHE_TTL_MS,
     value: resolved

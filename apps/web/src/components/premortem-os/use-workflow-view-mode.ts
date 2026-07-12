@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { defaultViewModeForStep, type WorkflowCanvasViewMode } from '@premortem/domain';
 
 const VIEW_MODE_STORAGE_KEY = 'premortem-workflow-view-mode';
@@ -14,31 +14,31 @@ function readStoredViewMode(): WorkflowCanvasViewMode {
 }
 
 export function useWorkflowViewMode(activeNodeId: string | null, stepIds: readonly string[]) {
-  const [viewMode, setViewModeState] = useState<WorkflowCanvasViewMode>('split');
+  const [storedViewMode, setStoredViewMode] = useState<WorkflowCanvasViewMode>(readStoredViewMode);
   const manualUntilRef = useRef(0);
-
-  useEffect(() => {
-    setViewModeState(readStoredViewMode());
-  }, []);
 
   const setViewMode = useCallback((mode: WorkflowCanvasViewMode, manual = true) => {
     if (manual) {
       manualUntilRef.current = Date.now() + MANUAL_OVERRIDE_MS;
     }
-    setViewModeState(mode);
+    setStoredViewMode(mode);
     if (typeof window !== 'undefined') {
       sessionStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
     }
   }, []);
 
-  useEffect(() => {
-    if (!activeNodeId) return;
-    if (Date.now() < manualUntilRef.current) return;
-    const stepIndex = stepIds.indexOf(activeNodeId);
-    if (stepIndex >= 0) {
-      setViewModeState(defaultViewModeForStep(stepIndex));
+  const viewMode = useMemo(() => {
+    if (Date.now() < manualUntilRef.current) {
+      return storedViewMode;
     }
-  }, [activeNodeId, stepIds]);
+
+    if (!activeNodeId) {
+      return storedViewMode;
+    }
+
+    const stepIndex = stepIds.indexOf(activeNodeId);
+    return stepIndex >= 0 ? defaultViewModeForStep(stepIndex) : storedViewMode;
+  }, [activeNodeId, stepIds, storedViewMode]);
 
   return { viewMode, setViewMode };
 }

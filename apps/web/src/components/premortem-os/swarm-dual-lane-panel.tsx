@@ -1,6 +1,5 @@
 'use client';
 
-import React from 'react';
 import { Activity, GitBranch, Shield, type LucideIcon } from 'lucide-react';
 
 import type { SwarmLaneAgent, SwarmTimelineAction } from '@/lib/premortem-os/swarm-lanes';

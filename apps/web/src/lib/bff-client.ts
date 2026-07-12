@@ -1,4 +1,5 @@
 import { parseBffErrorMessage } from '@/lib/bff-messages';
+import { z } from 'zod';
 
 export class BffRequestError extends Error {
   readonly status: number;
@@ -23,7 +24,7 @@ export async function bffFetchJson<T>(url: string, init?: RequestInit): Promise<
       response.status
     );
   }
-  return response.json() as Promise<T>;
+  return response.json();
 }
 
 export async function bffFetchOk(url: string, init?: RequestInit): Promise<unknown> {
@@ -39,4 +40,11 @@ export async function bffFetchOk(url: string, init?: RequestInit): Promise<unkno
 
 export function isUnauthorizedBffError(error: unknown): boolean {
   return error instanceof BffRequestError && error.status === 401;
+}
+
+export function shouldRetryBffQuery(failureCount: number, error: unknown): boolean {
+  if (isUnauthorizedBffError(error)) {
+    return false;
+  }
+  return failureCount < 1;
 }

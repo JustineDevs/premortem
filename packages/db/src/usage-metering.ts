@@ -44,9 +44,13 @@ export async function getUsageEventTotalsForOrganization(
 }> {
   const grouped = await prisma.usageEvent.groupBy({
     by: ['eventType'],
+    orderBy: { eventType: 'asc' },
     where: {
       organizationId,
-      createdAt: { gte: since }
+      createdAt: { gte: since },
+      eventType: {
+        in: ['audit_run', 'tokens_in', 'tokens_out', 'graph_write', 'publish']
+      }
     },
     _sum: {
       quantity: true

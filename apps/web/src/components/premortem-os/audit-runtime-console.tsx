@@ -14,38 +14,60 @@ interface AuditRuntimeConsoleProps {
   panelTitle?: string;
   auditId: string;
   auditStatus: string;
+  runtimeModeLabel?: string;
   agentRuns: Array<{ agentName: string; status: string; startedAt?: string | null }>;
   events: Array<{ eventType: string; actor: string; createdAt: string }>;
   summary?: unknown;
   compact?: boolean;
+  onStartAudit?: () => void | Promise<void>;
+  onPause?: (auditId: string) => void | Promise<void>;
   onStopAll?: () => void | Promise<void>;
   onResume?: (auditId: string) => void | Promise<void>;
   showStopAll?: boolean;
+  isPausePending?: boolean;
   isStopAllPending?: boolean;
   isResumePending?: boolean;
+  isStartAuditPending?: boolean;
 }
 
 export function AuditRuntimeConsole({
   panelTitle = 'Audit Runtime Monitor',
   auditId,
   auditStatus,
+  runtimeModeLabel = 'Manual',
   agentRuns,
   events,
   summary,
   compact = false,
+  onStartAudit,
+  onPause,
   onStopAll,
   onResume,
   showStopAll = false,
+  isPausePending = false,
   isStopAllPending = false,
-  isResumePending = false
+  isResumePending = false,
+  isStartAuditPending = false
 }: AuditRuntimeConsoleProps) {
   const [controlError, setControlError] = useState<string | null>(null);
   const { activeStepIndex, animating } = derivePipelineProgress({ auditStatus, agentRuns, summary });
   const logs = buildConsoleLogLines({ events, agentRuns, summary });
   const progressPct = Math.round(((activeStepIndex + 1) / AUDIT_PIPELINE_STEPS.length) * 100);
   const checkpoint = parseAuditCheckpoint(summary);
-  const canStopAll = showStopAll && Boolean(onStopAll);
-  const canResume = auditStatus === 'PAUSED' && Boolean(onResume);
+  const isQueued = auditStatus === 'QUEUED';
+  const isRunning = auditStatus === 'RUNNING';
+  const isPaused = auditStatus === 'PAUSED';
+  const isCancelled = auditStatus === 'CANCELLED';
+  const controlState =
+    isRunning || isQueued
+      ? 'active'
+      : isPaused
+        ? 'paused'
+        : 'idle';
+  const canPause = (isRunning || isQueued) && Boolean(onPause);
+  const canResume = isPaused && Boolean(onResume);
+  const canStartAudit = controlState === 'idle' && Boolean(onStartAudit);
+  const canStopAll = showStopAll && controlState !== 'idle' && Boolean(onStopAll);
 
   const handleStopAll = async () => {
     if (!onStopAll) return;
@@ -54,6 +76,26 @@ export function AuditRuntimeConsole({
       await onStopAll();
     } catch (error) {
       setControlError(error instanceof Error ? error.message : 'Failed to stop runtime.');
+    }
+  };
+
+  const handleStartAudit = async () => {
+    if (!onStartAudit) return;
+    setControlError(null);
+    try {
+      await onStartAudit();
+    } catch (error) {
+      setControlError(error instanceof Error ? error.message : 'Failed to start audit.');
+    }
+  };
+
+  const handlePause = async () => {
+    if (!onPause) return;
+    setControlError(null);
+    try {
+      await onPause(auditId);
+    } catch (error) {
+      setControlError(error instanceof Error ? error.message : 'Failed to pause audit run.');
     }
   };
 
@@ -82,36 +124,70 @@ export function AuditRuntimeConsole({
               <p className="text-xs font-semibold text-[#1E2522] font-display">Premortem pipeline execution</p>
             </div>
             <div className="flex items-center gap-2">
-              {canStopAll ? (
+              <span className="inline-flex items-center gap-1.5 rounded border border-[#EAE6DF] bg-white px-2.5 py-1 text-[9px] font-mono uppercase tracking-wider text-[#5C6560]">
+                Mode · {runtimeModeLabel}
+              </span>
+              {canStartAudit ? (
                 <button
                   type="button"
-                  onClick={() => void handleStopAll()}
-                  disabled={isStopAllPending}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-amber-300 bg-amber-50 text-[9px] font-mono uppercase tracking-wider font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-60"
-                  title="Stop all audits and turn off automatic rotation"
+                  onClick={() => void handleStartAudit()}
+                  disabled={isStartAuditPending}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-emerald-800 bg-emerald-950 text-[10px] font-mono uppercase tracking-wider font-bold text-[#72C8AF] hover:bg-emerald-900 disabled:opacity-60"
+                  title="Start a new security audit"
+                >
+                  <Play size={11} />
+                  {isStartAuditPending ? 'Starting…' : 'Start audit'}
+                </button>
+              ) : canPause ? (
+                <button
+                  type="button"
+                  onClick={() => void handlePause()}
+                  disabled={isPausePending}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-amber-300 bg-amber-50 text-[10px] font-mono uppercase tracking-wider font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-60"
+                  title="Pause the current audit run"
                 >
                   <Pause size={11} />
-                  {isStopAllPending ? 'Stopping all…' : 'Stop all'}
+                  {isPausePending ? 'Pausing…' : 'Pause'}
                 </button>
-              ) : null}
-              {canResume ? (
+              ) : canResume ? (
                 <button
                   type="button"
                   onClick={() => void handleResume()}
                   disabled={isResumePending}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-emerald-300 bg-emerald-50 text-[9px] font-mono uppercase tracking-wider font-bold text-emerald-900 hover:bg-emerald-100 disabled:opacity-60"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-emerald-300 bg-emerald-50 text-[10px] font-mono uppercase tracking-wider font-bold text-emerald-900 hover:bg-emerald-100 disabled:opacity-60"
+                  title="Resume the paused audit run"
                 >
                   <Play size={11} />
                   {isResumePending ? 'Resuming…' : 'Resume'}
                 </button>
               ) : null}
+              {canStopAll ? (
+                <button
+                  type="button"
+                  onClick={() => void handleStopAll()}
+                  disabled={isStopAllPending}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-rose-300 bg-rose-50 text-[10px] font-mono uppercase tracking-wider font-bold text-rose-900 hover:bg-rose-100 disabled:opacity-60"
+                  title="Stop all audits and turn off automatic rotation"
+                >
+                  {isStopAllPending ? 'Stopping all…' : 'Stop all'}
+                </button>
+              ) : null}
               <span
                 className={`inline-flex items-center gap-1.5 text-[9px] font-mono uppercase tracking-wider font-bold ${
-                  animating ? 'text-emerald-700' : auditStatus === 'PAUSED' ? 'text-amber-700' : 'text-[#717A75]'
+                  isRunning || isQueued
+                    ? 'text-emerald-700'
+                    : isPaused
+                      ? 'text-amber-700'
+                      : isCancelled
+                        ? 'text-[#717A75]'
+                      : 'text-[#717A75]'
                 }`}
               >
-                <span className={`continuous-audit-live-dot ${animating ? 'on' : ''}`} aria-hidden="true" />
-                {animating ? 'Live' : auditStatus}
+                <span
+                  className={`continuous-audit-live-dot ${(isRunning || isQueued) && animating ? 'on' : ''}`}
+                  aria-hidden="true"
+                />
+                {isRunning ? 'Running' : isQueued ? 'Queued' : isPaused ? 'Paused' : isCancelled ? 'Stopped' : 'Stopped'}
               </span>
             </div>
           </div>
@@ -129,7 +205,17 @@ export function AuditRuntimeConsole({
               </p>
               {checkpoint.reason ? <p className="text-[#8A958F]">{checkpoint.reason}</p> : null}
             </div>
-          ) : null}
+          ) : (
+            <div className="grid grid-cols-1 gap-1 text-[10px] font-mono text-[#5C6560]">
+              <p>
+                Execution milestone · {isRunning ? 'running' : isQueued ? 'queued' : isPaused ? 'paused' : isCancelled ? 'stopped' : auditStatus.toLowerCase()}
+              </p>
+              <p>
+                Findings {agentRuns.length > 0 ? agentRuns.length : logs.filter((line) => line.msg.includes('finding')).length} ·{' '}
+                Agents {agentRuns.length} · No persisted checkpoint yet
+              </p>
+            </div>
+          )}
           {controlError ? (
             <p className="text-[10px] font-mono text-rose-700">{controlError}</p>
           ) : null}

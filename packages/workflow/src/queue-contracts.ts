@@ -4,13 +4,16 @@ export interface AuditJob {
   projectId: string;
   branch: string;
   commitSha?: string;
+  codeSnippet?: string;
+  mergeRequest?: {
+    iid: number;
+    title?: string;
+    sourceBranch?: string;
+    targetBranch?: string;
+    sha?: string;
+    webUrl?: string;
+    action?: string;
+  };
   attempt: number;
   idempotencyKey: string;
-}
-
-export interface DeadLetterJob {
-  queue: string;
-  reason: string;
-  payload: Record<string, unknown>;
-  failedAt: string;
 }

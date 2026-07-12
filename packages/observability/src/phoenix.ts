@@ -1,22 +1,25 @@
+import { generateText } from 'ai';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { trace as phoenixTrace } from '@arizeai/phoenix-otel';
 import { scoreAuditMissionOutput } from './phoenix-code-evaluator';
 import { scrubOutput } from '@premortem/security';
 
-const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
 type PhoenixOtelModule = typeof import('@arizeai/phoenix-otel');
 
 let phoenixOtelModulePromise: Promise<PhoenixOtelModule> | undefined;
-let phoenixOtelLoadFailed = false;
 let phoenixOtelLoadFailureLogged = false;
 let provider: { shutdown: () => Promise<void> } | undefined;
 let initialized = false;
+let initPromise: Promise<{ shutdown: () => Promise<void> } | undefined> | undefined;
 
 function shouldLogPhoenixOtelFailure() {
   return process.env.PHOENIX_OTEL_DEBUG === '1';
 }
 
 function shouldLoadPhoenixOtel() {
-  return process.env.PHOENIX_OTEL_ENABLED === '1';
+  return isPhoenixEnabled();
 }
 
 function dynamicImportPhoenixOtel(): Promise<PhoenixOtelModule> {
@@ -27,61 +30,62 @@ function dynamicImportPhoenixOtel(): Promise<PhoenixOtelModule> {
 }
 
 async function loadPhoenixOtel() {
-  if (!shouldLoadPhoenixOtel()) return null;
-  if (phoenixOtelLoadFailed) return null;
+  if (!shouldLoadPhoenixOtel()) {
+    throw new Error(
+      'Phoenix OTEL is required. Set PHOENIX_OTEL_ENABLED=1 and install @arizeai/phoenix-otel.'
+    );
+  }
   phoenixOtelModulePromise ??= dynamicImportPhoenixOtel();
   try {
     return await phoenixOtelModulePromise;
   } catch (error) {
-    phoenixOtelLoadFailed = true;
+    const message = error instanceof Error ? error.message : String(error);
     if (!phoenixOtelLoadFailureLogged && shouldLogPhoenixOtelFailure()) {
       phoenixOtelLoadFailureLogged = true;
-      console.warn(
-        'phoenix-tracing-disabled',
-        error instanceof Error ? error.message : String(error)
-      );
+      console.error('phoenix-tracing-load-failed', message);
     }
-    return null;
+    throw new Error(`Phoenix OTEL unavailable: ${message}`);
   }
 }
 
 export async function getLLMAttributes(...args: any[]): Promise<any> {
   const mod = await loadPhoenixOtel();
-  if (!mod) return undefined;
   return (mod.getLLMAttributes as (...inner: any[]) => any)(...args);
 }
 
-export const trace: any = undefined;
+export interface PhoenixTraceLike {
+  getActiveSpan(): { setAttribute(name: string, value: string): void } | null;
+}
+
+export const trace: PhoenixTraceLike = phoenixTrace as PhoenixTraceLike;
 
 async function traceAgent(...args: any[]): Promise<any> {
   const mod = await loadPhoenixOtel();
-  if (!mod) return args[0];
   return (mod.traceAgent as (...inner: any[]) => any)(...args);
 }
 
 async function traceChain(...args: any[]): Promise<any> {
   const mod = await loadPhoenixOtel();
-  if (!mod) return args[0];
   return (mod.traceChain as (...inner: any[]) => any)(...args);
 }
 
 async function traceTool(...args: any[]): Promise<any> {
   const mod = await loadPhoenixOtel();
-  if (!mod) return args[0];
   return (mod.traceTool as (...inner: any[]) => any)(...args);
 }
 
 export async function withSpan(...args: any[]): Promise<any> {
   const mod = await loadPhoenixOtel();
-  if (!mod) return args[0];
   return (mod.withSpan as (...inner: any[]) => any)(...args);
 }
 
 export function resolvePhoenixUrl() {
-  const raw =
-    process.env.PHOENIX_COLLECTOR_ENDPOINT?.trim() ||
-    process.env.PHOENIX_BASE_URL?.trim() ||
-    'http://localhost:6006';
+  const raw = process.env.PHOENIX_COLLECTOR_ENDPOINT?.trim() || process.env.PHOENIX_BASE_URL?.trim();
+  if (!raw) {
+    throw new Error(
+      'Phoenix is required. Set PHOENIX_COLLECTOR_ENDPOINT or PHOENIX_BASE_URL before startup.'
+    );
+  }
 
   return raw.replace(/\/v1\/traces\/?$/, '').replace(/\/$/, '');
 }
@@ -90,13 +94,19 @@ export function resolvePhoenixMcpBaseUrl() {
   const configured = process.env.PHOENIX_MCP_BASE_URL?.trim();
   if (configured) return configured.replace(/\/$/, '');
 
+  const baseUrl = process.env.PHOENIX_BASE_URL?.trim();
+  if (baseUrl) return baseUrl.replace(/\/v1\/traces\/?$/, '').replace(/\/$/, '');
+
   const collector = process.env.PHOENIX_COLLECTOR_ENDPOINT?.trim();
   if (collector) {
     const withoutTraces = collector.replace(/\/v1\/traces\/?$/, '').replace(/\/$/, '');
     if (withoutTraces.includes('/s/')) return withoutTraces;
+    return withoutTraces;
   }
 
-  return 'https://app.phoenix.arize.com';
+  throw new Error(
+    'Phoenix MCP is required. Set PHOENIX_MCP_BASE_URL or PHOENIX_COLLECTOR_ENDPOINT before probing.'
+  );
 }
 
 export interface PhoenixEndpointProbe {
@@ -144,36 +154,43 @@ export async function probePhoenixEndpoint(): Promise<PhoenixEndpointProbe> {
 
 export function isPhoenixEnabled() {
   return Boolean(
-    process.env.PHOENIX_API_KEY?.trim() ||
-      process.env.PHOENIX_COLLECTOR_ENDPOINT?.trim() ||
-      process.env.PHOENIX_OTEL_ENABLED === '1'
+    process.env.PHOENIX_API_KEY?.trim() &&
+      (process.env.PHOENIX_COLLECTOR_ENDPOINT?.trim() || process.env.PHOENIX_BASE_URL?.trim())
   );
 }
 
-export function initPhoenixTracing(serviceName: string) {
-  if (initialized || !shouldLoadPhoenixOtel()) return provider;
-  if (!isPhoenixEnabled()) return undefined;
+export async function initPhoenixTracing(serviceName: string) {
+  if (initialized) return provider;
+  if (initPromise) return initPromise;
 
-  void loadPhoenixOtel()
-    .then((mod) => {
-      if (!mod) return;
-      const register = (mod as NonNullable<typeof mod>).register;
-      provider = register({
-        projectName: process.env.PHOENIX_PROJECT_NAME?.trim() || 'premortem',
-        url: resolvePhoenixUrl(),
-        apiKey: process.env.PHOENIX_API_KEY?.trim(),
-        batch: process.env.NODE_ENV === 'production',
-        headers: {
-          'x-premortem-service': serviceName
-        }
-      }) as { shutdown: () => Promise<void> };
-      initialized = true;
-    })
-    .catch((error) => {
-      console.error('initPhoenixTracing.phoenix-load-failed', error);
-    });
+  const apiKey = process.env.PHOENIX_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error('Phoenix is required. Set PHOENIX_API_KEY before startup.');
+  }
 
-  return provider;
+  const url = resolvePhoenixUrl();
+
+  initPromise = (async () => {
+    const mod = await loadPhoenixOtel();
+    const register = (mod as NonNullable<typeof mod>).register;
+    provider = register({
+      projectName: process.env.PHOENIX_PROJECT_NAME?.trim() || 'premortem',
+      url,
+      apiKey,
+      batch: process.env.NODE_ENV === 'production',
+      headers: {
+        'x-premortem-service': serviceName
+      }
+    }) as { shutdown: () => Promise<void> };
+    initialized = true;
+    return provider;
+  })();
+
+  try {
+    return await initPromise;
+  } finally {
+    initPromise = undefined;
+  }
 }
 
 export async function shutdownPhoenixTracing() {
@@ -181,6 +198,14 @@ export async function shutdownPhoenixTracing() {
   await provider.shutdown();
   provider = undefined;
   initialized = false;
+}
+
+export async function probePhoenixTracing(serviceName = 'premortem-observability-smoke') {
+  const started = await initPhoenixTracing(serviceName);
+  if (!started) {
+    throw new Error('Phoenix tracing did not initialize.');
+  }
+  await shutdownPhoenixTracing();
 }
 
 export const tracePremortemAgentMission = traceAgent;
@@ -208,11 +233,8 @@ export async function tracePremortemLlmGenerate<T>(
   input: PhoenixLlmSpanInput,
   fn: () => Promise<T>
 ): Promise<T> {
-  if (!isPhoenixEnabled()) return fn();
-
   const mod = await loadPhoenixOtel();
-  if (!mod) return fn();
-  const traced = mod.withSpan(async () => fn(), {
+  const tracedFn = mod.withSpan(() => fn(), {
     name: resolveLlmSpanName(input),
     kind: 'LLM',
     processInput: () =>
@@ -238,9 +260,9 @@ export async function tracePremortemLlmGenerate<T>(
         outputMessages: [{ role: 'assistant', content: text.slice(0, 4000) }]
       });
     }
-  });
+  }) as () => Promise<T>;
 
-  return traced();
+  return await tracedFn();
 }
 
 export interface AuditFindingEvalInput {
@@ -299,6 +321,35 @@ function resolveGeminiJudgeModel(model?: string) {
   return model?.trim() || process.env.LLM_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
 }
 
+function parseJsonObjectFromLlmText<T extends Record<string, unknown>>(text: string): T {
+  const attempts = [text.trim()];
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenced?.[1]) {
+    attempts.unshift(fenced[1].trim());
+  }
+
+  for (const candidate of attempts) {
+    if (!candidate) continue;
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      // keep trying
+    }
+  }
+
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(text.slice(start, end + 1)) as T;
+    } catch {
+      // fall through
+    }
+  }
+
+  return {} as T;
+}
+
 export async function evaluateAuditMissionWithLlmJudge(
   input: AuditMissionLlmJudgeInput
 ): Promise<AuditMissionLlmJudgeResult> {
@@ -314,32 +365,15 @@ export async function evaluateAuditMissionWithLlmJudge(
     titles.length > 0 ? `Sample findings: ${titles.join('; ')}` : 'Sample findings: none'
   ].join('\n');
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${input.apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        generationConfig: {
-          temperature: 0,
-          responseMimeType: 'application/json'
-        },
-        contents: [{ role: 'user', parts: [{ text: prompt }] }]
-      })
-    }
-  );
+  const google = createGoogleGenerativeAI({ apiKey: input.apiKey });
+  const result = await generateText({
+    model: google(model),
+    temperature: 0,
+    messages: [{ role: 'user', content: prompt }]
+  });
+  const text = result.text || '{}';
 
-  if (!response.ok) {
-    throw new Error(`Gemini judge request failed: ${response.status} ${await response.text()}`);
-  }
-
-  const raw = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-  const text =
-    raw.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('\n') ?? '{}';
-
-  const parsed = JSON.parse(text) as { label?: string; explanation?: string };
+  const parsed = parseJsonObjectFromLlmText<{ label?: string; explanation?: string }>(text);
   const label = parsed.label === 'acceptable' ? 'acceptable' : 'needs_improvement';
   const explanation = parsed.explanation?.trim() || 'No explanation returned.';
   const score = label === 'acceptable' ? 1 : 0;

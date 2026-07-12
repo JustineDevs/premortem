@@ -70,7 +70,7 @@ Smoke entrypoints:
 
 - `pnpm run smoke:onboarding-e2e`
 - `pnpm run smoke:production-readiness`
-- `scripts/smoke/verify-runtime-pipeline.mjs`
+- `scripts/smoke/verify-runtime-pipeline.ts`
 
 ## Continuous audit mode
 

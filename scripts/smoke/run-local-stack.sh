@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-node ./scripts/smoke/run-local-stack.mjs
+npx tsx --tsconfig ./tsconfig.base.json ./scripts/smoke/run-local-stack.ts

@@ -3,8 +3,15 @@ import type { OrgPlan } from '@prisma/client';
 export declare const PLAN_LIMITS: Record<OrgPlan, {
     maxRepos: number;
     auditsPerMonth: number;
+    publishesPerMonth: number | null;
     canPublish: boolean;
     label: string;
+    historyRetentionDays: number;
+    supportLevel: 'community' | 'email' | 'priority' | 'dedicated';
+    sarifExport: boolean;
+    webhooks: boolean;
+    graphitiMemory: boolean;
+    skillMarketplace: boolean;
 }>;
 export declare class EntitlementError extends Error {
     readonly code: 'quota_exceeded' | 'feature_locked' | 'repo_limit';
@@ -17,8 +24,15 @@ export declare function getOrganizationEntitlements(organizationId: string): Pro
     limits: {
         maxRepos: number;
         auditsPerMonth: number;
+        publishesPerMonth: number | null;
         canPublish: boolean;
         label: string;
+        historyRetentionDays: number;
+        supportLevel: 'community' | 'email' | 'priority' | 'dedicated';
+        sarifExport: boolean;
+        webhooks: boolean;
+        graphitiMemory: boolean;
+        skillMarketplace: boolean;
     };
     projectCount: number;
     auditsUsed: number;

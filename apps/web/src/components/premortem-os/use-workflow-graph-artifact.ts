@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 import type { WorkflowGraphEdge, WorkflowGraphNode } from './workflow-graph.types';
+import { buildOsQueryKey, type OsQueryScope } from '@/hooks/use-os-console-data';
+import { shouldRetryBffQuery } from '@/lib/bff-client';
 
 interface GraphArtifactPayload {
   nodes?: Array<{ id: string; label: string; kind?: string; props?: Record<string, unknown> }>;
@@ -50,7 +52,7 @@ function mapArtifactToGraph(payload: GraphArtifactPayload): {
 
 export function useWorkflowGraphArtifact(
   auditRunId: string | undefined,
-  options?: { enabled?: boolean }
+  options?: { enabled?: boolean; queryScope?: OsQueryScope }
 ) {
   const enabled = Boolean(auditRunId) && (options?.enabled ?? true);
 
@@ -59,15 +61,18 @@ export function useWorkflowGraphArtifact(
     isLoading,
     isFetching
   } = useQuery({
-    queryKey: ['os', 'audit-graph', auditRunId],
+    queryKey: buildOsQueryKey(options?.queryScope, 'audit-graph', auditRunId),
     enabled,
     staleTime: 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    retry: shouldRetryBffQuery,
     queryFn: async () => {
       const response = await fetch(`/api/audits/${auditRunId}/graph`);
       if (!response.ok) {
         return { nodes: [] as WorkflowGraphNode[], edges: [] as WorkflowGraphEdge[] };
       }
-      const data = (await response.json()) as { payload?: GraphArtifactPayload };
+      const data = await response.json();
       if (!data.payload) {
         return { nodes: [] as WorkflowGraphNode[], edges: [] as WorkflowGraphEdge[] };
       }

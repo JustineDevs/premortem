@@ -1,4 +1,4 @@
-import React from 'react';
+import type { CSSProperties } from 'react';
 
 interface ProviderIconProps {
   slug: string;
@@ -10,7 +10,7 @@ export function ProviderIcon({ slug, className = "w-3.5 h-3.5", size }: Provider
   const norm = slug.toLowerCase().trim();
 
   // Pick the style override if custom sizes are specified
-  const styles: React.CSSProperties = size ? { width: size, height: size } : {};
+  const styles: CSSProperties = size ? { width: size, height: size } : {};
 
   // GitLab Official SVG
   if (norm === 'gitlab') {

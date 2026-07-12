@@ -1,6 +1,6 @@
 import type { User, UserIdentity } from '@supabase/supabase-js';
 
-import type { ProfileProvisionHints } from '@premortem/db';
+import type { ProfileProvisionHints } from '@premortem/db/workspace-auth';
 
 function identityString(identity: UserIdentity, keys: string[]): string | null {
   const data = (identity as UserIdentity & { identity_data?: Record<string, unknown> }).identity_data;

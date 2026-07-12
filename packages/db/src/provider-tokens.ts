@@ -1,16 +1,37 @@
-import { getNangoToken, refreshGitLabOAuthToken, gitLabAuthHeaders } from '@premortem/integrations';
+import { getNangoToken, refreshGitLabOAuthToken } from '@premortem/integrations';
+import { fetchGitLabUser } from '@premortem/integrations';
 import { isProductionMode } from '@premortem/domain';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
 import { prisma } from './client';
 import { resolveGitLabApiBaseUrl } from './gitlab-url';
+import { decodeStoredToken as decodePlainStoredToken } from './token-codec';
 
 const TOKEN_REFRESH_SKEW_MS = 60_000;
 const STORED_TOKEN_PREFIX = 'enc:v1:';
+const GITLAB_CONNECTION_SELECT = {
+  id: true,
+  provider: true,
+  encryptedAccessToken: true,
+  encryptedRefreshToken: true,
+  tokenExpiresAt: true,
+  nangoConnectionId: true,
+  nangoProviderKey: true
+} as const;
+const GITHUB_CONNECTION_SELECT = {
+  id: true,
+  provider: true,
+  encryptedAccessToken: true,
+  nangoConnectionId: true,
+  nangoProviderKey: true
+} as const;
 
 function allowsEnvGitLabTokenFallback(): boolean {
   if (isProductionMode()) return false;
-  return process.env.PREMORTEM_ALLOW_ENV_GITLAB_TOKEN === '1';
+  const flag = process.env.PREMORTEM_ALLOW_ENV_GITLAB_TOKEN?.trim();
+  if (flag === '1') return true;
+  if (flag === '0') return false;
+  return Boolean(process.env.GITLAB_TOKEN?.trim());
 }
 
 export class GitLabTokenError extends Error {
@@ -47,8 +68,9 @@ function encryptToken(token: string): string {
   const key = encryptionKey();
   if (!key) {
     if (isProductionMode()) {
-      throw new Error('ENCRYPTION_KEY is required to store provider tokens in production');
+      throw new Error('ENCRYPTION_KEY is required to store provider tokens');
     }
+
     return `plain:${token}`;
   }
 
@@ -75,13 +97,10 @@ function decryptToken(ciphertext: string): string {
 }
 
 export function decodeStoredToken(value: string) {
-  if (value.startsWith('plain:')) {
-    return value.slice('plain:'.length);
-  }
   if (value.startsWith(STORED_TOKEN_PREFIX)) {
     return decryptToken(value.slice(STORED_TOKEN_PREFIX.length));
   }
-  return value;
+  return decodePlainStoredToken(value);
 }
 
 export function encodeStoredToken(token: string) {
@@ -94,10 +113,12 @@ function tokenNeedsRefresh(expiresAt: Date | null | undefined) {
 }
 
 async function verifyGitLabAccessTokenLive(baseUrl: string, token: string) {
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/v4/user`, {
-    headers: gitLabAuthHeaders(token)
-  });
-  return response.ok;
+  try {
+    await fetchGitLabUser(baseUrl, token);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function refreshStoredGitLabConnectionTokens(connectionId: string, refreshToken: string) {
@@ -150,6 +171,35 @@ async function resolveManagedConnectionAccessToken(connection: {
   } catch {
     return null;
   }
+}
+
+async function findGitLabConnectionForOrganization(
+  organizationId: string,
+  options?: { connectionId?: string }
+) {
+  if (options?.connectionId) {
+    return prisma.providerConnection.findFirst({
+      where: {
+        id: options.connectionId,
+        organizationId,
+        provider: 'gitlab',
+        status: { in: ['active', 'pending'] },
+        OR: [{ encryptedAccessToken: { not: null } }, { nangoConnectionId: { not: null } }]
+      },
+      select: GITLAB_CONNECTION_SELECT
+    });
+  }
+
+  return prisma.providerConnection.findFirst({
+    where: {
+      organizationId,
+      provider: 'gitlab',
+      status: 'active',
+      OR: [{ encryptedAccessToken: { not: null } }, { nangoConnectionId: { not: null } }]
+    },
+    orderBy: { updatedAt: 'desc' },
+    select: GITLAB_CONNECTION_SELECT
+  });
 }
 
 /** Returns a live GitLab access token, refreshing OAuth credentials when needed. */
@@ -218,7 +268,11 @@ async function resolveConnectionAccessToken(connection: {
   const managedToken = await resolveManagedConnectionAccessToken(connection);
   if (managedToken) return managedToken;
   if (!connection.encryptedAccessToken) return null;
-  return ensureGitLabAccessTokenForConnection(connection.id);
+  try {
+    return await ensureGitLabAccessTokenForConnection(connection.id);
+  } catch {
+    return null;
+  }
 }
 
 export async function resolveGitLabCredentialsForOrganization(
@@ -227,47 +281,9 @@ export async function resolveGitLabCredentialsForOrganization(
 ): Promise<ResolvedGitLabCredentials | null> {
   const baseUrl = resolveGitLabApiBaseUrl(process.env.GITLAB_BASE_URL);
 
-  if (options?.connectionId) {
-    const connection = await prisma.providerConnection.findFirst({
-      where: {
-        id: options.connectionId,
-        organizationId,
-        provider: 'gitlab',
-        status: { in: ['active', 'pending'] },
-        OR: [{ encryptedAccessToken: { not: null } }, { nangoConnectionId: { not: null } }]
-      }
-    });
-
-    if (connection) {
-      const token = await resolveConnectionAccessToken(connection);
-      if (!token) return null;
-      return {
-        baseUrl,
-        token,
-        connectionId: connection.id,
-        source: 'connection'
-      };
-    }
-  }
-
-  const organization = await prisma.organization.findUnique({
-    where: { id: organizationId },
-    include: {
-      providerConnections: {
-        where: {
-          provider: 'gitlab',
-          status: 'active',
-          OR: [{ encryptedAccessToken: { not: null } }, { nangoConnectionId: { not: null } }]
-        },
-        orderBy: { updatedAt: 'desc' },
-        take: 1
-      }
-    }
+  const connection = await findGitLabConnectionForOrganization(organizationId, {
+    connectionId: options?.connectionId
   });
-
-  if (!organization) return null;
-
-  const connection = organization.providerConnections[0];
 
   if (connection) {
     const token = await resolveConnectionAccessToken(connection);
@@ -295,28 +311,21 @@ export async function resolveGitLabCredentialsForProject(
 ): Promise<ResolvedGitLabCredentials | null> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    include: {
-      connection: true,
-      organization: {
-        include: {
-          providerConnections: {
-            where: {
-              provider: 'gitlab',
-              status: 'active',
-              OR: [{ encryptedAccessToken: { not: null } }, { nangoConnectionId: { not: null } }]
-            },
-            orderBy: { updatedAt: 'desc' },
-            take: 1
-          }
-        }
+    select: {
+      organizationId: true,
+      connection: {
+        select: GITLAB_CONNECTION_SELECT
       }
     }
   });
 
   if (!project) return null;
 
-  const connection = project.connection ?? project.organization.providerConnections[0];
   const baseUrl = resolveGitLabApiBaseUrl(process.env.GITLAB_BASE_URL);
+  const connection =
+    project.connection?.provider === 'gitlab'
+      ? project.connection
+      : await findGitLabConnectionForOrganization(project.organizationId);
 
   if (connection) {
     const token = await resolveConnectionAccessToken(connection);
@@ -361,16 +370,10 @@ export async function resolveGitHubCredentialsForProject(
 ): Promise<ResolvedGitHubCredentials | null> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    include: {
-      connection: true,
-      organization: {
-        include: {
-          providerConnections: {
-            where: { provider: 'github', status: 'active' },
-            orderBy: { updatedAt: 'desc' },
-            take: 1
-          }
-        }
+    select: {
+      organizationId: true,
+      connection: {
+        select: GITHUB_CONNECTION_SELECT
       }
     }
   });
@@ -379,7 +382,11 @@ export async function resolveGitHubCredentialsForProject(
 
   const connection = project.connection?.provider === 'github'
     ? project.connection
-    : project.organization.providerConnections[0];
+    : await prisma.providerConnection.findFirst({
+        where: { organizationId: project.organizationId, provider: 'github', status: 'active' },
+        orderBy: { updatedAt: 'desc' },
+        select: GITHUB_CONNECTION_SELECT
+      });
 
   if (connection) {
     const managedToken = await resolveManagedConnectionAccessToken(connection);
@@ -393,11 +400,15 @@ export async function resolveGitHubCredentialsForProject(
   }
 
   if (connection?.encryptedAccessToken) {
-    return {
-      token: decodeStoredToken(connection.encryptedAccessToken),
-      connectionId: connection.id,
-      source: 'connection'
-    };
+    try {
+      return {
+        token: decodeStoredToken(connection.encryptedAccessToken),
+        connectionId: connection.id,
+        source: 'connection'
+      };
+    } catch {
+      return null;
+    }
   }
 
   const envToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;

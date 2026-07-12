@@ -89,7 +89,7 @@ export function MarketingPricingTable() {
         })}
       </div>
       <p className="landing-block-pricing__note" style={body14}>
-        Demo pricing mirrors in-app Settings → Billing. Stripe Checkout applies for paid tiers when configured.
+        Pricing mirrors in-app Settings → Billing. Paid tiers use real Stripe Checkout and Billing Portal flows when configured.
       </p>
     </div>
   );

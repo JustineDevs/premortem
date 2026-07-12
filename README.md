@@ -3,7 +3,7 @@
 <p align="center">
   <a href="https://github.com/JustineDevs/premortem/releases"><img src="https://img.shields.io/badge/version-v0.1.0-111111?style=for-the-badge" alt="Version"></a>
   <a href="https://github.com/JustineDevs/premortem"><img src="https://img.shields.io/badge/apps-web%20%7C%20api%20%7C%20orchestrator-111111?style=for-the-badge" alt="Packages"></a>
-  <a href="https://github.com/JustineDevs/premortem"><img src="https://img.shields.io/badge/stack-next.js%20%7C%20supabase%20%7C%20cloudflare-111111?style=for-the-badge" alt="Tech Stack"></a>
+  <a href="https://github.com/JustineDevs/premortem"><img src="https://img.shields.io/badge/stack-next.js%20%7C%20supabase%20%7C%20vercel%20%7C%20alibaba%20cloud-111111?style=for-the-badge" alt="Tech Stack"></a>
   <a href="https://premortem.jstn.site"><img src="https://img.shields.io/badge/website-premortem.jstn.site-111111?style=for-the-badge" alt="Website"></a>
   <a href="https://github.com/sponsors/JustineDevs"><img src="https://img.shields.io/badge/sponsor-JustineDevs-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor JustineDevs"></a>
 </p>
@@ -59,7 +59,7 @@ For each GitLab project, Premortem asks **what could go wrong here?** as a struc
 
 The reviewer console at `/app` exposes traceability: which lens surfaced a finding, supporting evidence, agent runs, and workflow canvas views over the audit pipeline and repository graph. Continuous audit mode can rotate scans when idle; Stop all returns control to manual runs.
 
-**Stack (as implemented):** Next.js BFF and reviewer UI, Cloudflare Workers API and Queues, `@premortem/orchestrator` swarm execution with Gemini, GitLab OAuth plus REST ingest and issue publish, Supabase Postgres via Prisma, optional Neo4j graph snapshots. The optional `services/agent-builder` package now includes a Cloud Run-ready ADK runtime path with Gemini API or Vertex AI, optional database-backed sessions, and built-in Gemini safety settings; production audits still run through the orchestrator pipeline, not a hosted Agent Builder-only runtime.
+**Stack (as implemented):** Next.js BFF and reviewer UI on Vercel, Alibaba Cloud ECS for the backend runtime, `@premortem/orchestrator` swarm execution with Gemini and Qwen-compatible model routes, GitLab OAuth plus REST ingest and issue publish, Supabase Postgres via Prisma, and Neo4j graph snapshots for audit context and workflow tracing. The optional `services/agent-builder` package now includes a Cloud Run-ready ADK runtime path with Gemini API or Vertex AI, optional database-backed sessions, and built-in Gemini safety settings; production audits still run through the orchestrator pipeline, not a hosted Agent Builder-only runtime.
 
 **On the roadmap:** cross-repo boundary analysis, performance and SLO lenses, organization policy packs, CLI and GitLab pipeline gates for release blocking.
 
@@ -102,7 +102,7 @@ At the system level, those responsibilities map to cooperating layers:
 
 * **Bounded async audits**: Queue-backed runs with idempotency, leasing, and cooperative pause/resume checkpoints.
 * **Specialist swarm**: Fixed agent roster with structured outputs, not generic summaries.
-* **Reviewer console**: Dashboard, projects, audits, workflow canvas, sandbox, and settings in `/app`.
+* **Reviewer console**: Dashboard, projects, audits, workflow canvas, sandbox, and settings in `/app`, with role-aware settings sections.
 * **Continuous audit mode**: Optional automatic rotation when idle; Stop all halts runtime and returns control to manual scans.
 * **Traceability chain**: Prompt version, agent run, finding, cluster, candidate, review action, published issue, reconciliation event.
 * **Commercial gating**: Stripe plan state with server-side entitlements (`PLAN_LIMITS`) for repos, audits, and publish capability.
@@ -113,7 +113,7 @@ At the system level, those responsibilities map to cooperating layers:
 
 - **Does Premortem store repository code?** The system is designed to process repository context through background workers and persist structured artifacts such as findings, clusters, audit snapshots, and review history. The reviewer console is the durable operational surface, not a second code mirror.
 - **How does Premortem reduce alert fatigue?** Parallel worker lanes do not publish directly. Findings flow through consensus validation, clustering, and a reviewer gate so single-lane noise does not become a public issue candidate.
-- **Which integrations are live today?** GitLab repository connect, publish, and reconciliation are shipped. GitHub sign-in and auth primitives exist, but GitHub repository integration, Bitbucket, Azure DevOps, and Gitea remain roadmap surfaces and are labeled as coming soon in the UI.
+- **Which integrations are live today?** GitLab repository connect, publish, and reconciliation are shipped. Sign-in uses Supabase Auth with email/password, magic link, and GitLab OAuth. GitHub repository integration, Bitbucket, Azure DevOps, and Gitea remain roadmap surfaces.
 - **How are tenant boundaries enforced?** Organization-scoped queries, Supabase RLS, and server-side session context keep workspace data separated. Webhooks are validated before they can trigger audit work.
 - **What about data retention and AI privacy?** Premortem can be configured to use provider contracts that explicitly offer zero data retention or no-training guarantees. Those guarantees come from the chosen provider contract, not from the UI alone.
 - **Can this be reviewed by enterprise security teams?** Yes. The project now has a public enterprise readiness doc, a scoped provider matrix, consensus validation for worker output, and an audit trail story aligned to review and compliance workflows.
@@ -151,7 +151,7 @@ cp .env.example .env.local
 ```
 
 > [!NOTE]
-> Local dev loads repo-root `.env.local` via `scripts/load-local-env.mjs`. Never commit credentials, service-role keys, or provider tokens.
+> Local dev loads repo-root `.env.local` via `scripts/load-local-env.ts`. Never commit credentials, service-role keys, or provider tokens.
 
 ### 2. Install and run
 
@@ -167,13 +167,13 @@ Run the canonical prompt eval when LLM credentials are configured:
 pnpm run eval:prompts
 ```
 
-`pnpm run dev` runs `scripts/dev/run-local-stack.mjs`, which:
+`pnpm run dev` runs `scripts/dev/run-local-stack.ts`, which:
 
 - ensures Docker services are up (Neo4j by default; Postgres when using local `DATABASE_URL`)
 - syncs Prisma to the configured database
 - starts the local API runtime (default `:18787`)
 - starts the Next.js web app (default `:13000`)
-- when `.env.local` has database, GitLab, LLM, and Supabase keys: **real auth** (Supabase OAuth), real GitLab ingest, and personal workspace onboarding
+- when `.env.local` has database, GitLab, LLM, and Supabase keys: **real auth** (Supabase Auth plus GitLab OAuth), real GitLab ingest, and personal workspace onboarding
 - when credentials are missing: fixture mode with `PREMORTEM_AUTH_DISABLED=1` and `LOCAL_DEV_FIXTURE` for smoke scripts only
 
 Open:
@@ -237,7 +237,7 @@ Legacy `/reviews` redirects to `/app`.
 | Database | Supabase Postgres via Prisma (or Docker Postgres for offline dev) |
 | Artifacts | Supabase Storage (when enabled) |
 | Graph store | Neo4j (`docker compose` + `NEO4J_URI`) |
-| Async execution | Cloudflare Queues / local orchestrator path |
+| Async execution | Alibaba Cloud ECS runtime / local orchestrator path |
 | Client state | TanStack Query in reviewer hooks |
 | Observability | Sentry, PostHog |
 | Billing | Stripe (commercial state only; not app identity) |
@@ -280,7 +280,7 @@ pnpm run db:reset-billing              # optional: reset tiers to Free for upgra
 Verification path with real users:
 
 1. `pnpm run dev` (configured mode: no `PREMORTEM_AUTH_DISABLED`)
-2. Sign in at `/login` (Supabase + GitLab OAuth)
+2. Sign in at `/login` (Supabase Auth email/password, magic link, and GitLab OAuth)
 3. Connect GitLab and register a repository in `/app` → Settings / Projects
 4. Run an audit from Projects or Dashboard
 5. Review findings and exercise billing upgrade in Settings (Stripe test mode applies tiers in-app)
@@ -365,8 +365,8 @@ Premortem is built on open source, managed services, and community projects. We 
 | <a href="https://react.dev/"><img src="https://cdn.simpleicons.org/react/61DAFB" alt="React" width="28" height="28" align="middle" /></a> [React](https://react.dev/) | Reviewer console UI |
 | <a href="https://www.typescriptlang.org/"><img src="https://cdn.simpleicons.org/typescript/3178C6" alt="TypeScript" width="28" height="28" align="middle" /></a> [TypeScript](https://www.typescriptlang.org/) | Shared typing across the monorepo |
 | <a href="https://pnpm.io/"><img src="https://cdn.simpleicons.org/pnpm/F69220" alt="pnpm" width="28" height="28" align="middle" /></a> [pnpm](https://pnpm.io/) + <a href="https://turbo.build/"><img src="https://cdn.simpleicons.org/turborepo/EF4444" alt="Turbo" width="28" height="28" align="middle" /></a> [Turbo](https://turbo.build/) | Workspace package management and build orchestration |
-| <a href="https://developers.cloudflare.com/workers/"><img src="https://cdn.simpleicons.org/cloudflare/F38020" alt="Cloudflare" width="28" height="28" align="middle" /></a> [Cloudflare Workers](https://developers.cloudflare.com/workers/) + [Wrangler](https://developers.cloudflare.com/workers/wrangler/) | API worker runtime and deploy path |
-| <a href="https://developers.cloudflare.com/queues/"><img src="https://cdn.simpleicons.org/cloudflare/F38020" alt="Cloudflare Queues" width="28" height="28" align="middle" /></a> [Cloudflare Queues](https://developers.cloudflare.com/queues/) | Async audit job delivery (production path) |
+| <a href="https://vercel.com/"><img src="https://cdn.simpleicons.org/vercel/000000" alt="Vercel" width="28" height="28" align="middle" /></a> [Vercel](https://vercel.com/) | Frontend hosting and BFF delivery path |
+| <a href="https://www.alibabacloud.com/"><img src="https://cdn.simpleicons.org/alibabacloud/FF6A00" alt="Alibaba Cloud" width="28" height="28" align="middle" /></a> [Alibaba Cloud](https://www.alibabacloud.com/) | ECS backend deployment and runtime hosting |
 | <a href="https://nodejs.org/"><img src="https://cdn.simpleicons.org/nodedotjs/339933" alt="Node.js" width="28" height="28" align="middle" /></a> [Node.js](https://nodejs.org/) | Local API server and tooling |
 
 #### Identity, data, and graph
@@ -389,6 +389,8 @@ Premortem is built on open source, managed services, and community projects. We 
 
 | Project | Role in Premortem |
 | --- | --- |
+| Qwen Cloud | Compatible model routing and provider fallback coverage |
+| Devin AI | Assisted workflow automation and implementation review |
 | <a href="https://ai.google.dev/"><img src="./public/logo/brand/gemini-color.png" alt="Google Gemini" width="28" height="28" align="middle" /></a> [Google Gemini API](https://ai.google.dev/) | Primary LLM executor for specialist swarm |
 | <a href="./services/orchestrator/"><img src="./public/logo/svg/premortem-mark.svg" alt="Premortem orchestrator" width="28" height="28" align="middle" /></a> [@premortem/orchestrator](./services/orchestrator/) | Queue-backed audit pipeline, specialist swarm, clustering, and publish path (primary runtime) |
 | [Optional `services/agent-builder`](./services/agent-builder/) | Mission trace bootstrap hooks used by the orchestrator; not the sole production runtime |
@@ -421,7 +423,7 @@ Premortem is built on open source, managed services, and community projects. We 
 <details>
 <summary><strong>Development tooling</strong></summary>
 
-Cursor MCP plugins and documented servers used during development and ops (Sentry, PostHog, Stripe, Prisma, Cloudflare Docs, GitLab MCP, Postgres toolbox) are described in repo-root `mcp.local.json` and verified via `node scripts/mcp/verify-all.mjs`.
+Cursor MCP plugins and documented servers used during development and ops (Sentry, PostHog, Stripe, Prisma, GitLab MCP, Postgres toolbox) are described in repo-root `mcp.local.json` and verified via `node scripts/mcp/verify-all.ts`.
 
 #### Repository hygiene
 

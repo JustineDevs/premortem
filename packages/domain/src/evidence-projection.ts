@@ -142,11 +142,25 @@ export function primaryEvidenceLocation(evidence: EvidenceRefLike[]): { filepath
 }
 
 function formatEvidenceBlock(item: EvidenceRefLike, index: number): string {
-  const header = `[${index + 1}] ${item.kind.toUpperCase()} · ${item.ref}`;
-  if (item.codeSnippet) {
-    return `${header}\n${item.reason ? `${item.reason}\n` : ''}${item.codeSnippet}`;
+  const parsed = parseFileEvidenceRef(item.ref);
+  const citation = parsed
+    ? `${parsed.filePath}:${parsed.startLine}${parsed.endLine > parsed.startLine ? `-${parsed.endLine}` : ''}`
+    : item.ref;
+  const header = `[${index + 1}] Source citation: \`${citation}\``;
+
+  if (item.reason && item.codeSnippet) {
+    return `${header}\n- Reason: ${item.reason}\n\n\`\`\`ts\n${item.codeSnippet}\n\`\`\``;
   }
-  return item.reason ? `${header}\n${item.reason}` : header;
+
+  if (item.codeSnippet) {
+    return `${header}\n\n\`\`\`ts\n${item.codeSnippet}\n\`\`\``;
+  }
+
+  if (item.reason) {
+    return `${header}\n- Reason: ${item.reason}\n- Snippet: unavailable in this snapshot`;
+  }
+
+  return `${header}\n- Snippet: unavailable in this snapshot`;
 }
 
 export function formatSourceCodeEvidence(evidence: EvidenceRefLike[]): string {

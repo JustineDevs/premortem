@@ -12,12 +12,14 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "postbuild": "node scripts/fix-dist-imports.mjs",
+    "postbuild": "tsx --tsconfig ../../tsconfig.base.json scripts/fix-dist-imports.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm exec tsx --tsconfig ../../tsconfig.base.json test/orbit-fallback.test.ts"
   },
   "dependencies": {
+    "@premortem/agent-kit": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@premortem/graphiti": "workspace:*",
     "@premortem/graph-model": "workspace:*",
     "@nangohq/node": "^0.70.8",
     "neo4j-driver": "^5.24.0"

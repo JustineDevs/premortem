@@ -14,7 +14,7 @@ export function OsLoadingScreen({
   description = premortemBrand.loadingDescription
 }: OsLoadingScreenProps) {
   return (
-    <div className="w-screen h-screen bg-[#FBFBFA] flex flex-col items-center justify-center font-sans px-6">
+    <div className="min-h-dvh w-full bg-[#FBFBFA] flex flex-col items-center justify-center font-sans px-6">
       <img
         src={osAssets.logoHeader}
         alt={premortemBrand.productName}

@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 import { authLinks } from '@/lib/auth-links';
+import type { AuthProviderBootstrap } from '@/lib/auth/auth-provider-bootstrap';
 import { marketingLinks } from '@/lib/marketing-links';
 
 import { body14, label14, navLink, sectionTitle } from '../landing/text-styles';
@@ -16,6 +17,7 @@ type PasswordResetFormProps = {
   description: string;
   alternateHref: string;
   alternateLabel: string;
+  initialBootstrap?: AuthProviderBootstrap;
 };
 
 function getSupabaseClient() {
@@ -47,7 +49,8 @@ export function PasswordResetForm({
   title,
   description,
   alternateHref,
-  alternateLabel
+  alternateLabel,
+  initialBootstrap
 }: PasswordResetFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState('');
@@ -58,6 +61,10 @@ export function PasswordResetForm({
   const [noticeTone, setNoticeTone] = useState<'warn' | 'error' | 'success'>('warn');
 
   const isRequestMode = mode === 'request';
+  const localFixtureMode = initialBootstrap?.mode === 'local_fixture';
+  const bootstrapConfig = initialBootstrap?.supabaseUrl && initialBootstrap?.supabaseAnonKey
+    ? { url: initialBootstrap.supabaseUrl, anonKey: initialBootstrap.supabaseAnonKey }
+    : null;
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -65,9 +72,15 @@ export function PasswordResetForm({
     setNotice(null);
 
     try {
-      const supabase = getSupabaseClient();
+      const supabase = localFixtureMode ? null : bootstrapConfig ? createClient(bootstrapConfig.url, bootstrapConfig.anonKey) : getSupabaseClient();
 
       if (!supabase) {
+        if (localFixtureMode) {
+          setNoticeTone('success');
+          setNotice('Local auth bypass is active. Redirecting to your workspace.');
+          router.replace(authLinks.defaultNext);
+          return;
+        }
         throw new Error('Supabase auth is not configured.');
       }
 

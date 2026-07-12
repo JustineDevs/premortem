@@ -1,7 +1,5 @@
 'use client';
 
-import React from 'react';
-
 import type { CanvasEdge } from './workflow-canvas.types';
 
 interface WorkflowEdgeBannerProps {

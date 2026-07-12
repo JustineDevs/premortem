@@ -22,10 +22,12 @@ function resolvePhoenixMcpBaseUrl() {
 }
 
 export function buildPhoenixMcpConnection(): StdioConnectionParams | null {
-  if (!isPhoenixEnabled()) return null;
-
   const apiKey = process.env.PHOENIX_API_KEY?.trim();
-  if (!apiKey) return null;
+  if (!apiKey) {
+    throw new Error(
+      'Phoenix is required. Set PHOENIX_API_KEY and PHOENIX_BASE_URL or PHOENIX_COLLECTOR_ENDPOINT.'
+    );
+  }
 
   const baseUrl = resolvePhoenixMcpBaseUrl();
 
@@ -47,6 +49,6 @@ export function describePhoenixRuntime() {
     enabled: isPhoenixEnabled(),
     projectName: process.env.PHOENIX_PROJECT_NAME?.trim() || 'premortem',
     mcpBaseUrl: resolvePhoenixMcpBaseUrl(),
-    mcpConfigured: Boolean(buildPhoenixMcpConnection())
+    mcpConfigured: Boolean(process.env.PHOENIX_API_KEY?.trim())
   };
 }

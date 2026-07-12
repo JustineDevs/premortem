@@ -1,5 +1,6 @@
 import type { CanonicalFinding } from '@premortem/agent-kit';
 import type { DedupePolicy } from '@premortem/agent-kit';
+import { DisjointSet } from '@datastructures-js/disjoint-set';
 
 export interface RuntimeCluster {
   clusterKey: string;
@@ -80,7 +81,7 @@ export function clusterFindings(
     threshold: 0.7
   };
 
-  const unionFind = new UnionFind(findings.length);
+  const unionFind = new DisjointSet(findings.length);
   for (let i = 0; i < findings.length; i += 1) {
     for (let j = i + 1; j < findings.length; j += 1) {
       if (findingsOverlap(findings[i]!, findings[j]!, policy)) {
@@ -119,29 +120,6 @@ export function clusterFindings(
       primaryFindingId: primary.finding_id
     };
   });
-}
-
-class UnionFind {
-  private readonly parent: number[];
-
-  constructor(size: number) {
-    this.parent = Array.from({ length: size }, (_, index) => index);
-  }
-
-  find(index: number): number {
-    if (this.parent[index] !== index) {
-      this.parent[index] = this.find(this.parent[index]!);
-    }
-    return this.parent[index]!;
-  }
-
-  union(a: number, b: number): void {
-    const rootA = this.find(a);
-    const rootB = this.find(b);
-    if (rootA !== rootB) {
-      this.parent[rootB] = rootA;
-    }
-  }
 }
 
 function pickPrimaryFinding(items: CanonicalFinding[]): CanonicalFinding {

@@ -1,0 +1,22 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Premortem">
+  <rect width="1200" height="630" fill="#FBFBF8"/>
+  <rect x="54" y="54" width="1092" height="522" rx="40" fill="url(#paint0_linear_402_2)"/>
+  <circle cx="162" cy="160" r="58" fill="#0F172A"/>
+  <path d="M129 161.5C129 143.885 143.385 129.5 161 129.5H163C180.615 129.5 195 143.885 195 161.5V162.5C195 180.115 180.615 194.5 163 194.5H161C143.385 194.5 129 180.115 129 162.5V161.5Z" fill="white" opacity="0.1"/>
+  <path d="M145 160H177" stroke="#FBFBF8" stroke-width="8" stroke-linecap="round"/>
+  <path d="M145 176H177" stroke="#FBFBF8" stroke-width="8" stroke-linecap="round"/>
+  <path d="M145 144H177" stroke="#FBFBF8" stroke-width="8" stroke-linecap="round"/>
+  <text x="244" y="149" fill="#0F172A" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="700" letter-spacing="-0.04em">Premortem</text>
+  <text x="244" y="188" fill="#475569" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="500">Predictive repository audits and review-ready findings.</text>
+  <text x="72" y="352" fill="#0F172A" font-family="Inter, Arial, sans-serif" font-size="70" font-weight="700" letter-spacing="-0.06em">Run on your repo before it breaks production.</text>
+  <text x="72" y="428" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="500">GitLab-first audits, human review gates, and operational guardrails.</text>
+  <rect x="72" y="484" width="284" height="64" rx="18" fill="#0F172A"/>
+  <text x="104" y="525" fill="#FBFBF8" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="700">premortem.jstn.site</text>
+  <defs>
+    <linearGradient id="paint0_linear_402_2" x1="54" y1="54" x2="1146" y2="576" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.52" stop-color="#EFF3FF"/>
+      <stop offset="1" stop-color="#E2E8F0"/>
+    </linearGradient>
+  </defs>
+</svg>

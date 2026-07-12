@@ -72,11 +72,11 @@ export async function ensureLocalDevelopmentFixture() {
         userId: LOCAL_DEV_FIXTURE.profileId
       }
     },
-    update: { role: 'owner' },
+    update: { role: 'member' },
     create: {
       organizationId: LOCAL_DEV_FIXTURE.organizationId,
       userId: LOCAL_DEV_FIXTURE.profileId,
-      role: 'owner'
+      role: 'member'
     }
   });
 

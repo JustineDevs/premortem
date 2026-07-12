@@ -3,15 +3,64 @@ import {
   buildTraceFromEvidence,
   formatRecommendedPatch,
   formatSourceCodeEvidence,
+  parseFileEvidenceRef,
   normalizeEvidenceRefs,
   primaryEvidenceLocation
 } from './evidence-projection';
 import { renderPublishedIssueBodyMarkdown } from './issue-body';
-import { issueCandidateToConsoleStatus } from './review';
+import { ConsoleIssueStatus, issueCandidateToConsoleStatus } from './review';
 import { runStatusToConsoleRunStatus, scoreFromReviewQueueCounts, scoreFromSeverityCounts } from './status';
 import { countSeverities, severityToConsole } from './severity';
 
 export type { EvidenceRefLike };
+
+function buildRecommendedCodeDnaSnippet(
+  title: string,
+  evidence: EvidenceRefLike[],
+  recommendedActionSummary?: string,
+  implementationSteps: string[] = [],
+  recommendedControls: string[] = []
+) {
+  const primarySnippet = evidence.find((item) => item.codeSnippet?.trim());
+  const citedEvidence = evidence.slice(0, 4).map((item, index) => {
+    const parsed = parseFileEvidenceRef(item.ref);
+    const citation = parsed
+      ? `${parsed.filePath}:${parsed.startLine}${parsed.endLine > parsed.startLine ? `-${parsed.endLine}` : ''}`
+      : item.ref;
+    const reason = item.reason ? ` — ${item.reason}` : '';
+    return `// Evidence citation ${index + 1}: ${citation}${reason}`;
+  });
+
+  const sourceExcerpt = primarySnippet?.codeSnippet?.trim()
+    ? primarySnippet.codeSnippet
+        .trim()
+        .split('\n')
+        .slice(0, 8)
+        .map((line) => `// ${line}`)
+    : ['// Source excerpt unavailable in this snapshot.'];
+
+  const steps = implementationSteps.length > 0
+    ? implementationSteps.map((step, index) => `  // Step ${index + 1}: ${step}`)
+    : ['  // Step 1: Apply the smallest safe fix grounded in the cited evidence.'];
+
+  const controls = recommendedControls.length > 0
+    ? recommendedControls.map((control) => `  // Control: ${control}`)
+    : ['  // Control: Keep the change scoped to the cited file and add a regression test.'];
+
+  return [
+    `// Recommended code DNA for ${title}`,
+    `// Goal: ${recommendedActionSummary?.trim() || 'Apply the smallest safe fix grounded in the cited evidence.'}`,
+    ...citedEvidence,
+    '',
+    ...sourceExcerpt,
+    '',
+    'export function applyRecommendedChange() {',
+    ...steps,
+    ...controls,
+    '  return true;',
+    '}'
+  ].join('\n');
+}
 
 export interface RuntimeIssueCandidateRow {
   id: string;
@@ -101,6 +150,44 @@ export interface ConsoleFindingProjection {
   suggestedPatchCode?: string;
   expectedBehavior?: string;
   successCriteria?: string;
+}
+
+function projectRuntimeFindingToConsoleFinding(
+  snapshot: RuntimeAuditSnapshotLike,
+  finding: RuntimeFindingRow
+): ConsoleFindingProjection {
+  const evidence = normalizeEvidenceRefs(finding.evidence);
+  const location = primaryEvidenceLocation(evidence);
+  const recommendedControls = finding.recommendedControls ?? [];
+  const title = finding.title?.trim() || finding.predictedFailureSummary?.trim() || finding.category;
+
+  return {
+    id: finding.id,
+    title,
+    severity: severityToConsole(finding.severity),
+    status: ConsoleIssueStatus.OPEN,
+    category: finding.category,
+    filepath: location.filepath,
+    line: location.line,
+    description: finding.predictedFailureSummary?.trim() || title,
+    evidence: formatSourceCodeEvidence(evidence),
+    evidenceRefs: evidence,
+    trace: buildTraceFromEvidence(evidence),
+    recommendation: formatRecommendedPatch({
+      recommendedActionSummary: finding.whyItMatters?.trim(),
+      recommendedControls
+    }) || finding.failureMode?.trim() || 'Review and convert to a published issue candidate.',
+    aiReasoning:
+      finding.whyItMatters?.trim() ||
+      finding.predictedFailureSummary?.trim() ||
+      'Runtime specialist finding projected from audit snapshot.',
+    suggestedPatchCode: formatRecommendedPatch({
+      recommendedControls,
+      recommendedActionSummary: finding.whyItMatters?.trim()
+    }),
+    expectedBehavior: finding.failureMode?.trim() || undefined,
+    successCriteria: (finding.affectedAssets ?? []).join('\n') || undefined
+  };
 }
 
 function relatedFindingsForIssue(snapshot: RuntimeAuditSnapshotLike, issue: RuntimeIssueCandidateRow) {
@@ -208,6 +295,13 @@ export function projectIssueCandidateToConsoleFinding(
     implementationSteps: issue.implementationSteps,
     recommendedControls
   });
+  const suggestedPatchSnippet = buildRecommendedCodeDnaSnippet(
+    issue.title,
+    evidenceItems,
+    issue.recommendedActionSummary,
+    issue.implementationSteps,
+    recommendedControls
+  );
 
   return {
     id: issue.id,
@@ -236,7 +330,7 @@ export function projectIssueCandidateToConsoleFinding(
     gitlabIssueId: issue.publishedUrl ?? undefined,
     publishedIssueBodyMarkdown,
     whyItMatters: issue.whyItMatters ?? primaryFinding?.whyItMatters ?? undefined,
-    suggestedPatchCode,
+    suggestedPatchCode: suggestedPatchSnippet || suggestedPatchCode,
     expectedBehavior: primaryFinding?.failureMode ?? undefined,
     successCriteria: (issue.doneCriteria ?? []).join('\n') || undefined
   };
@@ -248,6 +342,13 @@ export function projectSnapshotToConsoleAudit(
   createdAt?: string
 ) {
   const severityCounts = countSeverities(snapshot.findings);
+  const projectedIssueCandidates = snapshot.issueCandidates.map((issue) =>
+    projectIssueCandidateToConsoleFinding(snapshot, issue)
+  );
+  const projectedRuntimeFindings =
+    projectedIssueCandidates.length === 0
+      ? snapshot.findings.map((finding) => projectRuntimeFindingToConsoleFinding(snapshot, finding))
+      : [];
   return {
     id: snapshot.auditRunId,
     projectId: snapshot.projectId,
@@ -259,9 +360,7 @@ export function projectSnapshotToConsoleAudit(
     highCount: severityCounts.high,
     mediumCount: severityCounts.medium,
     lowCount: severityCounts.low,
-    findings: snapshot.issueCandidates.map((issue) =>
-      projectIssueCandidateToConsoleFinding(snapshot, issue)
-    ),
+    findings: projectedIssueCandidates.length > 0 ? projectedIssueCandidates : projectedRuntimeFindings,
     runtimeEventTypes: snapshot.events.map((event) => event.eventType)
   };
 }
@@ -273,22 +372,52 @@ export function projectAuditListItemToConsoleAudit(
     branch: string;
     runStatus: string;
     createdAt: string;
+    findingCount?: number;
+    criticalCount?: number;
+    highCount?: number;
+    mediumCount?: number;
+    lowCount?: number;
     reviewableIssueCount: number;
     rejectedIssueCount: number;
   },
   projectName: string
 ) {
+  const hasSeverityCounts =
+    typeof item.criticalCount === 'number' ||
+    typeof item.highCount === 'number' ||
+    typeof item.mediumCount === 'number' ||
+    typeof item.lowCount === 'number';
+  const criticalCount = item.criticalCount ?? 0;
+  const highCount = item.highCount ?? 0;
+  const mediumCount = item.mediumCount ?? 0;
+  const lowCount = item.lowCount ?? 0;
+  const findingCount =
+    typeof item.findingCount === 'number'
+      ? item.findingCount
+      : criticalCount + highCount + mediumCount + lowCount;
+  const score = hasSeverityCounts
+    ? scoreFromSeverityCounts({
+        critical: criticalCount,
+        high: highCount,
+        medium: mediumCount,
+        low: lowCount
+      })
+    : scoreFromReviewQueueCounts(item.reviewableIssueCount, item.rejectedIssueCount);
+
   return {
     id: item.auditRunId,
     projectId: item.projectId,
     projectName,
-    score: scoreFromReviewQueueCounts(item.reviewableIssueCount, item.rejectedIssueCount),
+    score,
     status: runStatusToConsoleRunStatus(item.runStatus),
     date: item.createdAt,
-    criticalCount: 0,
-    highCount: item.reviewableIssueCount,
-    mediumCount: item.rejectedIssueCount,
-    lowCount: 0,
+    criticalCount,
+    highCount: hasSeverityCounts ? highCount : item.reviewableIssueCount,
+    mediumCount: hasSeverityCounts ? mediumCount : item.rejectedIssueCount,
+    lowCount,
+    reviewableCount: item.reviewableIssueCount,
+    rejectedCount: item.rejectedIssueCount,
+    findingCount,
     findings: [] as ConsoleFindingProjection[]
   };
 }

@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { z } from 'zod';
 
 const STATE_COOKIE = 'pm_integration_oauth_state';
 const NEXT_COOKIE = 'pm_integration_oauth_next';
@@ -52,7 +53,12 @@ export async function exchangeGitLabCode(input: {
     throw new Error(`GitLab token exchange failed: ${response.status} ${await response.text()}`);
   }
 
-  return response.json() as Promise<{ access_token: string; refresh_token?: string; expires_in?: number }>;
+  const GitLabTokenResponseSchema = z.object({
+    access_token: z.string(),
+    refresh_token: z.string().optional(),
+    expires_in: z.number().optional()
+  });
+  return GitLabTokenResponseSchema.parse(await response.json());
 }
 
 export async function fetchGitLabProfile(baseUrl: string, accessToken: string) {
@@ -62,10 +68,11 @@ export async function fetchGitLabProfile(baseUrl: string, accessToken: string) {
   if (!response.ok) {
     throw new Error(`GitLab profile fetch failed: ${response.status}`);
   }
-  return response.json() as Promise<{
-    id: number;
-    username: string;
-    name: string;
-    web_url?: string;
-  }>;
+  const GitLabProfileSchema = z.object({
+    id: z.number(),
+    username: z.string(),
+    name: z.string(),
+    web_url: z.string().optional()
+  });
+  return GitLabProfileSchema.parse(await response.json());
 }

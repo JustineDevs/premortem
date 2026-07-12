@@ -94,7 +94,7 @@ export interface AuditRun {
   projectId: string;
   projectName: string;
   score: number;
-  status: 'COMPLETED' | 'FAILED' | 'RUNNING' | 'PAUSED';
+  status: 'COMPLETED' | 'FAILED' | 'RUNNING' | 'PAUSED' | 'QUEUED' | 'CANCELLED';
   date: string;
   criticalCount: number;
   highCount: number;
@@ -118,6 +118,19 @@ export interface RiskCluster {
   projectIds: string[];
   /** Audit run that produced this cluster (for dashboard Open navigation). */
   auditRunId?: string;
+}
+
+export function isRiskClusterArray(value: unknown): value is RiskCluster[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        Boolean(item) &&
+        typeof item === 'object' &&
+        typeof (item as RiskCluster).id === 'string' &&
+        typeof (item as RiskCluster).name === 'string'
+    )
+  );
 }
 
 export type { ConsoleReviewActionValue } from '@premortem/domain';

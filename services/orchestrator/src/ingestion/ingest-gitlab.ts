@@ -5,12 +5,23 @@ import {
   fetchRepositoryTree,
   isGitLabMcpEnabled
 } from '@premortem/integrations';
+import { fetchVulnerabilityContext } from '@premortem/ingestion';
+import { searchPriorFindings } from '@premortem/integrations';
 
 import {
   buildSourceSnapshot,
   EMPTY_CI_HISTORY,
   type GitHistorySnapshot,
+  findAgentPromptPaths,
+  findAuthPatternPaths,
+  parseJsonIfPresent,
+  parseLockfilePackages,
+  parsePackageJsonDependencyNames,
+  parseTomlLikeConfig,
   parseOwnershipHints,
+  sampleText,
+  selectHighRiskSourceFilePaths,
+  selectPackageJsonPaths,
   selectSourceFilePaths,
   type IngestionBundle,
   summarizeTextPreview
@@ -66,6 +77,7 @@ export async function ingestGitLabProject(input: {
   externalProjectId: string;
   branch: string;
   commitSha?: string;
+  projectId?: string;
 }): Promise<IngestionBundle> {
   const treeEntries = await fetchRepositoryTree({
     baseUrl: input.baseUrl,
@@ -81,6 +93,13 @@ export async function ingestGitLabProject(input: {
   const source_files: IngestionBundle['source_files'] = [];
   const ownership_hints: IngestionBundle['ownership_hints'] = [];
   const git_history: GitHistorySnapshot[] = [];
+  const source_code_samples: Record<string, string> = {};
+  const auth_patterns: string[] = [];
+  let agent_registry: string | undefined;
+  const agent_prompts: Record<string, string> = {};
+  const mcp_config: Record<string, unknown> = {};
+  const packageDependencyNames = new Set<string>();
+  let pnpmLockContent: string | null = null;
 
   for (const fileName of CI_FILE_NAMES) {
     if (!repo_tree.includes(fileName)) continue;
@@ -112,11 +131,54 @@ export async function ingestGitLabProject(input: {
           filePath: fileName
         });
         source_files.push(buildSourceSnapshot(fileName, content, 'manifest'));
+        if (fileName === 'package.json') {
+          for (const dependencyName of parsePackageJsonDependencyNames(content)) {
+            packageDependencyNames.add(dependencyName);
+          }
+        }
+        if (fileName === 'pnpm-lock.yaml') {
+          pnpmLockContent = content;
+        }
       } catch {
         // skip unreadable manifest file
       }
     }
   }
+
+  for (const packageJsonPath of selectPackageJsonPaths(repo_tree)) {
+    if (packageJsonPath === 'package.json') continue;
+    try {
+      const content = await fetchRepositoryFileRaw({
+        baseUrl: input.baseUrl,
+        token: input.token,
+        externalProjectId: input.externalProjectId,
+        ref: input.branch,
+        filePath: packageJsonPath
+      });
+      for (const dependencyName of parsePackageJsonDependencyNames(content)) {
+        packageDependencyNames.add(dependencyName);
+      }
+      source_files.push(buildSourceSnapshot(packageJsonPath, content, 'manifest'));
+    } catch {
+      // skip unreadable package manifest
+    }
+  }
+
+  const exactLockfilePackages = pnpmLockContent ? parseLockfilePackages(pnpmLockContent) : [];
+  const filteredLockfilePackages =
+    packageDependencyNames.size > 0
+      ? exactLockfilePackages.filter((entry) => packageDependencyNames.has(entry.name))
+      : exactLockfilePackages;
+  const lockfile_packages = (
+    filteredLockfilePackages.length > 0 ? filteredLockfilePackages : exactLockfilePackages
+  ).slice(0, 500);
+  const vulnerability_context = await fetchVulnerabilityContext(lockfile_packages);
+  const prior_findings = input.projectId
+    ? await searchPriorFindings({
+        projectId: input.projectId,
+        query: 'recurring failure risk regression'
+      })
+    : [];
 
   for (const schemaName of SCHEMA_NAMES) {
     const matched = repo_tree.find((entry) => entry.endsWith(schemaName));
@@ -149,6 +211,79 @@ export async function ingestGitLabProject(input: {
       ownership_hints.push(...parseOwnershipHints(content, ownershipFile));
     } catch {
       // skip unreadable ownership file
+    }
+  }
+
+  for (const highRiskPath of selectHighRiskSourceFilePaths(repo_tree)) {
+    try {
+      const content = await fetchRepositoryFileRaw({
+        baseUrl: input.baseUrl,
+        token: input.token,
+        externalProjectId: input.externalProjectId,
+        ref: input.branch,
+        filePath: highRiskPath
+      });
+      source_code_samples[highRiskPath] = sampleText(content);
+    } catch {
+      // skip unreadable sample
+    }
+  }
+
+  for (const authPath of findAuthPatternPaths(repo_tree)) {
+    auth_patterns.push(authPath);
+  }
+  const uniqueAuthPatterns = [...new Set(auth_patterns)];
+  auth_patterns.splice(0, auth_patterns.length, ...uniqueAuthPatterns);
+
+  if (repo_tree.includes('.agents/registry.yaml')) {
+    try {
+      agent_registry = await fetchRepositoryFileRaw({
+        baseUrl: input.baseUrl,
+        token: input.token,
+        externalProjectId: input.externalProjectId,
+        ref: input.branch,
+        filePath: '.agents/registry.yaml'
+      });
+    } catch {
+      // skip unreadable agent registry
+    }
+  }
+
+  for (const promptPath of findAgentPromptPaths(repo_tree)) {
+    try {
+      const content = await fetchRepositoryFileRaw({
+        baseUrl: input.baseUrl,
+        token: input.token,
+        externalProjectId: input.externalProjectId,
+        ref: input.branch,
+        filePath: promptPath
+      });
+      agent_prompts[promptPath] = content;
+    } catch {
+      // skip unreadable prompt
+    }
+  }
+
+  for (const configFile of ['mcp.local.json', 'mcp.json', 'wrangler.toml']) {
+    if (!repo_tree.includes(configFile)) continue;
+    try {
+      const content = await fetchRepositoryFileRaw({
+        baseUrl: input.baseUrl,
+        token: input.token,
+        externalProjectId: input.externalProjectId,
+        ref: input.branch,
+        filePath: configFile
+      });
+      if (configFile.endsWith('.json')) {
+        const parsed = parseJsonIfPresent(content);
+        if (parsed) {
+          mcp_config[configFile] = parsed;
+        }
+      } else {
+        mcp_config[configFile] = parseTomlLikeConfig(content);
+      }
+    } catch {
+      // skip unreadable MCP config
     }
   }
 
@@ -244,6 +379,14 @@ export async function ingestGitLabProject(input: {
     ci_config,
     has_ci: pipeline_files.length > 0 || ci_history.pipelines.length > 0,
     package_manifests,
+    lockfile_packages,
+    vulnerability_context,
+    source_code_samples,
+    auth_patterns,
+    prior_findings,
+    agent_registry,
+    agent_prompts,
+    mcp_config,
     pipeline_files,
     services,
     apps,
@@ -261,6 +404,14 @@ export async function ingestGitLabProject(input: {
       docs,
       sourceFileCount: source_files.length,
       ownershipHintCount: ownership_hints.length,
+      lockfilePackageCount: lockfile_packages.length,
+      vulnerabilityHitCount: vulnerability_context.hits.length,
+      priorFindingCount: prior_findings.length,
+      sourceCodeSampleCount: Object.keys(source_code_samples).length,
+      authPatternCount: auth_patterns.length,
+      agentPromptCount: Object.keys(agent_prompts).length,
+      hasAgentRegistry: Boolean(agent_registry),
+      hasMcpConfig: Object.keys(mcp_config).length > 0,
       gitHistoryPathCount: git_history.length,
       gitHistoryCommitCount: git_history.reduce((count, entry) => count + entry.commits.length, 0),
       ciHistorySampled: ci_history.totals.sampled,

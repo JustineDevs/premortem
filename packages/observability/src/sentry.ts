@@ -3,17 +3,21 @@ import type { NodeOptions } from '@sentry/node';
 
 let sentryInitialized = false;
 let sentryModulePromise: Promise<typeof import('@sentry/node')> | undefined;
+let sentryInitPromise: Promise<void> | undefined;
 
 function shouldInitializeSentry() {
-  return (process.env.APP_ENV ?? process.env.NODE_ENV) === 'production';
+  return Boolean(process.env.SENTRY_DSN?.trim());
 }
 
 function loadSentryModule() {
-  sentryModulePromise ??= import('@sentry/node');
+  const loader = new Function('specifier', 'return import(specifier)') as (
+    specifier: string
+  ) => Promise<typeof import('@sentry/node')>;
+  sentryModulePromise ??= loader('@sentry/node');
   return sentryModulePromise;
 }
 
-function isCloudflareWorkerRuntime() {
+function isWorkerLikeRuntime() {
   return typeof (globalThis as { WebSocketPair?: unknown }).WebSocketPair !== 'undefined';
 }
 
@@ -37,38 +41,44 @@ export function getServerSentryInitOptions(serviceName: string): NodeOptions {
   };
 }
 
-export function initServerObservability(serviceName: string) {
+export async function initServerObservability(serviceName: string) {
   const dsn = process.env.SENTRY_DSN;
-  if (!dsn || sentryInitialized || isCloudflareWorkerRuntime() || !shouldInitializeSentry()) return;
+  if (!dsn) {
+    throw new Error('Sentry is required. Set SENTRY_DSN before starting the service.');
+  }
+  if (sentryInitialized || isWorkerLikeRuntime() || !shouldInitializeSentry()) return;
+  if (sentryInitPromise) return sentryInitPromise;
 
-  void loadSentryModule()
-    .then((Sentry) => {
-      const options = getServerSentryInitOptions(serviceName);
-      if (options.skipOpenTelemetrySetup) {
-        options.integrations = (integrations) =>
-          integrations.map((integration) => {
-            if (integration.name !== 'NodeFetch') return integration;
+  sentryInitPromise = (async () => {
+    const Sentry = await loadSentryModule();
+    const options = getServerSentryInitOptions(serviceName);
+    if (options.skipOpenTelemetrySetup) {
+      options.integrations = (integrations) =>
+        integrations.map((integration) => {
+          if (integration.name !== 'NodeFetch') return integration;
 
-            return Sentry.nativeNodeFetchIntegration({
-              spans: false,
-              breadcrumbs: true,
-              ignoreOutgoingRequests: gitLabFetchUrl
-            });
+          return Sentry.nativeNodeFetchIntegration({
+            spans: false,
+            breadcrumbs: true,
+            ignoreOutgoingRequests: gitLabFetchUrl
           });
-      }
+        });
+    }
 
-      Sentry.init(options);
-      sentryInitialized = true;
-    })
-    .catch((error) => {
-      console.error('initServerObservability.sentry-load-failed', error);
-    });
+    Sentry.init(options);
+    sentryInitialized = true;
+  })();
+
+  try {
+    await sentryInitPromise;
+  } finally {
+    sentryInitPromise = undefined;
+  }
 }
 
 export function captureServerException(error: unknown, context?: Record<string, unknown>) {
-  if (!process.env.SENTRY_DSN || isCloudflareWorkerRuntime() || !shouldInitializeSentry()) {
-    console.error('captureServerException', error, context);
-    return;
+  if (!process.env.SENTRY_DSN || isWorkerLikeRuntime() || !shouldInitializeSentry()) {
+    throw new Error('Sentry is required. Set SENTRY_DSN before capturing server exceptions.');
   }
 
   void loadSentryModule()
@@ -83,17 +93,29 @@ export function captureServerException(error: unknown, context?: Record<string, 
       });
     })
     .catch((loadError) => {
-      console.error('captureServerException.sentry-load-failed', loadError, error, context);
+      throw loadError;
     });
 }
 
 export function captureServerMessage(message: string, level: SeverityLevel = 'info') {
-  if (!process.env.SENTRY_DSN || isCloudflareWorkerRuntime() || !shouldInitializeSentry()) return;
+  if (!process.env.SENTRY_DSN || isWorkerLikeRuntime() || !shouldInitializeSentry()) {
+    throw new Error('Sentry is required. Set SENTRY_DSN before capturing server messages.');
+  }
   void loadSentryModule()
     .then((Sentry) => {
       Sentry.captureMessage(message, level);
     })
     .catch((error) => {
-      console.error('captureServerMessage.sentry-load-failed', error, message, level);
+      throw error;
     });
+}
+
+export async function probeSentryDelivery(
+  serviceName = 'premortem-observability-smoke',
+  message = 'premortem-observability-smoke'
+) {
+  await initServerObservability(serviceName);
+  const Sentry = await loadSentryModule();
+  Sentry.captureMessage(message, 'info');
+  await Sentry.flush(5000);
 }

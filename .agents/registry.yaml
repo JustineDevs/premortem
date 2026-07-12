@@ -73,6 +73,24 @@ agents:
       - integration_boundary
     merge_owner_priority: 90
 
+  - name: pr_diff_agent
+    description: Reviews merge request diffs for risky code changes before the full audit finishes.
+    prompt: .agents/prompts/pr-diff.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_source_code == true
+    input:
+      requires:
+        - merge_request
+        - diff_summary
+      optional:
+        - existing_issues
+        - orbit_context
+    output_schema: .agents/schemas/canonical-finding.schema.json
+    owns_categories:
+      - pr_diff_review
+    merge_owner_priority: 91
+
   - name: ci_regression_agent
     description: Detects flaky CI behavior, masked failures, and regression-prone delivery sequences.
     prompt: .agents/prompts/ci-regression.md
@@ -444,3 +462,72 @@ agents:
     owns_categories:
       - validation
     merge_owner_priority: 1000
+
+  - name: security_prediction_agent
+    description: Predicts undiscovered security vulnerabilities from code patterns, CWE classes, and EPSS-weighted dependency exploitation probability. No CVE required.
+    prompt: .agents/prompts/security-prediction.md
+    run_mode: always
+    enabled_if:
+      - repo.has_source_code == true
+    input:
+      requires:
+        - source_code_samples
+        - lockfile_packages
+      optional:
+        - vulnerability_context
+        - auth_patterns
+        - repo_tree
+    output_schema: .agents/schemas/finding.v1.json
+    owns_categories:
+      - security_prediction
+      - vulnerability_prediction
+    merge_owner_priority: 98
+    min_evidence_refs: 2
+    min_trigger_conditions: 2
+
+  - name: threat_model_agent
+    description: Applies STRIDE-per-Element to the inferred system architecture, producing structured threat findings for every applicable element-category pair.
+    prompt: .agents/prompts/threat-model.md
+    run_mode: always
+    enabled_if:
+      - repo.has_source_code == true
+    input:
+      requires:
+        - repo_tree
+        - services
+        - apps
+      optional:
+        - ci_config
+        - api_clients
+        - schemas
+        - auth_config
+        - source_code_samples
+    output_schema: .agents/schemas/finding.v1.json
+    owns_categories:
+      - threat_model
+      - stride
+    merge_owner_priority: 96
+    min_evidence_refs: 2
+    min_trigger_conditions: 2
+
+  - name: llm_security_agent
+    description: Predicts LLM-specific security threats (T1-T10) against the agentic architecture - indirect injection, MCP supply-chain, confused deputy, unbounded consumption, and related attack surfaces.
+    prompt: .agents/prompts/llm-security.md
+    run_mode: conditional
+    enabled_if:
+      - repo.has_agent_config == true
+    input:
+      requires:
+        - agent_registry
+        - agent_prompts
+        - mcp_config
+      optional:
+        - source_code_samples
+        - skill_files
+    output_schema: .agents/schemas/finding.v1.json
+    owns_categories:
+      - llm_security
+      - agentic_threat_model
+    merge_owner_priority: 97
+    min_evidence_refs: 2
+    min_trigger_conditions: 2

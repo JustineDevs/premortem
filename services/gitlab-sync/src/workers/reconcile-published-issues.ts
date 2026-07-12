@@ -1,20 +1,5 @@
 import { createReconciliationEvent, prisma, resolveGitLabCredentialsForProject } from '@premortem/db';
-import { gitLabAuthHeaders } from '@premortem/integrations';
-
-async function fetchGitLabIssue(baseUrl: string, token: string, projectId: string, issueIid: string) {
-  const response = await fetch(`${baseUrl}/api/v4/projects/${encodeURIComponent(projectId)}/issues/${issueIid}`, {
-    headers: gitLabAuthHeaders(token)
-  });
-
-  if (!response.ok) throw new Error(`GitLab issue fetch failed: ${response.status} ${await response.text()}`);
-  return response.json() as Promise<{
-    state?: string;
-    title?: string;
-    description?: string;
-    labels?: string[];
-    web_url?: string;
-  }>;
-}
+import { fetchGitLabIssue } from '@premortem/integrations';
 
 function detectDrift(
   local: {

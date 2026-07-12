@@ -57,6 +57,29 @@ export async function proxyPremortemApi(path: string, init?: RequestInit, reques
   }
 }
 
+export async function proxyPremortemApiRaw(path: string, init?: RequestInit) {
+  try {
+    const response = await fetch(`${getApiBaseUrl()}${path}`, {
+      ...init,
+      cache: 'no-store'
+    });
+
+    const requestId = response.headers.get('x-request-id');
+    const headers = new Headers(response.headers);
+    if (requestId) {
+      headers.set('x-request-id', requestId);
+    }
+
+    return new Response(response.body, {
+      status: response.status,
+      headers
+    });
+  } catch (error) {
+    console.error(error);
+    return bffErrorResponse(error, 'Upstream API request failed');
+  }
+}
+
 /** @deprecated Prefer proxyPremortemApi; kept for route compatibility. */
 export async function proxyPremortemApiOrUnauthorized(
   path: string,

@@ -9,8 +9,11 @@ on:
 
 permissions:
   contents: read
-  actions: read
   deployments: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
 
 jobs:
   deploy-api:
@@ -24,57 +27,72 @@ jobs:
       name: production-api
       url: https://api.jstn.site
     env:
-      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
-      DIRECT_URL: postgresql://ci:ci@127.0.0.1:5432/ci
+      ECS_HOST: ${{ secrets.ALIBABA_CLOUD_ECS_HOST }}
+      ECS_PORT: ${{ secrets.ALIBABA_CLOUD_ECS_SSH_PORT }}
+      ECS_USER: ${{ secrets.ALIBABA_CLOUD_ECS_SSH_USER }}
+      ECS_PRIVATE_KEY: ${{ secrets.ALIBABA_CLOUD_ECS_SSH_PRIVATE_KEY }}
+      ECS_APP_DIR: ${{ secrets.ALIBABA_CLOUD_ECS_APP_DIR }}
+      ECS_PUBLIC_URL: ${{ secrets.ALIBABA_CLOUD_ECS_PUBLIC_URL }}
+      ECS_DEPLOY_REF: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec turbo build --filter=@premortem/api... --concurrency=1
-      - name: Deploy API Worker (api.jstn.site)
-        working-directory: apps/api
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Validate ECS deploy inputs
         run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::warning::Worker deploy skipped: add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to GitHub repo secrets (see docs/releases/DEPLOY-PRODUCTION.md)."
-            exit 0
-          fi
-          attempts=0
-          max_attempts=4
-          while :; do
-            set +e
-            output="$(pnpm run deploy 2>&1)"
-            status=$?
-            set -e
-            printf '%s\n' "$output"
-            if [ "$status" -eq 0 ]; then
-              exit 0
-            fi
-            if printf '%s' "$output" | grep -Eq 'Authentication error|Cannot use the access token|Too many authentication failures|code: 10000|code: 9109|code: 10502'; then
-              echo "::warning::Cloudflare deploy skipped because the configured token cannot authenticate from this runner. Queue bootstrap and deploy remain wired; update the Cloudflare token permissions to restore live deploys."
-              exit 0
-            fi
-            if printf '%s' "$output" | grep -Eq 'Rate limited|code: 10429'; then
-              attempts=$((attempts + 1))
-              if [ "$attempts" -lt "$max_attempts" ]; then
-                sleep_seconds=$((attempts * 30))
-                echo "::warning::Cloudflare deploy rate-limited. Retrying in ${sleep_seconds}s (attempt ${attempts}/${max_attempts})."
-                sleep "$sleep_seconds"
-                continue
+          : "${ECS_HOST:?ALIBABA_CLOUD_ECS_HOST secret is required}"
+          : "${ECS_USER:?ALIBABA_CLOUD_ECS_SSH_USER secret is required}"
+          : "${ECS_PRIVATE_KEY:?ALIBABA_CLOUD_ECS_SSH_PRIVATE_KEY secret is required}"
+          ECS_PORT="${ECS_PORT:-22}"
+          ECS_APP_DIR="${ECS_APP_DIR:-/root/workspace/premortem}"
+          ECS_PUBLIC_URL="${ECS_PUBLIC_URL:-http://${ECS_HOST}:18787}"
+          {
+            echo "ECS_HOST=$ECS_HOST"
+            echo "ECS_PORT=$ECS_PORT"
+            echo "ECS_USER=$ECS_USER"
+            echo "ECS_APP_DIR=$ECS_APP_DIR"
+            echo "ECS_PUBLIC_URL=$ECS_PUBLIC_URL"
+            echo "ECS_DEPLOY_REF=$ECS_DEPLOY_REF"
+          } >>"$GITHUB_ENV"
+
+      - name: Install SSH key
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$ECS_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$ECS_PORT" -H "$ECS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy API on Alibaba Cloud ECS
+        run: |
+          ssh -p "$ECS_PORT" "$ECS_USER@$ECS_HOST" "bash -lc '
+            set -euo pipefail
+            cd \"${ECS_APP_DIR}\"
+            git fetch --all --prune
+            git checkout --detach \"${ECS_DEPLOY_REF}\"
+            docker build -f apps/api/Dockerfile -t premortem-api:prod .
+            docker rm -f premortem-api >/dev/null 2>&1 || true
+            docker run -d \
+              --name premortem-api \
+              --restart unless-stopped \
+              --env-file .env.production \
+              -p 127.0.0.1:18787:18787 \
+              premortem-api:prod
+            for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+              if curl -fsS http://127.0.0.1:18787/health >/tmp/premortem-api-health.json; then
+                cat /tmp/premortem-api-health.json
+                exit 0
               fi
-              echo "::error::Cloudflare deploy was rate-limited after ${max_attempts} attempts."
-              exit "$status"
-            fi
-            exit "$status"
-          done
+              sleep 5
+            done
+            echo \"API health check failed after deployment\" >&2
+            docker logs --tail 80 premortem-api >&2 || true
+            exit 1
+          '"
+
+      - name: Verify public API endpoint
+        run: |
+          curl -fsS "${ECS_PUBLIC_URL}/health" | tee /tmp/premortem-api-public-health.json
 
   deploy-web:
     needs: deploy-api
@@ -88,53 +106,39 @@ jobs:
       name: production-web
       url: https://premortem.jstn.site
     env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       NEXT_PUBLIC_APP_URL: https://premortem.jstn.site
       PREMORTEM_API_BASE_URL: https://api.jstn.site
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
       - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
+
       - run: pnpm install --frozen-lockfile
-      - name: Deploy Web Worker (premortem.jstn.site)
-        working-directory: apps/web
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Validate Vercel deploy inputs
         run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::warning::Web deploy skipped: add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to GitHub repo secrets."
-            exit 0
-          fi
-          attempts=0
-          max_attempts=4
-          while :; do
-            set +e
-            output="$(pnpm run deploy 2>&1)"
-            status=$?
-            set -e
-            printf '%s\n' "$output"
-            if [ "$status" -eq 0 ]; then
-              exit 0
-            fi
-            if printf '%s' "$output" | grep -Eq 'Authentication error|Cannot use the access token|Too many authentication failures|code: 10000|code: 9109|code: 10502'; then
-              echo "::warning::Web deploy skipped because the configured token cannot authenticate from this runner. Update the Cloudflare token permissions to restore live deploys."
-              exit 0
-            fi
-            if printf '%s' "$output" | grep -Eq 'Rate limited|code: 10429'; then
-              attempts=$((attempts + 1))
-              if [ "$attempts" -lt "$max_attempts" ]; then
-                sleep_seconds=$((attempts * 30))
-                echo "::warning::Cloudflare deploy rate-limited. Retrying in ${sleep_seconds}s (attempt ${attempts}/${max_attempts})."
-                sleep "$sleep_seconds"
-                continue
-              fi
-              echo "::error::Cloudflare deploy was rate-limited after ${max_attempts} attempts."
-              exit "$status"
-            fi
-            exit "$status"
-          done
+          : "${VERCEL_TOKEN:?VERCEL_TOKEN secret is required}"
+          : "${VERCEL_ORG_ID:?VERCEL_ORG_ID secret is required}"
+          : "${VERCEL_PROJECT_ID:?VERCEL_PROJECT_ID secret is required}"
+
+      - name: Deploy Web to Vercel
+        run: |
+          pnpm dlx vercel@latest deploy \
+            --prod \
+            --yes \
+            --token "$VERCEL_TOKEN"
+
+      - name: Smoke the production web entrypoint
+        run: |
+          curl -fsS https://premortem.jstn.site >/tmp/premortem-web-home.html
+          grep -q "Premortem" /tmp/premortem-web-home.html

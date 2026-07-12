@@ -31,5 +31,5 @@ export async function refreshGitLabOAuthToken(input: {
     throw new Error(`GitLab token refresh failed: ${response.status} ${body.slice(0, 240)}`);
   }
 
-  return response.json() as Promise<GitLabOAuthTokenResponse>;
+  return response.json();
 }

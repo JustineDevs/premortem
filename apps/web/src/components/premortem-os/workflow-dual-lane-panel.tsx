@@ -1,12 +1,12 @@
 'use client';
 
-import React from 'react';
 import { AUDIT_PARALLEL_LANES } from '@premortem/domain';
 
 import type { WorkflowAuditSnapshot } from './workflow-canvas.types';
 
 interface WorkflowDualLanePanelProps {
   auditSnapshot: WorkflowAuditSnapshot | null;
+  selectedAgentRunId?: string | null;
   compact?: boolean;
 }
 
@@ -29,8 +29,15 @@ function laneAgentsForSnapshot(
   );
 }
 
-export function WorkflowDualLanePanel({ auditSnapshot, compact = false }: WorkflowDualLanePanelProps) {
+export function WorkflowDualLanePanel({
+  auditSnapshot,
+  selectedAgentRunId = null,
+  compact = false
+}: WorkflowDualLanePanelProps) {
   const agentRuns = auditSnapshot?.agentRuns ?? [];
+  const selectedAgentRun = selectedAgentRunId
+    ? agentRuns.find((run) => run.id === selectedAgentRunId) ?? null
+    : null;
 
   return (
     <div
@@ -39,6 +46,19 @@ export function WorkflowDualLanePanel({ auditSnapshot, compact = false }: Workfl
       <p className="mb-2 font-mono text-[9px] font-bold uppercase tracking-wider text-[#8A958F]">
         Dual-lane parallel audit ({AUDIT_PARALLEL_LANES.length} lanes)
       </p>
+      {selectedAgentRun ? (
+        <div className="mb-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-[10px] leading-relaxed text-emerald-950">
+          <div className="font-mono text-[8px] font-bold uppercase tracking-[0.24em] text-emerald-700">
+            Selected agent
+          </div>
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <span className="truncate font-semibold text-emerald-950">{selectedAgentRun.agentName}</span>
+            <span className="rounded bg-white px-2 py-0.5 font-mono text-[8px] font-bold uppercase tracking-wide text-emerald-800">
+              {selectedAgentRun.status}
+            </span>
+          </div>
+        </div>
+      ) : null}
       <div className="grid grid-cols-2 gap-2">
         {AUDIT_PARALLEL_LANES.map((lane) => {
           const laneAgents = laneAgentsForSnapshot(lane.id, agentRuns);

@@ -10,12 +10,7 @@ services:
       - "${PREMORTEM_DOCKER_POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres -d premortem']
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
+      - ./scripts/docker/postgres-init.sql:/docker-entrypoint-initdb.d/00-citext.sql:ro
     restart: unless-stopped
 
   neo4j:
@@ -31,16 +26,6 @@ services:
       - "${PREMORTEM_DOCKER_NEO4J_BOLT_PORT:-7687}:7687"
     volumes:
       - neo4j_data:/data
-    healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1'
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
     restart: unless-stopped
 
 volumes:

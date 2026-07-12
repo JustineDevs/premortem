@@ -4,25 +4,29 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "node --import tsx src/local-server.ts",
-    "dev:worker": "wrangler dev",
-    "deploy": "node ../../scripts/cloudflare/run-worker-deploy.mjs",
-    "deploy:dev": "node ../../scripts/cloudflare/ensure-queues.mjs dev && wrangler deploy --env dev",
+    "dev": "tsx --tsconfig ../../tsconfig.base.json src/local-server.ts",
+    "start": "tsx --tsconfig ../../tsconfig.base.json src/server.ts",
+    "docker:build": "docker build -f apps/api/Dockerfile -t premortem-api .",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "bash ../../scripts/smoke/run-audit-flow.sh",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@premortem/domain": "workspace:*",
     "@premortem/db": "workspace:*",
     "@premortem/integrations": "workspace:*",
+    "@premortem/llm": "workspace:*",
     "@premortem/gitlab-sync": "workspace:*",
     "@premortem/orchestrator": "workspace:*",
     "@premortem/workflow": "workspace:*",
-    "@premortem/observability": "workspace:*"
+    "@premortem/observability": "workspace:*",
+    "stripe": "^22.2.0",
+    "hono": "^4.12.25",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
-    "wrangler": "^4.100.0"
+    "tsx": "^4.20.0"
   }
 }

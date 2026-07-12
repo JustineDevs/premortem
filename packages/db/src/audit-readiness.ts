@@ -1,14 +1,11 @@
 import { allowsLocalIngestBypass, allowsMockExecutor, isProductionMode } from '@premortem/domain';
 import { isLlmProviderTargetUsable, resolveLlmProviderTargets } from '@premortem/llm';
-import { gitLabAuthHeaders, getNangoToken } from '@premortem/integrations';
+import { fetchGitLabUser, gitLabAuthHeaders, getNangoToken } from '@premortem/integrations';
 
 import { prisma } from './client';
 import { fetchWithTimeout } from './fetch-with-timeout';
-import {
-  resolveGitLabCredentialsForOrganization,
-  resolveGitLabCredentialsForProject,
-  decodeStoredToken
-} from './provider-tokens';
+import { resolveGitLabCredentialsForOrganization, resolveGitLabCredentialsForProject } from './provider-tokens';
+import { decodeStoredToken } from './token-codec';
 import { getOrganizationLlmSettings } from './workspace';
 
 export class AuditReadinessError extends Error {
@@ -42,7 +39,11 @@ async function resolveGitLabTokenFromConnection(connection: {
     return null;
   }
 
-  return decodeStoredToken(connection.encryptedAccessToken);
+  try {
+    return decodeStoredToken(connection.encryptedAccessToken);
+  } catch {
+    return null;
+  }
 }
 
 async function verifyLlmConfiguration(organizationId: string) {
@@ -84,37 +85,25 @@ export async function verifyGitLabRepoReadAccess(input: {
     );
   }
 
-  return response.json() as Promise<{
-    permissions?: {
-      project_access?: { access_level?: number };
-      group_access?: { access_level?: number };
-    };
-  }>;
+  return response.json();
 }
 
-async function verifyGitLabMemberAccess(input: {
+async function verifyGitLabGroupMemberAccess(input: {
   baseUrl: string;
   token: string;
-  externalProjectId: string;
+  groupId: number;
 }) {
   const base = input.baseUrl.replace(/\/$/, '');
-  const encodedProject = encodeURIComponent(input.externalProjectId);
-
-  const userResponse = await fetchWithTimeout(`${base}/api/v4/user`, {
-    headers: gitLabAuthHeaders(input.token)
-  });
-  if (!userResponse.ok) return null;
-
-  const user = (await userResponse.json()) as { id?: number };
-  if (!user.id) return null;
+  const user = await fetchGitLabUser(base, input.token).catch(() => null);
+  if (!user?.id) return null;
 
   const memberResponse = await fetchWithTimeout(
-    `${base}/api/v4/projects/${encodedProject}/members/all/${user.id}`,
+    `${base}/api/v4/groups/${input.groupId}/members/all/${user.id}`,
     { headers: gitLabAuthHeaders(input.token) }
   );
   if (!memberResponse.ok) return null;
 
-  const member = (await memberResponse.json()) as { access_level?: number };
+  const member = await memberResponse.json();
   return member.access_level ?? 0;
 }
 
@@ -129,7 +118,17 @@ export async function verifyGitLabIssueWriteAccess(input: {
   let accessLevel = Math.max(projectAccess, groupAccess);
 
   if (accessLevel < 30) {
-    const memberAccess = await verifyGitLabMemberAccess(input);
+    const namespaceId =
+      project.namespace?.kind === 'group' && typeof project.namespace.id === 'number'
+        ? project.namespace.id
+        : null;
+    const memberAccess = namespaceId
+      ? await verifyGitLabGroupMemberAccess({
+          baseUrl: input.baseUrl,
+          token: input.token,
+          groupId: namespaceId
+        })
+      : null;
     if (memberAccess) {
       accessLevel = Math.max(accessLevel, memberAccess);
     }
@@ -147,66 +146,13 @@ export async function verifyGitLabIssueWriteAccess(input: {
   return project;
 }
 
-async function readGitLabPatScopes(baseUrl: string, token: string): Promise<string[] | null> {
-  const response = await fetchWithTimeout(`${baseUrl.replace(/\/$/, '')}/api/v4/personal_access_tokens/self`, {
-    headers: gitLabAuthHeaders(token)
-  });
-  if (!response.ok) return null;
-  const payload = (await response.json()) as { scopes?: string[] };
-  return payload.scopes ?? null;
-}
-
-/** Probes GitLab issue create + close on the target project (validates api scope, not just role). */
+/** Probes GitLab write access on the target project without mutating GitLab state. */
 export async function verifyGitLabIssueCreateAccess(input: {
   baseUrl: string;
   token: string;
   externalProjectId: string;
 }) {
-  await verifyGitLabIssueWriteAccess(input);
-
-  const base = input.baseUrl.replace(/\/$/, '');
-  const encodedProject = encodeURIComponent(input.externalProjectId);
-
-  const response = await fetchWithTimeout(`${base}/api/v4/projects/${encodedProject}/issues`, {
-    method: 'POST',
-    headers: {
-      ...gitLabAuthHeaders(input.token),
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify({
-      title: '[premortem-readiness] publish probe — safe to close',
-      description: 'Automated production-readiness probe. This issue is closed immediately.'
-    })
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    const scopes = await readGitLabPatScopes(base, input.token);
-    const scopeHint =
-      scopes && !scopes.includes('api') && scopes.includes('read_api')
-        ? ' Token has read_api only. Create a Personal Access Token with api scope (GitLab → Edit profile → Access Tokens).'
-        : '';
-    throw new AuditReadinessError(
-      `GitLab issue create probe failed (${response.status}). Use a token with api scope on ${input.externalProjectId}.${scopeHint} ${body.slice(0, 200)}`,
-      'gitlab_issue_create',
-      'GITLAB_TOKEN',
-      'gitlab'
-    );
-  }
-
-  const created = (await response.json()) as { iid?: number };
-  if (created.iid) {
-    await fetchWithTimeout(`${base}/api/v4/projects/${encodedProject}/issues/${created.iid}`, {
-      method: 'PUT',
-      headers: {
-        ...gitLabAuthHeaders(input.token),
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify({ state_event: 'close' })
-    });
-  }
-
-  return created;
+  return verifyGitLabIssueWriteAccess(input);
 }
 
 export async function probeGitLabIssueWriteAccess(input: {

@@ -34,13 +34,15 @@ export function prefersRealUserAuth(): boolean {
 }
 
 /** True when `.env.local` has enough credentials to run real ingest + LLM without mocks. */
-export function hasConfiguredRuntimeCredentials(): boolean {
-  const hasDb = Boolean(process.env.DATABASE_URL?.trim());
-  const hasGitlab = Boolean(process.env.GITLAB_TOKEN?.trim());
+export function hasConfiguredRuntimeCredentials(env: NodeJS.ProcessEnv = process.env): boolean {
+  const hasDb = Boolean(env.DATABASE_URL?.trim());
+  const hasGitlab = Boolean(env.GITLAB_TOKEN?.trim());
   const hasLlm = Boolean(
-    process.env.GEMINI_API_KEY?.trim() ||
-      process.env.OPENAI_API_KEY?.trim() ||
-      process.env.ANTHROPIC_API_KEY?.trim()
+    env.OPENROUTER_API_KEY?.trim() ||
+      env.OPEN_ROUTER_API_KEY?.trim() ||
+      env.GEMINI_API_KEY?.trim() ||
+      env.OPENAI_API_KEY?.trim() ||
+      env.ANTHROPIC_API_KEY?.trim()
   );
   return hasDb && hasGitlab && hasLlm;
 }
@@ -55,7 +57,9 @@ function hasSupabaseOAuthEnv(env: NodeJS.ProcessEnv): boolean {
 
 function hasLlmEnv(env: NodeJS.ProcessEnv): boolean {
   return Boolean(
-    env.GEMINI_API_KEY?.trim() ||
+    env.OPENROUTER_API_KEY?.trim() ||
+      env.OPEN_ROUTER_API_KEY?.trim() ||
+      env.GEMINI_API_KEY?.trim() ||
       env.OPENAI_API_KEY?.trim() ||
       env.ANTHROPIC_API_KEY?.trim()
   );
@@ -91,7 +95,7 @@ export function collectProductionBootEnvIssues(env: NodeJS.ProcessEnv = process.
   }
 
   if (!hasLlmEnv(env)) {
-    missing.push('GEMINI_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY');
+    missing.push('OPENROUTER_API_KEY or GEMINI_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY');
   }
 
   if (!hasGitLabEnv(env)) {
@@ -120,6 +124,13 @@ function envFlag(name: string): boolean | undefined {
   return undefined;
 }
 
+function resolveIngestBypassFlag(envName: string): boolean {
+  const flag = envFlag(envName);
+  if (flag === true) return true;
+  if (flag === false) return false;
+  return !hasConfiguredRuntimeCredentials();
+}
+
 export function validateProductionBootEnv(): string[] {
   if (!isProductionMode()) return [];
 
@@ -132,19 +143,13 @@ export function allowsMockExecutor(): boolean {
 
 export function allowsLocalIngestBypass(): boolean {
   if (isProductionMode()) return false;
-  const flag = envFlag('PREMORTEM_INGEST_LOCAL');
-  if (flag === true) return true;
-  if (flag === false) return false;
-  return !hasConfiguredRuntimeCredentials();
+  return resolveIngestBypassFlag('PREMORTEM_INGEST_LOCAL');
 }
 
 /** When set, local filesystem ingest wins even if GitLab credentials exist (dev-only). */
 export function allowsForceLocalIngest(): boolean {
   if (isProductionMode()) return false;
-  const flag = envFlag('PREMORTEM_FORCE_LOCAL_INGEST');
-  if (flag === true) return true;
-  if (flag === false) return false;
-  return !hasConfiguredRuntimeCredentials();
+  return resolveIngestBypassFlag('PREMORTEM_FORCE_LOCAL_INGEST');
 }
 
 export function allowsPublishDryRun(): boolean {
@@ -162,4 +167,29 @@ export function skipsPublishEntitlementCheck(): boolean {
 
 export function allowsReconcileDryRun(): boolean {
   return !isProductionMode() && process.env.PREMORTEM_RECONCILE_DRY_RUN === '1';
+}
+
+/** When `.env.local` is fully populated, prefer real GitLab + LLM paths for dev and smoke. */
+export function applyConfiguredDevDefaults(env: NodeJS.ProcessEnv = process.env) {
+  if (env.PREMORTEM_PRODUCTION_MODE === '1' || !hasConfiguredRuntimeCredentials(env)) {
+    return { mode: env.PREMORTEM_PRODUCTION_MODE === '1' ? 'production' : 'fixture' };
+  }
+
+  if (env.PREMORTEM_INGEST_LOCAL === undefined) delete env.PREMORTEM_INGEST_LOCAL;
+  if (env.PREMORTEM_FORCE_LOCAL_INGEST === undefined) delete env.PREMORTEM_FORCE_LOCAL_INGEST;
+  env.PREMORTEM_EXECUTOR ??= 'llm';
+  env.NEO4J_DISABLED ??= '0';
+
+  const hasSupabase = Boolean(
+    env.NEXT_PUBLIC_SUPABASE_URL?.trim() && env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim()
+  );
+  if (
+    hasSupabase &&
+    env.PREMORTEM_SMOKE_USE_FIXTURE !== '1' &&
+    env.PREMORTEM_AUTH_DISABLED !== '1'
+  ) {
+    delete env.PREMORTEM_AUTH_DISABLED;
+  }
+
+  return { mode: 'configured' };
 }

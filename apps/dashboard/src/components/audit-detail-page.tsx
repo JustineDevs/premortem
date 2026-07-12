@@ -1,4 +1,4 @@
-import type { AuditRunSnapshot } from '@premortem/orchestrator';
+import type { AuditRunSnapshot } from '@premortem/orchestrator/read-model';
 
 const pageStyle = {
   minHeight: '100vh',

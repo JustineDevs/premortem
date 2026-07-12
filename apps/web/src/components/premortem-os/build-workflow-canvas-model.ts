@@ -9,6 +9,7 @@ import type {
   CanvasNode,
   WorkflowAuditSnapshot
 } from './workflow-canvas.types';
+import { formatDateTime } from '@/lib/premortem-os/format';
 
 interface BuildCanvasModelInput {
   selectedProj: Project;
@@ -16,8 +17,6 @@ interface BuildCanvasModelInput {
   auditSnapshot: WorkflowAuditSnapshot | null;
   auditSummary?: unknown;
   runtimeEventTypes: string[];
-  isSimulating: boolean;
-  simulationIndex: number;
   providerConnected: boolean;
 }
 
@@ -28,8 +27,6 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
     auditSnapshot,
     auditSummary,
     runtimeEventTypes,
-    isSimulating,
-    simulationIndex,
     providerConnected
   } = input;
   const checkpoint = parseAuditCheckpoint(auditSummary);
@@ -63,9 +60,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
   const graphEdgeCount =
     auditSnapshot?.graphSnapshot?.edgeCount ?? matchingAudit?.graphSnapshot?.edgeCount ?? 0;
   const agentRunCount = auditSnapshot?.agentRuns?.length ?? matchingAudit?.agentRuns?.length ?? 0;
-  const auditTimestamp = matchingAudit?.date
-    ? new Date(matchingAudit.date).toLocaleString()
-    : 'No audit run yet';
+  const auditTimestamp = formatDateTime(matchingAudit?.date) || 'No audit run yet';
 
   const eventLogs = (eventTypes: string[]) =>
     (auditSnapshot?.events ?? [])
@@ -79,16 +74,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
   const fallbackLogs = (message: string) =>
     eventLogs([]).length > 0 ? eventLogs([]) : [message];
 
-  const getSimulatedStatus = (
-    stepIdx: number,
-    baseStatus: CanvasNode['status']
-  ): CanvasNode['status'] => {
-    if (isSimulating) {
-      if (simulationIndex > stepIdx) return 'completed';
-      if (simulationIndex === stepIdx) return 'running';
-      return 'queued';
-    }
-
+  const getNodeStatus = (stepIdx: number, baseStatus: CanvasNode['status']): CanvasNode['status'] => {
     if (checkpoint) {
       const checkpointPhase = checkpoint.phase;
       const checkpointStepIndex = Math.min(5, Math.max(0, phaseRank(checkpointPhase) - 1));
@@ -128,7 +114,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
       label: 'Connect Provider',
       type: 'input',
       description: 'Load repository metadata, branch context, and provider connectivity.',
-      status: getSimulatedStatus(0, connectState),
+      status: getNodeStatus(0, connectState),
       targetLinkTab: 'settings',
       metadata: {
         title: 'Provider Connectivity Gateway',
@@ -143,7 +129,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
         logs: fallbackLogs('Connect the provider in Settings before starting a traceable audit.'),
         systemNote:
           'Provider connection state comes from workspace integrations and project registry.',
-        promptVersion: 'N/A',
+        promptVersion: providerConnected ? 'integrations-ready' : 'provider-pending',
         agentConfig: 'ingestion-service',
         linkedFindingIds: []
       }
@@ -153,7 +139,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
       label: 'Analyze CI & Config',
       type: 'execution',
       description: 'Parse pipeline YAML profiles, package manifests, and Docker configuration.',
-      status: getSimulatedStatus(1, scannerState === 'failed' ? 'partial' : scannerState),
+      status: getNodeStatus(1, scannerState === 'failed' ? 'partial' : scannerState),
       targetLinkTab: 'projects',
       metadata: {
         title: 'Repository Ingestion and Graph Scan',
@@ -168,7 +154,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
           ? eventLogs(['GRAPH_BUILT', 'INGESTION_COMPLETED'])
           : fallbackLogs('Graph snapshot pending: run an audit to populate the runtime graph.'),
         systemNote: 'Graph metrics loaded from orchestrator graphSnapshot.',
-        promptVersion: auditSnapshot?.counts ? `events:${auditSnapshot.counts.events}` : 'N/A',
+        promptVersion: `events:${auditSnapshot?.counts?.events ?? (auditSnapshot?.events?.length ?? 0)}`,
         agentConfig: 'graph-builder',
         linkedFindingIds: []
       }
@@ -178,7 +164,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
       label: 'Run Specialist Swarm',
       type: 'execution',
       description: 'Run auditor and critic specialists over grounded repository context.',
-      status: getSimulatedStatus(2, scannerState),
+      status: getNodeStatus(2, scannerState),
       targetLinkTab: 'audits',
       metadata: {
         title: 'Specialist Swarm Orchestration',
@@ -192,7 +178,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
         ],
         outputs: [
           `${totalFindingsCount} findings`,
-          `Compliance score: ${matchingAudit?.score ?? selectedProj.lastAuditScore ?? 'N/A'}/100`
+          `Compliance score: ${matchingAudit?.score ?? selectedProj.lastAuditScore ?? 'pending'}/100`
         ],
         logs: eventLogs(['STARTED', 'COMPLETED', 'FAILED']).length
           ? eventLogs(['STARTED', 'COMPLETED', 'FAILED'])
@@ -209,7 +195,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
       label: 'Cluster Findings',
       type: 'synthesis',
       description: 'Deduplicate findings into clusters grounded by shared evidence and lineage.',
-      status: getSimulatedStatus(3, totalFindingsCount > 0 ? 'completed' : 'queued'),
+      status: getNodeStatus(3, totalFindingsCount > 0 ? 'completed' : 'queued'),
       targetLinkTab: 'dashboard',
       metadata: {
         title: 'Clustered Finding Rollup',
@@ -237,7 +223,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
       label: 'Reviewer Approval',
       type: 'review',
       description: 'Human approval gateway for confirm, dismiss, split, or edit decisions.',
-      status: getSimulatedStatus(4, reviewState),
+      status: getNodeStatus(4, reviewState),
       targetLinkTab: 'audits',
       metadata: {
         title: 'Reviewer Decision Board',
@@ -249,7 +235,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
           `Dismissed: ${matchingAudit?.findings?.filter((f) => f.status === 'DISMISSED').length || 0}`
         ],
         logs: [
-          `Audit ${matchingAudit?.id ?? 'N/A'} awaiting reviewer actions`,
+          `Audit ${matchingAudit?.id ?? 'pending'} awaiting reviewer actions`,
           resolvedFindings.length > 0
             ? `${resolvedFindings.length} findings resolved in runtime`
             : 'No reviewer actions recorded yet.'
@@ -265,7 +251,7 @@ export function buildWorkflowCanvasModel(input: BuildCanvasModelInput) {
       label: 'Publish Approved Issues',
       type: 'publish',
       description: 'Publish approved issue drafts back to the connected issue tracker.',
-      status: getSimulatedStatus(5, publishState),
+      status: getNodeStatus(5, publishState),
       targetLinkTab: 'audits',
       metadata: {
         title: 'Issue Publication Connector',

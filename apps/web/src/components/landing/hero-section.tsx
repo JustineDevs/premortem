@@ -81,7 +81,7 @@ export function HeroSection() {
         type="button"
         className="framer-mlk6bw"
         data-border="true"
-        aria-label="GitHub sign-in not enabled"
+        aria-label="GitHub sign-in roadmap"
         aria-disabled="true"
         disabled
         style={{

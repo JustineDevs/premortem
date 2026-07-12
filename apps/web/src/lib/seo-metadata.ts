@@ -218,7 +218,7 @@ export const canonicalDocsKeywords = dedupe([
   'reviewer console',
   'runtime guides',
   'queue workers',
-  'Cloudflare Workers',
+  'backend workers',
   'Supabase Auth',
   'auth troubleshooting',
   'integration troubleshooting'

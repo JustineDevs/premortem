@@ -5,8 +5,8 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 eval "$(
-  node <<'EOF'
-import { loadPremortemLocalEnv } from './scripts/load-local-env.mjs';
+  node --input-type=module --import tsx <<'EOF'
+const { loadPremortemLocalEnv } = (await import('./scripts/load-local-env.ts')).default;
 
 loadPremortemLocalEnv();
 console.log(`export DATABASE_URL=${JSON.stringify(process.env.DATABASE_URL ?? '')}`);
@@ -23,7 +23,7 @@ if [ -z "${DATABASE_URL:-}" ]; then
 fi
 
 eval "$(
-  node <<'EOF'
+  node --input-type=module --import tsx <<'EOF'
 const input = process.env.DATABASE_URL;
 if (!input) {
   process.exit(1);

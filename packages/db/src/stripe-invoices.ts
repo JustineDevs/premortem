@@ -46,19 +46,18 @@ export async function listStripeInvoicesForCustomer(
       return [];
     }
 
-    const payload = (await response.json()) as {
-      data?: Array<{
-        id?: string;
-        created?: number;
-        amount_paid?: number | string;
-        status?: string;
-        collection_method?: string;
-        hosted_invoice_url?: string | null;
-        invoice_pdf?: string | null;
-      }>;
-    };
+    const payload = await response.json();
+    const invoices: Array<{
+      id?: string;
+      created?: number;
+      amount_paid?: number | string;
+      status?: string;
+      collection_method?: string;
+      hosted_invoice_url?: string | null;
+      invoice_pdf?: string | null;
+    }> = Array.isArray(payload?.data) ? payload.data : [];
 
-    return (payload.data ?? [])
+    return invoices
       .filter((invoice) => Boolean(invoice?.id))
       .map((invoice) => ({
         id: invoice.id!,
@@ -74,4 +73,55 @@ export async function listStripeInvoicesForCustomer(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function resolveStripeCustomerIdFromSubscription(subscriptionId: string): Promise<string | null> {
+  const secretKey = resolveStripeSecretKey();
+  if (!secretKey) return null;
+  if (!subscriptionId.trim()) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2500);
+
+  try {
+    const response = await fetch(`https://api.stripe.com/v1/subscriptions/${subscriptionId.trim()}`, {
+      headers: {
+        Authorization: `Bearer ${secretKey}`
+      },
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as { customer?: string | { id?: string } | null };
+    if (typeof payload.customer === 'string') {
+      return payload.customer;
+    }
+    return payload.customer?.id ?? null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function listStripeInvoicesForBillingAccount(input: {
+  customerId?: string | null;
+  subscriptionId?: string | null;
+  limit?: number;
+}): Promise<StripeInvoiceSummary[]> {
+  const customerId = input.customerId?.trim();
+  if (customerId) {
+    return listStripeInvoicesForCustomer(customerId, input.limit ?? 10);
+  }
+
+  const subscriptionId = input.subscriptionId?.trim();
+  if (!subscriptionId) return [];
+
+  const resolvedCustomerId = await resolveStripeCustomerIdFromSubscription(subscriptionId);
+  if (!resolvedCustomerId) return [];
+
+  return listStripeInvoicesForCustomer(resolvedCustomerId, input.limit ?? 10);
 }

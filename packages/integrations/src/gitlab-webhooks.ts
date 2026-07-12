@@ -21,7 +21,7 @@ export async function listGitLabProjectHooks(input: {
     throw new Error(`GitLab hook list failed: ${response.status} ${await response.text()}`);
   }
 
-  return response.json() as Promise<GitLabProjectHook[]>;
+  return response.json();
 }
 
 /** Registers an Issue events hook when missing (idempotent). Requires Maintainer+ on the project. */
@@ -62,6 +62,6 @@ export async function ensureGitLabProjectIssueWebhook(input: {
     throw new Error(`GitLab hook create failed: ${response.status} ${await response.text()}`);
   }
 
-  const created = (await response.json()) as { id: number };
+  const created = await response.json();
   return { created: true as const, hookId: created.id };
 }

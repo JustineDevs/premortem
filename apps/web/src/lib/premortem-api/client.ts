@@ -1,6 +1,7 @@
 export type { AuditRunSnapshot as RuntimeAuditSnapshot } from '@premortem/orchestrator/read-model';
 
 import type { AuditRunSnapshot } from '@premortem/orchestrator/read-model';
+import { z } from 'zod';
 import { getApiBaseUrl } from '@/lib/runtime-config';
 import type { Project } from '@/lib/premortem-os/types';
 
@@ -34,7 +35,7 @@ async function apiFetch(path: string, init?: RequestInit, actorHeaders?: Runtime
     throw new RuntimeApiError(path, response.status, text);
   }
 
-  return response.json();
+  return z.unknown().parse(await response.json());
 }
 
 export async function fetchRuntimeProjects(actorHeaders?: RuntimeApiHeaders) {
@@ -55,6 +56,11 @@ export async function fetchRuntimeAudits(limit = 12, actorHeaders?: RuntimeApiHe
       branch: string;
       runStatus: string;
       createdAt: string;
+      findingCount: number;
+      criticalCount: number;
+      highCount: number;
+      mediumCount: number;
+      lowCount: number;
       reviewableIssueCount: number;
       rejectedIssueCount: number;
       latestEventType?: string;
@@ -85,6 +91,7 @@ export async function submitRuntimeAudit(input: {
   projectId: string;
   branch: string;
   commitSha?: string;
+  scanCodeSnippet?: string;
   triggeredById?: string;
   headers?: Record<string, string>;
 }) {
@@ -104,7 +111,11 @@ export async function submitRuntimeAudit(input: {
     throw new Error(`Audit submit failed (${response.status}): ${text}`);
   }
 
-  return response.json() as Promise<{ auditRunId: string; runStatus: string }>;
+  const SubmissionResponseSchema = z.object({
+    auditRunId: z.string(),
+    runStatus: z.string()
+  });
+  return SubmissionResponseSchema.parse(await response.json());
 }
 
 export async function approveRuntimeIssue(
@@ -258,13 +269,16 @@ export async function pollRuntimeAuditUntilComplete(
   actorHeaders?: RuntimeApiHeaders
 ) {
   const startedAt = Date.now();
+  let attempt = 0;
   while (Date.now() - startedAt < timeoutMs) {
     const snapshot = await fetchRuntimeAuditSnapshot(auditRunId, actorHeaders, { hydrate: false });
     if (snapshot.runStatus === 'completed') return snapshot;
     if (snapshot.runStatus === 'failed') {
       throw new Error(`Audit ${auditRunId} failed`);
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const delay = Math.min(1000 * 2 ** attempt, 10_000);
+    attempt += 1;
+    await new Promise((resolve) => setTimeout(resolve, delay));
   }
   throw new Error(`Timed out waiting for audit ${auditRunId}`);
 }

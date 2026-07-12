@@ -1,6 +1,6 @@
 import type { ZodType } from 'zod';
 
-export type LlmProvider = 'google' | 'openai' | 'anthropic' | 'qwen';
+export type LlmProvider = 'google' | 'openai' | 'anthropic' | 'qwen' | 'openrouter';
 
 export interface LlmMessage {
   role: 'system' | 'user' | 'assistant';

@@ -1,0 +1,1 @@
+ALTER TYPE "OrgPlan" ADD VALUE IF NOT EXISTS 'scale';

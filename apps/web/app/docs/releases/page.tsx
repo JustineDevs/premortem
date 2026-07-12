@@ -36,7 +36,7 @@ export default function ReleasesDocPage() {
             items={[
               'pnpm run smoke:production-readiness: public onboarding, publish flow, and Neo4j graph checks.',
               'pnpm run smoke:full-app-stress: marketing, docs, auth, billing guards, and audits.',
-              'Stripe test catalog wired (Premortem Starter / Premortem Growth price IDs).'
+              'Stripe test catalog wired (Premortem Starter / Premortem Growth / Premortem Scale price IDs).'
             ]}
           />
           <MarketingDocCodeBlock

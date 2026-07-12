@@ -1,14 +1,15 @@
-# Production deployment (Cloudflare + Supabase)
+# Production deployment (Vercel + Alibaba Cloud ECS + Supabase + Kubernetes packaging)
 
 Premortem v0.1.0 splits runtime across:
 
 | Surface | Target | Route |
 | --- | --- | --- |
-| Web (Next.js BFF + marketing + `/app`) | Cloudflare Pages | `premortem.jstn.site` |
-| API (audit orchestration) | Cloudflare Worker | `api.jstn.site` |
+| Web (Next.js BFF + marketing + `/app`) | Vercel | `premortem.jstn.site` |
+| API (audit orchestration) | Alibaba Cloud ECS | `api.jstn.site` |
 | Database + Auth | Supabase | Postgres pooler + Auth |
 | Graph | Neo4j Aura or self-hosted | Bolt URI |
 | Billing | Stripe | Checkout + webhooks |
+| Portable backend packaging | Kubernetes manifests | `deploy/kubernetes/base` |
 
 ## 1. GitHub → CI
 
@@ -21,48 +22,35 @@ pnpm typecheck
 pnpm build
 ```
 
-## 2. API Worker deploy
+## 2. API backend deploy
 
-After CI succeeds, `.github/workflows/deploy.yml` deploys `apps/api` when these GitHub secrets exist:
-
-- `CLOUDFLARE_API_TOKEN` (Workers + Queues edit)
-- `CLOUDFLARE_ACCOUNT_ID`
+After CI succeeds, `.github/workflows/deploy.yml` deploys `apps/api` on Alibaba Cloud ECS when the backend environment and deployment target are configured.
 
 Manual deploy:
 
 ```bash
 pnpm --filter @premortem/api build
-cd apps/api && pnpm run deploy
+node scripts/deploy/alibaba-cloud-ecs.ts
 ```
 
-Wrangler 4 requires Node.js 22 or newer for the deploy step.
+The deployment helper prints the ECS instance metadata when it can reach the Alibaba Cloud metadata service and falls back to the configured host or public URL when metadata is unavailable.
 
-The API deploy wrapper also loads repo-root `.env.production` and sets `CLOUDFLARE_ENV=production` before `wrangler deploy` runs.
+Set backend secrets in the ECS runtime environment or deployment system, not in git:
 
-Set Worker secrets in Cloudflare (not in git):
+- `DATABASE_URL`
+- `DIRECT_URL`
+- `GEMINI_API_KEY`
+- `GITLAB_CLIENT_ID`
+- `GITLAB_CLIENT_SECRET`
+- `NEO4J_URI`
+- `NEO4J_PASSWORD`
+- `SUPABASE_SERVICE_ROLE_KEY`
 
-```bash
-cd apps/api
-npx wrangler secret put DATABASE_URL --env production
-npx wrangler secret put DIRECT_URL --env production
-npx wrangler secret put GEMINI_API_KEY --env production
-npx wrangler secret put GITLAB_CLIENT_ID --env production
-npx wrangler secret put GITLAB_CLIENT_SECRET --env production
-npx wrangler secret put NEO4J_URI --env production
-npx wrangler secret put NEO4J_PASSWORD --env production
-npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --env production
-```
+The same API runtime is packaged for Kubernetes in `deploy/kubernetes/base`. That package uses the production Dockerfiles in `apps/api/Dockerfile` and `services/agent-builder/Dockerfile`, so ECS and Kubernetes share the same container build contract.
 
-Production queue bootstrap runs during deploy when `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are present. If you need to provision them manually, run:
+## 3. Web (Vercel)
 
-```bash
-cd apps/api
-node ../../scripts/cloudflare/ensure-queues.mjs production
-```
-
-## 3. Web (Cloudflare Pages)
-
-Connect the GitHub repo in **Workers & Pages → Create → Pages → Connect to Git**.
+Connect the GitHub repo in Vercel.
 
 Recommended monorepo settings:
 
@@ -71,11 +59,11 @@ Recommended monorepo settings:
 | Production branch | `main` |
 | Root directory | `/` (repo root) |
 | Build command | `pnpm install --frozen-lockfile && pnpm run build:pages` |
-| Build output | Use Cloudflare **Next.js** preset (dashboard auto-detect) or OpenNext adapter when added |
+| Build output | Next.js build output detected by Vercel |
 
-The `pnpm run build:pages` wrapper loads repo-root `.env.production` and sets `CLOUDFLARE_ENV=production` before the Pages build starts.
+The `pnpm run build:pages` wrapper loads repo-root `.env.production` before the Vercel build starts.
 
-Pages environment variables (production):
+Frontend environment variables (production):
 
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_URL`, `SUPABASE_ANON_KEY` as server-side fallbacks accepted by the web runtime
@@ -83,12 +71,47 @@ Pages environment variables (production):
 - `PREMORTEM_API_BASE_URL` = `https://api.jstn.site`
 - `DATABASE_URL`, `DIRECT_URL` (server routes / Prisma)
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
-- `STRIPE_PRICE_PRO`, `STRIPE_PRICE_TEAM`, `STRIPE_PRICE_PRO_ANNUAL`, `STRIPE_PRICE_TEAM_ANNUAL`
+- `STRIPE_PRICE_PRO`, `STRIPE_PRICE_TEAM`, `STRIPE_PRICE_SCALE`, `STRIPE_PRICE_PRO_ANNUAL`, `STRIPE_PRICE_TEAM_ANNUAL`, `STRIPE_PRICE_SCALE_ANNUAL`
 - `SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`
 - `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`
 - Do **not** set `PREMORTEM_AUTH_DISABLED` in production
 
-Stripe webhook endpoint: `https://premortem.jstn.site/api/stripe/webhook`
+Stripe webhook endpoint: `https://premortem.jstn.site/api/webhooks/stripe`
+
+## 3.5 Kubernetes package
+
+The checked-in Kubernetes manifests are the portable backend deployment path.
+
+```bash
+kubectl apply -k deploy/kubernetes/base
+```
+
+The manifests include:
+
+- namespace and service account
+- API Deployment, Service, PDB, and HPA
+- agent-builder Deployment, Service, and PDB
+- default-deny network policies with explicit egress rules
+- ingress for `api.jstn.site`
+
+This package is intended for cluster-backed backend deployments and local cluster validation. The frontend stays on Vercel.
+
+### 3.6 Helm package
+
+The same backend package is also available as a production-ready Helm chart in `deploy/helm/premortem`.
+
+```bash
+helm template premortem deploy/helm/premortem
+```
+
+Use the chart when you need values-driven overrides for:
+
+- ingress host and TLS wiring
+- replica counts and rolling update settings
+- resource quotas and limit ranges
+- optional secret creation for local or bootstrap installs
+
+By default, the chart expects an existing Kubernetes Secret named `premortem-runtime-secrets` so cluster operators can keep production credentials outside the chart release.
 
 ## 4. Stripe (verified)
 
@@ -96,12 +119,15 @@ Test catalog in Stripe (account `acct_1S3ChjRvbSAmdYDO`):
 
 - **Premortem Starter** → maps to `pro` plan prices
 - **Premortem Growth** → maps to `team` plan prices
+- **Premortem Scale** → maps to `scale` plan prices
 
-Ensure `.env.local` / Pages secrets use the active price IDs (`price_1Tgyw2…`, `price_1Tgyw3…`, etc.).
+Ensure `.env.local` / Vercel secrets use the active price IDs (`price_1Tgyw2…`, `price_1Tgyw3…`, etc.).
 
-Test mode (`sk_test_…`): Checkout Sessions work; plan PATCH bypasses Stripe for local dev when `shouldUseStripeCheckout()` is false.
+Test mode (`sk_test_…`): Checkout Sessions work when the catalog and webhook secrets are configured. The same checkout and portal flows are exercised in test mode, so local smoke catches real billing behavior.
 
 Live mode (`sk_live_…`): Checkout + webhooks drive entitlements.
+
+Customer Portal: the billing settings surface opens Stripe Billing Portal so users can manage payment methods, invoices, and cancellations without support intervention.
 
 ## 5. Pre-flight smokes (run against production URL)
 
@@ -123,7 +149,7 @@ pnpm run smoke:production-readiness   # with PREMORTEM_PRODUCTION_MODE=1
 ## 6. Tag release
 
 ```bash
-git tag -a v0.1.0 -m "Premortem v0.1.0 — GitLab-first stranger self-serve"
+git tag -a v0.1.0 -m "Premortem v0.1.0 - GitLab-first stranger self-serve"
 git push origin v0.1.0
 ```
 

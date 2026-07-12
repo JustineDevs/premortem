@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { LandingShell } from '../landing-shell';
-import { mainPanelBorder } from '../landing-panel-border';
+import { MarketingPageFrame } from '../marketing-page-frame';
 import { MarketingDocSidebar } from './marketing-doc-sidebar';
 
 type MarketingDocsRouteLayoutProps = {
@@ -12,16 +12,12 @@ type MarketingDocsRouteLayoutProps = {
 export function MarketingDocsRouteLayout({ children }: MarketingDocsRouteLayoutProps) {
   return (
     <LandingShell>
-      <div
-        className="framer-1vn47iw landing-route-panel landing-doc-panel"
-        data-border="true"
-        style={mainPanelBorder}
-      >
+      <MarketingPageFrame variant="docs">
         <div className="landing-doc-layout">
           <MarketingDocSidebar />
           <div className="landing-doc-main">{children}</div>
         </div>
-      </div>
+      </MarketingPageFrame>
     </LandingShell>
   );
 }

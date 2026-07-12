@@ -104,13 +104,26 @@ export async function listUserNotifications(input: {
   organizationId?: string;
   limit?: number;
 }) {
+  const limit = Math.min(Math.max(input.limit ?? 25, 1), 100);
   const notifications = await prisma.notification.findMany({
     where: {
       userId: input.userId,
       ...(input.organizationId ? { organizationId: input.organizationId } : {})
     },
     orderBy: { createdAt: 'desc' },
-    take: input.limit ?? 25
+    take: limit,
+    select: {
+      id: true,
+      organizationId: true,
+      projectId: true,
+      kind: true,
+      title: true,
+      body: true,
+      url: true,
+      readAt: true,
+      metadata: true,
+      createdAt: true
+    }
   });
 
   return notifications.map((notification) => ({

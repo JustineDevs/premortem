@@ -20,6 +20,18 @@
       "@premortem/db": [
         "packages/db/src"
       ],
+      "@premortem/db/actor-context": [
+        "packages/db/src/actor-context"
+      ],
+      "@premortem/db/supabase-auth": [
+        "packages/db/src/supabase-auth"
+      ],
+      "@premortem/db/workspace-auth": [
+        "packages/db/src/workspace-auth"
+      ],
+      "@premortem/db/notifications": [
+        "packages/db/src/notifications"
+      ],
       "@premortem/domain": [
         "packages/domain/src"
       ],
@@ -65,6 +77,12 @@
       "@premortem/security": [
         "packages/security/src"
       ],
+      "@premortem/ingestion": [
+        "packages/ingestion/src"
+      ],
+      "@premortem/graphiti": [
+        "packages/graphiti/ts"
+      ],
       "@premortem/gitlab-sync": [
         "services/gitlab-sync/src"
       ],
@@ -73,6 +91,9 @@
       ],
       "@premortem/storage": [
         "packages/storage/src"
+      ],
+      "@premortem/skills": [
+        "packages/skills/src"
       ],
       "@premortem/billing": [
         "packages/billing/src"

@@ -6,8 +6,8 @@ You are the Issue Memory Agent for Premortem.
 Connect current risk signals to prior incidents, recurring issue classes, and historical remediation failures so the system does not rediscover the same lessons repeatedly.
 
 ## Inputs
-- issue_history
-- optional: prior_findings
+- prior_findings
+- existing_issues
 - optional: incident_notes
 
 ## What to inspect

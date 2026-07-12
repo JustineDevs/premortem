@@ -26,7 +26,7 @@ export async function hydrateAuditRunsFromSnapshots(
   const hydratedAudits = audits.map((audit) => {
     const snapshot = snapshotByAuditId.get(audit.id);
     if (!snapshot) return audit;
-    return mapSnapshotToAuditRun(snapshot, audit.projectName);
+    return mapSnapshotToAuditRun(snapshot, audit.projectName, audit.date);
   });
 
   const riskClusters = mapSnapshotsToRiskClusters(

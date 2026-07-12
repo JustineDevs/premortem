@@ -3,12 +3,14 @@
   "entry": [
     "apps/*/app/**/*.{ts,tsx,js,jsx,mjs,cjs}",
     "apps/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    "apps/web/scripts/**/*.{ts,tsx,js,jsx,mjs,cjs}",
     "packages/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
     "scripts/**/*.{ts,tsx,js,jsx,mjs,cjs}",
     "services/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}"
   ],
   "project": [
     "apps/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    "apps/web/scripts/**/*.{ts,tsx,js,jsx,mjs,cjs}",
     "packages/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
     "scripts/**/*.{ts,tsx,js,jsx,mjs,cjs}",
     "services/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}"
@@ -25,7 +27,8 @@
     ".turbo/**",
     ".vscode/**",
     ".wrangler/**",
-    ".cloudflare-pages/**",
+    "**/.wrangler/**",
+    "packages/graphiti/.venv/**",
     "apps/web/.open-next/**",
     "apps/web/src/vendor/**",
     "fixtures/**",
@@ -41,9 +44,10 @@
     "apps/web/src/content/**/*": ["files", "exports", "types"],
     "apps/web/src/lib/**/*": ["files", "exports", "types"],
     "apps/web/src/hooks/use-canonical-feature-flag.ts": ["files"],
+    "**/*.test.ts": ["files", "exports", "types"],
     "packages/db/src/**/*": ["files", "exports", "types"],
     "packages/db/scripts/**/*": ["files"],
-    "packages/db/supabase-database-url.mjs": ["files"],
+    "packages/db/src/supabase-database-url.ts": ["files"],
     "packages/domain/src/**/*": ["files", "exports", "types"],
     "packages/observability/src/**/*": ["files", "exports", "types"],
     "packages/observability/phoenix-evaluators/premortem-audit-mission.eval.ts": ["files"],
@@ -51,20 +55,22 @@
     "packages/security/src/**/*": ["files", "exports", "types"],
     "packages/integrations/scripts/**/*": ["files"],
     "packages/integrations/test/**/*": ["files"],
+    "services/agent-builder/src/gitlab-duo-audit.ts": ["files"],
     "services/gitlab-sync/src/**/*": ["files", "exports", "types"],
     "services/graph-builder/src/**/*": ["files", "exports", "types"],
     "services/agent-builder/src/server.ts": ["files"],
     "services/orchestrator/src/**/*": ["files", "exports", "types"]
   },
   "ignoreDependencies": [
-    "@opennextjs/cloudflare",
     "@premortem/llm",
     "@premortem/notifications",
     "@premortem/observability",
+    "@premortem/db",
     "@radix-ui/react-slot",
     "class-variance-authority"
   ],
   "ignoreBinaries": [
-    "ngrok"
+    "ngrok",
+    "tsx"
   ]
 }

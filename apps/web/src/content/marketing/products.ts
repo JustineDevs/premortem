@@ -20,7 +20,7 @@ export const productsPage = {
     { feature: 'Reviewer console at /app backed by runtime API', status: 'included' as ScopeStatus },
     { feature: 'Review approve/reject/publish APIs + CLI', status: 'included' as ScopeStatus },
     { feature: 'Audit detail, lineage, and workflow canvas trace', status: 'included' as ScopeStatus },
-    { feature: 'Session middleware on /app (Supabase OAuth)', status: 'included' as ScopeStatus },
+    { feature: 'Session middleware on /app (Supabase Auth)', status: 'included' as ScopeStatus },
     { feature: 'GitHub provider parity', status: 'roadmap' as ScopeStatus },
     { feature: 'Bitbucket provider parity', status: 'roadmap' as ScopeStatus },
     { feature: 'Azure DevOps provider parity', status: 'roadmap' as ScopeStatus },

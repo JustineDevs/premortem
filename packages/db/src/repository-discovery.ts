@@ -1,9 +1,9 @@
 import {
   listAccessibleGitLabProjects,
   parseGitLabExternalProjectId,
-  resolveGitLabProjectByReference,
-  type GitLabDiscoveredProject
+  resolveGitLabProjectByReference
 } from '@premortem/integrations';
+import { resolveGitHubProjectByReference } from '@premortem/integrations';
 import type { Prisma } from '@prisma/client';
 
 import {
@@ -14,24 +14,33 @@ import {
 import { assertCanRegisterProject, EntitlementError } from './entitlements';
 import { ensureGitLabAccessTokenForConnection, GitLabTokenError } from './provider-tokens';
 import { prisma } from './client';
-import { slugifyProjectNameForRepo } from './repositories';
+import { invalidateProjectListCache, slugifyProjectNameForRepo } from './repositories';
+import { resolveGitLabApiBaseUrl } from './gitlab-url';
+import { invalidateWorkspaceBundleCache } from './workspace';
 
 const LOCAL_TRANSACTION_OPTIONS = {
   maxWait: 10_000,
   timeout: 60_000
 } as const;
 
-export type DiscoveredRepositoryRow = GitLabDiscoveredProject & {
+type DiscoveredRepositoryBase = {
+  externalProjectId: string;
+  name: string;
+  repoUrl: string;
+  defaultBranch: string;
+  visibility: 'private' | 'internal' | 'public' | 'unknown';
+  accessLevel: number;
+  canRead: boolean;
+  canWriteIssues: boolean;
+};
+
+export type DiscoveredRepositoryRow = DiscoveredRepositoryBase & {
   enabled: boolean;
   projectId: string | null;
   source: 'discovered' | 'public_watch' | 'manual';
 };
 
 export { GitLabTokenError };
-
-function resolveGitLabApiBaseUrl(baseUrl?: string | null) {
-  return (baseUrl ?? process.env.GITLAB_BASE_URL ?? 'https://gitlab.com').replace(/\/$/, '');
-}
 
 async function getGitLabConnectionForOrg(input: {
   organizationId: string;
@@ -117,6 +126,8 @@ export async function listDiscoveredRepositories(input: {
         discoveredAt: new Date().toISOString()
       } as Prisma.JsonObject
     }
+  }).finally(() => {
+    invalidateWorkspaceBundleCache(input.organizationId);
   });
 
   return {
@@ -129,7 +140,8 @@ async function createProjectFromDiscovery(input: {
   organizationId: string;
   connectionId?: string | null;
   createdById?: string;
-  discovered: GitLabDiscoveredProject;
+  provider: 'gitlab' | 'github';
+  discovered: DiscoveredRepositoryBase;
   source: 'discovered' | 'public_watch';
   publishCapable: boolean;
 }) {
@@ -138,12 +150,12 @@ async function createProjectFromDiscovery(input: {
     source: input.source,
     discoveredAt: new Date().toISOString(),
     publishCapable: input.publishCapable,
-    gitlabAccessLevel: input.discovered.accessLevel
+    providerAccessLevel: input.discovered.accessLevel
   };
 
   const existing = await prisma.project.findFirst({
     where: {
-      provider: 'gitlab',
+      provider: input.provider,
       externalProjectId: input.discovered.externalProjectId
     },
     select: { metadata: true }
@@ -152,14 +164,14 @@ async function createProjectFromDiscovery(input: {
   const project = await prisma.project.upsert({
     where: {
       provider_externalProjectId: {
-        provider: 'gitlab',
+        provider: input.provider,
         externalProjectId: input.discovered.externalProjectId
       }
     },
     create: {
       organizationId: input.organizationId,
       connectionId: input.connectionId ?? null,
-      provider: 'gitlab',
+      provider: input.provider,
       externalProjectId: input.discovered.externalProjectId,
       name: input.discovered.name,
       slug,
@@ -174,6 +186,7 @@ async function createProjectFromDiscovery(input: {
     update: {
       organizationId: input.organizationId,
       connectionId: input.connectionId ?? null,
+      provider: input.provider,
       name: input.discovered.name,
       repoUrl: input.discovered.repoUrl,
       defaultBranch: input.discovered.defaultBranch,
@@ -195,6 +208,9 @@ async function createProjectFromDiscovery(input: {
     update: {},
     create: { projectId: project.id }
   });
+
+  invalidateProjectListCache(input.organizationId);
+  invalidateWorkspaceBundleCache(input.organizationId);
 
   return project;
 }
@@ -270,6 +286,7 @@ export async function enableDiscoveredRepositories(input: {
         organizationId: input.organizationId,
         connectionId: connection.id,
         createdById: input.createdById,
+        provider: 'gitlab',
         discovered,
         source: 'discovered',
         publishCapable
@@ -325,6 +342,9 @@ export async function disableOrganizationProject(input: {
   return prisma.project.update({
     where: { id: project.id },
     data: { status: 'disconnected' }
+  }).finally(() => {
+    invalidateProjectListCache(input.organizationId);
+    invalidateWorkspaceBundleCache(input.organizationId);
   });
 }
 
@@ -367,9 +387,41 @@ export async function registerPublicGitLabProject(input: {
   const project = await createProjectFromDiscovery({
     organizationId: input.organizationId,
     createdById: input.createdById,
+    provider: 'gitlab',
     discovered,
     source: 'public_watch',
     publishCapable: false
+  });
+
+  return project;
+}
+
+export async function registerPublicGitHubProject(input: {
+  organizationId: string;
+  repoUrlOrPath: string;
+  createdById?: string;
+}) {
+  const discovered = await resolveGitHubProjectByReference(input.repoUrlOrPath);
+
+  const existing = await prisma.project.findFirst({
+    where: {
+      organizationId: input.organizationId,
+      provider: 'github',
+      externalProjectId: discovered.externalProjectId
+    }
+  });
+
+  if (!existing) {
+    await assertCanRegisterProject(input.organizationId);
+  }
+
+  const project = await createProjectFromDiscovery({
+    organizationId: input.organizationId,
+    createdById: input.createdById,
+    provider: 'github',
+    discovered,
+    source: 'public_watch',
+    publishCapable: discovered.canWriteIssues
   });
 
   return project;

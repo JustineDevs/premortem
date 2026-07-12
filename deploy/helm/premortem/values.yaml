@@ -1,0 +1,90 @@
+global:
+  namespace: premortem
+  webUrl: https://premortem.jstn.site
+  apiUrl: https://api.jstn.site
+  runtimeMode: kubernetes
+
+api:
+  image:
+    repository: premortem-api
+    tag: prod
+    pullPolicy: IfNotPresent
+  replicas: 2
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+agentBuilder:
+  image:
+    repository: premortem-agent-builder
+    tag: prod
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  host: api.jstn.site
+  tls:
+    enabled: true
+    secretName: premortem-api-tls
+
+resources:
+  quota:
+    enabled: true
+    requestsCpu: "4"
+    requestsMemory: 6Gi
+    limitsCpu: "8"
+    limitsMemory: 12Gi
+    pods: "12"
+    pvc: "2"
+  limitRange:
+    enabled: true
+    defaultRequestCpu: 250m
+    defaultRequestMemory: 256Mi
+    defaultCpu: "1"
+    defaultMemory: 1Gi
+    minCpu: 100m
+    minMemory: 128Mi
+    maxCpu: "4"
+    maxMemory: 4Gi
+
+networkPolicy:
+  enabled: true
+
+serviceAccount:
+  name: premortem-runtime
+
+existingSecret: premortem-runtime-secrets
+createSecret: false
+secrets:
+  DATABASE_URL: replace-me
+  DIRECT_URL: replace-me
+  SUPABASE_SERVICE_ROLE_KEY: replace-me
+  GEMINI_API_KEY: replace-me
+  GITLAB_CLIENT_ID: replace-me
+  GITLAB_CLIENT_SECRET: replace-me
+  PHOENIX_API_KEY: replace-me
+  PHOENIX_COLLECTOR_ENDPOINT: replace-me
+  LANGFUSE_PUBLIC_KEY: replace-me
+  LANGFUSE_SECRET_KEY: replace-me
+  SENTRY_DSN: replace-me
+  POSTHOG_API_KEY: replace-me
+  STRIPE_SECRET_KEY: replace-me
+  STRIPE_WEBHOOK_SECRET: replace-me

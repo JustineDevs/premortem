@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import Script from 'next/script';
-import { useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { createBrowserClient } from '@supabase/ssr';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, type FormEvent, type MouseEvent } from 'react';
+import Image from 'next/image';
 
 import { authLinks, authProviderHref, type AuthMode } from '@/lib/auth-links';
+import { type AuthProviderBootstrap } from '@/lib/auth/auth-provider-bootstrap';
+import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { marketingLinks } from '@/lib/marketing-links';
 
 import { assets } from '../landing/assets';
@@ -19,24 +20,18 @@ type AuthProviderFormProps = {
   description: string;
   alternateHref: string;
   alternateLabel: string;
+  initialBootstrap: AuthProviderBootstrap;
 };
 
-type AuthStatusPayload = {
-  configured?: boolean;
-  authenticated?: boolean;
-  mode?: string;
-  captchaEnabled?: boolean;
-  captchaConfigured?: boolean;
-  captchaSiteKey?: string | null;
-  supabaseUrl?: string | null;
-  supabaseAnonKey?: string | null;
+type AuthProviderUiState = {
+  agreedToTerms: boolean;
+  termsNotice: boolean;
+  isSigningIn: boolean;
 };
 
-const notices: Record<string, { message: string; tone: 'warn' | 'error' }> = {
-  'github-soon': {
-    message: 'GitHub sign-in is not enabled in this release. Use GitLab to continue.',
-    tone: 'warn'
-  },
+type NoticeTone = 'warn' | 'error' | 'success';
+
+const notices: Record<string, { message: string; tone: NoticeTone }> = {
   config: {
     message:
       'Supabase sign-in is not available in this environment. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY, or the SUPABASE_URL and SUPABASE_ANON_KEY fallback pair, then restart.',
@@ -44,116 +39,88 @@ const notices: Record<string, { message: string; tone: 'warn' | 'error' }> = {
   },
   oauth: {
     message:
-      'Could not start GitLab sign-in. Check Supabase GitLab provider settings and that your GitLab app enables the read_user scope.',
+      'Could not start social sign-in. Check your Supabase provider settings and the configured OAuth scopes.',
     tone: 'error'
+  },
+  coming_soon: {
+    message: 'GitHub sign-in is on the roadmap.',
+    tone: 'warn'
   },
   callback: {
     message:
       'Supabase sign-in could not be completed. The external code exchange failed or the callback host did not match the configured origin. Try again from the same browser session.',
     tone: 'error'
   },
-  captcha: {
-    message:
-      'Complete the Cloudflare Turnstile widget to continue.',
+  terms: {
+    message: 'Accept the Privacy Policy and Terms of Service to continue.',
     tone: 'warn'
   },
-  'captcha-config': {
-    message:
-      'Cloudflare Turnstile is not configured in this environment. Add both NEXT_PUBLIC_TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY in Cloudflare Pages or Workers, then restart.',
-    tone: 'error'
+  'email-magic-link-sent': {
+    message: 'Magic link sent. Check your email to continue.',
+    tone: 'success'
+  },
+  'email-password-success': {
+    message: 'Email sign-in succeeded. Redirecting to your workspace.',
+    tone: 'success'
+  },
+  'email-confirmation-sent': {
+    message: 'Account created. Check your email to confirm and finish signing in.',
+    tone: 'success'
   }
 };
 
-type TurnstileWidget = {
-  render(container: HTMLElement, options: {
-    sitekey: string;
-    action?: string;
-    callback?: (token: string) => void;
-    'expired-callback'?: () => void;
-    'error-callback'?: (message?: string) => void;
-  }): string;
-  reset(widgetId: string): void;
-  remove(widgetId: string): void;
-};
+function readFragmentNotice(): string | null {
+  if (typeof window === 'undefined') return null;
 
-declare global {
-  interface Window {
-    turnstile?: TurnstileWidget;
-  }
+  const fragment = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
+  if (!fragment) return null;
+
+  const params = new URLSearchParams(fragment);
+  return params.get('error_description') ?? params.get('error') ?? null;
 }
 
-const turnstileAction = 'turnstile-spin-v1';
+function getEmailRedirectUrl(nextPath: string, mode: AuthMode) {
+  const url = new URL(authLinks.callback, window.location.origin);
+  url.searchParams.set('next', nextPath);
+  url.searchParams.set('mode', mode);
+  return url.toString();
+}
 
 export function AuthProviderForm({
   mode,
   title,
   description,
   alternateHref,
-  alternateLabel
+  alternateLabel,
+  initialBootstrap
 }: AuthProviderFormProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const noticeKey = searchParams?.get('notice') ?? searchParams?.get('error');
   const redirectNotice = noticeKey ? notices[noticeKey] : null;
   const callbackDetail = searchParams?.get('error_description') ?? searchParams?.get('error_code');
-  const [fragmentNotice, setFragmentNotice] = useState<string | null>(null);
-  const [runtimeConfigured, setRuntimeConfigured] = useState<boolean | null>(null);
-  const [authMode, setAuthMode] = useState<string | null>(null);
-  const [captchaEnabled, setCaptchaEnabled] = useState(false);
-  const [captchaConfigured, setCaptchaConfigured] = useState(false);
-  const [captchaSiteKey, setCaptchaSiteKey] = useState('');
-  const [supabaseUrl, setSupabaseUrl] = useState('');
-  const [supabaseAnonKey, setSupabaseAnonKey] = useState('');
-  const [captchaNotice, setCaptchaNotice] = useState(false);
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
-  const [termsNotice, setTermsNotice] = useState(false);
-  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [fragmentNotice] = useState(readFragmentNotice);
+  const localFixtureMode = initialBootstrap.mode === 'local_fixture';
+  const [uiState, setUiState] = useState<AuthProviderUiState>({
+    agreedToTerms: false,
+    termsNotice: false,
+    isSigningIn: false
+  });
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [authNotice, setAuthNotice] = useState<{ message: string; tone: NoticeTone } | null>(
+    null
+  );
+  const githubEnabled = false;
   const nextPath = searchParams?.get('next') ?? authLinks.defaultNext;
-  const turnstileSiteKey = captchaSiteKey;
-  const turnstileReady = captchaEnabled && captchaConfigured && Boolean(turnstileSiteKey);
-  const turnstileNotice = captchaEnabled && !captchaConfigured ? notices['captcha-config'] : null;
-  const captchaVisibleNotice = captchaNotice ? notices.captcha : turnstileNotice;
-
-  useEffect(() => {
-    void fetch('/api/auth/status')
-      .then((response) => response.json())
-      .then((payload: AuthStatusPayload) => {
-        setRuntimeConfigured(Boolean(payload.configured));
-        setAuthMode(payload.mode ?? null);
-        setCaptchaEnabled(Boolean(payload.captchaEnabled));
-        setCaptchaConfigured(Boolean(payload.captchaConfigured));
-        setCaptchaSiteKey(payload.captchaSiteKey?.trim() ?? '');
-        setSupabaseUrl(payload.supabaseUrl?.trim() ?? '');
-        setSupabaseAnonKey(payload.supabaseAnonKey?.trim() ?? '');
-      })
-      .catch(() => {
-        setRuntimeConfigured(false);
-        setAuthMode(null);
-        setCaptchaEnabled(false);
-        setCaptchaConfigured(false);
-        setCaptchaSiteKey('');
-        setSupabaseUrl('');
-        setSupabaseAnonKey('');
+  const supabase = localFixtureMode
+    ? null
+    : createSupabaseBrowserClient({
+        url: initialBootstrap.supabaseUrl,
+        anonKey: initialBootstrap.supabaseAnonKey
       });
-  }, []);
-
-  const browserSupabaseClient = useMemo(() => {
-    if (!supabaseUrl || !supabaseAnonKey) {
-      return null;
-    }
-
-    return createBrowserClient(supabaseUrl, supabaseAnonKey);
-  }, [supabaseAnonKey, supabaseUrl]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const fragment = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
-    if (!fragment) return;
-
-    const params = new URLSearchParams(fragment);
-    const description = params.get('error_description') ?? params.get('error') ?? null;
-    setFragmentNotice(description);
-  }, []);
 
   const notice =
     redirectNotice ??
@@ -163,14 +130,14 @@ export function AuthProviderForm({
           tone: 'error' as const
         }
       : null) ??
-    (termsNotice ? { message: 'Accept the Privacy Policy and Terms of Service to continue.', tone: 'warn' as const } : null) ??
-    (captchaVisibleNotice
+    (uiState.termsNotice
       ? {
-          message: captchaVisibleNotice.message,
-          tone: captchaVisibleNotice.tone
+          message: 'Accept the Privacy Policy and Terms of Service to continue.',
+          tone: 'warn' as const
         }
       : null) ??
-    (runtimeConfigured === false ? notices.config : null);
+    authNotice ??
+    null;
 
   const resolvedNotice =
     noticeKey === 'callback' && callbackDetail
@@ -180,91 +147,156 @@ export function AuthProviderForm({
         }
       : notice;
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    if (runtimeConfigured === null) {
-      event.preventDefault();
-      return;
+  function requireTermsIfNeeded() {
+    if (!uiState.agreedToTerms) {
+      setUiState((current) => ({ ...current, termsNotice: true }));
+      return false;
     }
+    return true;
+  }
 
-    if (!agreedToTerms) {
-      event.preventDefault();
-      setTermsNotice(true);
-      return;
-    }
-
-    if (authMode === 'local_fixture') {
-      return;
-    }
-
+  async function handleProviderClick(provider: 'gitlab' | 'github', event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
-    setIsSigningIn(true);
 
-    if (captchaEnabled) {
-      if (!captchaConfigured) {
-        setIsSigningIn(false);
-        setCaptchaConfigured(false);
-        return;
-      }
+    if (!requireTermsIfNeeded()) {
+      return;
+    }
 
-      const formData = new FormData(event.currentTarget);
-      const token = formData.get('cf-turnstile-response');
-      if (typeof token !== 'string' || !token.trim()) {
-        setIsSigningIn(false);
-        setCaptchaNotice(true);
-        return;
-      }
+    if (provider === 'github' && !githubEnabled) {
+      return;
+    }
 
-      const verification = await fetch('/api/auth/turnstile', {
+    setUiState((current) => ({ ...current, isSigningIn: true }));
+
+    try {
+      const form = event.currentTarget.form;
+      const response = await fetch(authProviderHref(provider, mode, nextPath), {
         method: 'POST',
         headers: {
-          'content-type': 'application/json'
+          accept: 'application/json'
         },
-        body: JSON.stringify({ turnstileToken: token.trim() })
+        body: form ? new FormData(form) : undefined
       });
 
-      if (!verification.ok) {
-        setIsSigningIn(false);
-        const payload = (await verification.json().catch(() => null)) as
-          | { reason?: string }
-          | null;
-        if (payload?.reason === 'missing-config') {
-          setCaptchaNotice(false);
-          setCaptchaConfigured(false);
-        } else {
-          setCaptchaNotice(true);
-        }
-        return;
+      const payload = (await response.json().catch(() => null)) as
+        | { url?: string; error?: string }
+        | null;
+
+      if (!response.ok || !payload?.url) {
+        throw new Error(payload?.error ?? 'Unable to start sign-in.');
       }
-    }
 
-    if (!browserSupabaseClient) {
-      setIsSigningIn(false);
-      return;
-    }
-
-    const callbackParams = new URLSearchParams({ next: nextPath, mode });
-    const redirectTo = `${window.location.origin}${authLinks.callback}?${callbackParams.toString()}`;
-    const { error } = await browserSupabaseClient.auth.signInWithOAuth({
-      provider: 'gitlab',
-      options: {
-        redirectTo,
-        scopes: 'read_user'
-      }
-    });
-
-    if (error) {
-      setIsSigningIn(false);
-      const failureUrl = new URL(authLinks.login, window.location.origin);
-      failureUrl.searchParams.set('next', nextPath);
-      failureUrl.searchParams.set('mode', mode);
-      failureUrl.searchParams.set('error', 'oauth');
-      window.location.assign(failureUrl.toString());
+      window.location.assign(payload.url);
+    } catch (error) {
+      setAuthNotice({
+        message:
+          error instanceof Error ? error.message : 'Unable to start provider sign-in.',
+        tone: 'error'
+      });
+    } finally {
+      setUiState((current) => ({ ...current, isSigningIn: false }));
     }
   }
 
-  function resetCaptchaNotice() {
-    if (captchaNotice) {
-      setCaptchaNotice(false);
+  async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthNotice(null);
+
+    if (mode === 'signup' && password !== confirmPassword) {
+      setAuthNotice({ message: 'Passwords do not match.', tone: 'error' });
+      return;
+    }
+
+    if (!requireTermsIfNeeded()) {
+      return;
+    }
+
+    if (!supabase) {
+      router.replace(nextPath);
+      return;
+    }
+
+    setEmailBusy(true);
+    try {
+      if (mode === 'signup') {
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: {
+            emailRedirectTo: getEmailRedirectUrl(nextPath, mode)
+          }
+        });
+
+        if (error) {
+          throw error;
+        }
+
+        if (data.session) {
+          router.replace(nextPath);
+          return;
+        }
+
+        setAuthNotice(notices['email-confirmation-sent']);
+        setPassword('');
+        setConfirmPassword('');
+        setEmail('');
+        return;
+      }
+
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setAuthNotice(notices['email-password-success']);
+      router.replace(nextPath);
+    } catch (error) {
+      setAuthNotice({
+        message: error instanceof Error ? error.message : 'Unable to sign in with email.',
+        tone: 'error'
+      });
+    } finally {
+      setEmailBusy(false);
+    }
+  }
+
+  async function handleMagicLinkClick() {
+    setAuthNotice(null);
+
+    if (!requireTermsIfNeeded()) {
+      return;
+    }
+
+    if (!supabase) {
+      router.replace(nextPath);
+      return;
+    }
+
+    setEmailBusy(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim(),
+        options: {
+          emailRedirectTo: getEmailRedirectUrl(nextPath, mode)
+        }
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setAuthNotice(notices['email-magic-link-sent']);
+    } catch (error) {
+      setAuthNotice({
+        message: error instanceof Error ? error.message : 'Unable to send a magic link.',
+        tone: 'error'
+      });
+    } finally {
+      setEmailBusy(false);
     }
   }
 
@@ -290,89 +322,178 @@ export function AuthProviderForm({
           </aside>
         ) : null}
 
-        <form className="landing-auth-form" action={authProviderHref('gitlab', mode, nextPath)} method="POST" onSubmit={handleSubmit}>
-          {turnstileReady ? (
-            <div className="landing-auth-captcha">
-              <Script
-                id={`turnstile-${mode}`}
-                src="https://challenges.cloudflare.com/turnstile/v0/api.js"
-                strategy="afterInteractive"
-                onLoad={resetCaptchaNotice}
-              />
-              <div
-                className="cf-turnstile"
-                data-sitekey={turnstileSiteKey}
-                data-action={turnstileAction}
-                data-theme="light"
-              />
-            </div>
-          ) : null}
-
-          <div className="landing-auth-card__providers">
-            <button
-              type="submit"
-              className="landing-auth-provider landing-auth-provider--gitlab"
-              data-border="true"
-              aria-disabled={
-                runtimeConfigured === null ||
-                !agreedToTerms ||
-                isSigningIn ||
-                (captchaEnabled && !captchaConfigured)
-              }
-              disabled={runtimeConfigured === null || isSigningIn || (captchaEnabled && !captchaConfigured)}
-              onClick={() => setCaptchaNotice(false)}
-            >
-              <GitLabLogo />
-              <span style={{ ...navLink, color: 'rgb(255, 255, 255)' }}>
-                {isSigningIn ? 'Redirecting' : 'Continue with GitLab'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="landing-auth-provider landing-auth-provider--github"
-              data-border="true"
-              disabled
-              aria-disabled="true"
-            >
-              <img
-                src={assets.githubIcon}
-                alt=""
-                width={19}
-                height={19}
-                aria-hidden
-                className="landing-auth-provider__github-icon"
-              />
-              <span style={{ ...navLink, color: 'rgb(255, 255, 255)' }}>GitHub not enabled</span>
-            </button>
-          </div>
-
-          <label className="landing-auth-terms landing-auth-terms--plain">
+        <section className="landing-auth-section" aria-label="Provider sign-in">
+          <form className="landing-auth-form" onSubmit={(event) => event.preventDefault()}>
             <input
-              type="checkbox"
-              className="landing-auth-terms__input"
-              aria-label="I agree to the Privacy Policy and Terms of Service."
-              checked={agreedToTerms}
-              onChange={(event) => {
-                setAgreedToTerms(event.target.checked);
-                if (event.target.checked) {
-                  setTermsNotice(false);
-                }
-              }}
+              type="hidden"
+              name="termsAccepted"
+              value={uiState.agreedToTerms ? '1' : '0'}
             />
-            <span className="landing-auth-terms__copy" style={body14}>
-              I agree to the{' '}
-              <Link href={marketingLinks.privacy} className="landing-route-link">
-                Privacy Policy
-              </Link>{' '}
-              and{' '}
-              <Link href={marketingLinks.terms} className="landing-route-link">
-                Terms of Service
-              </Link>
-              .
-            </span>
-          </label>
-        </form>
+            <div className="landing-auth-card__providers">
+              <button
+                type="button"
+                className="landing-auth-provider landing-auth-provider--gitlab"
+                data-border="true"
+                aria-disabled={uiState.isSigningIn || !uiState.agreedToTerms}
+                disabled={uiState.isSigningIn || !uiState.agreedToTerms}
+                onClick={(event) => {
+                  void handleProviderClick('gitlab', event);
+                }}
+              >
+                <GitLabLogo />
+                <span style={{ ...navLink, color: 'rgb(255, 255, 255)' }}>
+                  {uiState.isSigningIn ? 'Redirecting' : 'Continue with GitLab'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className="landing-auth-provider landing-auth-provider--github"
+                data-border="true"
+                aria-disabled={uiState.isSigningIn || !uiState.agreedToTerms || !githubEnabled}
+                disabled={uiState.isSigningIn || !uiState.agreedToTerms || !githubEnabled}
+                title={githubEnabled ? undefined : 'GitHub repository integration is roadmap.'}
+                style={githubEnabled ? undefined : { opacity: 1 }}
+                onClick={(event) => {
+                  void handleProviderClick('github', event);
+                }}
+              >
+                <Image
+                  src={assets.githubIcon}
+                  alt=""
+                  width={19}
+                  height={19}
+                  aria-hidden
+                  className="landing-auth-provider__github-icon"
+                />
+                <span style={{ ...navLink, color: 'rgb(255, 255, 255)' }}>
+                  {uiState.isSigningIn ? 'Redirecting' : 'Continue with GitHub'}
+                </span>
+              </button>
+
+            </div>
+
+          </form>
+        </section>
+
+        <div className="landing-auth-divider" aria-hidden="true">
+          <span>Or use email</span>
+        </div>
+
+        <section className="landing-auth-section" aria-label="Email sign-in">
+          <form className="landing-auth-form" onSubmit={handlePasswordSubmit}>
+            <div className="landing-auth-fields">
+              <label className="landing-auth-field">
+                <span className="landing-auth-field__label" style={body14}>
+                  Email address
+                </span>
+                <input
+                  type="email"
+                  name="email"
+                  autoComplete="email"
+                  className="landing-auth-input"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  required
+                />
+              </label>
+
+              <label className="landing-auth-field">
+                <span className="landing-auth-field__label" style={body14}>
+                  Password
+                </span>
+                <input
+                  type="password"
+                  name="password"
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                  className="landing-auth-input"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  minLength={8}
+                  required
+                />
+              </label>
+
+              {mode === 'signup' ? (
+                <label className="landing-auth-field">
+                  <span className="landing-auth-field__label" style={body14}>
+                    Confirm password
+                  </span>
+                  <input
+                    type="password"
+                    name="confirmPassword"
+                    autoComplete="new-password"
+                    className="landing-auth-input"
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    minLength={8}
+                    required
+                  />
+                </label>
+              ) : null}
+            </div>
+
+            <div className="landing-auth-actions">
+              <button
+                type="submit"
+                className="landing-auth-submit"
+                disabled={emailBusy || !uiState.agreedToTerms}
+                data-border="true"
+              >
+                <span style={{ ...navLink, color: 'rgb(255, 255, 255)' }}>
+                  {emailBusy
+                    ? 'Please wait'
+                    : mode === 'signup'
+                      ? 'Create password account'
+                      : 'Sign in with password'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className="landing-auth-submit landing-auth-submit--secondary"
+                disabled={emailBusy || !uiState.agreedToTerms}
+                data-border="true"
+                onClick={() => {
+                  void handleMagicLinkClick();
+                }}
+              >
+                <span style={{ ...navLink, color: 'rgb(17, 17, 17)' }}>
+                  {emailBusy ? 'Please wait' : 'Send magic link'}
+                </span>
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <label className="landing-auth-terms landing-auth-terms--plain">
+          <input
+            type="checkbox"
+            className="landing-auth-terms__input"
+            aria-label="I agree to the Privacy Policy and Terms of Service."
+            checked={uiState.agreedToTerms}
+            onChange={(event) => {
+              setUiState((current) => ({
+                ...current,
+                agreedToTerms: event.target.checked
+              }));
+              if (event.target.checked) {
+                setUiState((current) => ({ ...current, termsNotice: false }));
+              }
+            }}
+          />
+          <span className="landing-auth-terms__copy" style={body14}>
+            I agree to the{' '}
+            <Link href={marketingLinks.privacy} className="landing-route-link">
+              Privacy Policy
+            </Link>{' '}
+            and{' '}
+            <Link href={marketingLinks.terms} className="landing-route-link">
+              Terms of Service
+            </Link>
+            .
+          </span>
+        </label>
 
         <footer className="landing-auth-card__footer">
           <Link href={alternateHref} className="landing-route-link">

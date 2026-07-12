@@ -1,3 +1,7 @@
+import { assertCoreObservabilityConfigured } from '@premortem/observability/boot';
+import { initServerObservability } from '@premortem/observability/server';
+
 export async function register() {
-  void process.env.NEXT_RUNTIME;
+  assertCoreObservabilityConfigured();
+  await initServerObservability('premortem-web');
 }

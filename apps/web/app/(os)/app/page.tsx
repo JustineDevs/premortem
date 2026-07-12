@@ -1,7 +1,7 @@
-import { PremortemOsApp } from '@/components/premortem-os/premortem-os-app';
+import { AppConsoleClient } from './app-console-client';
 
 export const dynamic = 'force-dynamic';
 
 export default function AppConsolePage() {
-  return <PremortemOsApp />;
+  return <AppConsoleClient />;
 }

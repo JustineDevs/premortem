@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, Globe, Loader2, RefreshCw, Search } from 'lucide-react';
 
 import type { WorkspaceIntegration } from '@/hooks/workspace-types';
-import { useRepositoryDiscoveryMutations } from '@/hooks/use-os-console-data';
+import { useRepositoryDiscoveryMutations, type OsQueryScope } from '@/hooks/use-os-console-data';
 import { integrationConnectHref } from '@/lib/integration-connect';
 import { gitLabAccessSummary, type ProviderAccessPhase } from '@/lib/provider-access';
 
@@ -25,6 +25,7 @@ interface RepositoryDiscoveryPanelProps {
   autoDiscoverOnMount?: boolean;
   skipDiscoverSessionCache?: boolean;
   onProjectsChanged?: () => void;
+  queryScope?: OsQueryScope;
 }
 
 export function RepositoryDiscoveryPanel({
@@ -32,10 +33,11 @@ export function RepositoryDiscoveryPanel({
   gitlabAccessPhase = 'identity_only',
   autoDiscoverOnMount = false,
   skipDiscoverSessionCache = false,
-  onProjectsChanged
+  onProjectsChanged,
+  queryScope = null
 }: RepositoryDiscoveryPanelProps) {
   const { discoverRepositories, enableRepositories, registerPublicRepository } =
-    useRepositoryDiscoveryMutations();
+    useRepositoryDiscoveryMutations({ queryScope });
 
   const [mode, setMode] = useState<'discover' | 'public'>('discover');
   const [catalog, setCatalog] = useState<DiscoveredRow[]>([]);
@@ -52,6 +54,12 @@ export function RepositoryDiscoveryPanel({
     if (lastIntegrationIdRef.current === nextIntegrationId) return;
     lastIntegrationIdRef.current = nextIntegrationId;
     autoDiscoverAttemptedRef.current = false;
+    setCatalog([]);
+    setCatalogQuery('');
+    setSelectedIds(new Set());
+    setPublicReference('');
+    setStatusMessage(null);
+    setErrorMessage(null);
   }, [gitlabIntegration?.id]);
 
   const applyCatalog = useCallback((repositories: DiscoveredRow[], lastSyncedAt: string | null) => {
@@ -118,8 +126,6 @@ export function RepositoryDiscoveryPanel({
     }
 
     autoDiscoverAttemptedRef.current = true;
-    setErrorMessage(null);
-    setStatusMessage(null);
     void handleDiscover()
       .catch((error: unknown) => {
         autoDiscoverAttemptedRef.current = false;
@@ -275,7 +281,11 @@ export function RepositoryDiscoveryPanel({
               <>
                 <div className="relative text-xs">
                   <Search size={14} className="absolute left-2.5 top-2.5 text-[#8A958F]" />
+                  <label htmlFor="repository-discovery-filter" className="sr-only">
+                    Filter repositories
+                  </label>
                   <input
+                    id="repository-discovery-filter"
                     type="text"
                     placeholder="Filter repositories..."
                     value={catalogQuery}
@@ -304,7 +314,7 @@ export function RepositoryDiscoveryPanel({
                         </span>
                         <span className="text-[10px] text-[#868A81]">
                           {row.visibility}
-                          {row.canWriteIssues ? ' · can publish issues' : ' · read-only publish'}
+                          {row.canWriteIssues ? ' · can publish issues' : ' · read-only scans'}
                         </span>
                       </span>
                       {row.enabled ? (
@@ -341,19 +351,19 @@ export function RepositoryDiscoveryPanel({
         <form onSubmit={(e) => void handleRegisterPublic(e)} className="space-y-3 text-xs">
           <label className="block space-y-1.5">
             <span className="font-mono font-bold uppercase tracking-wider text-[#717A75]">
-              GitLab URL or namespace/project
+              Public repository URL or owner/project
             </span>
             <input
               type="text"
               value={publicReference}
               onChange={(e) => setPublicReference(e.target.value)}
-              placeholder="e.g. gitlab.com/org/repo or https://gitlab.com/org/repo"
+              placeholder="e.g. github.com/org/repo or gitlab.com/org/repo"
               className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded focus:outline-none focus:border-emerald-950 font-mono"
             />
           </label>
           <p className="text-[10px] text-[#868A81]">
-            Public watch registers a public GitLab repo for read-only scans. Connect GitLab in Settings
-            (read_repository scope) before running audits. Issue publish stays disabled until you grant write access.
+            Public watch registers a public repository for read-only scans. Connect GitLab or GitHub in Settings
+            before running audits. Issue publish stays disabled until you grant write access.
           </p>
           <div className="flex justify-end">
             <button

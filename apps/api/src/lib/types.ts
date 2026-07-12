@@ -8,26 +8,8 @@ export interface AuditQueueBinding {
   send(message: AuditJob): Promise<void>;
 }
 
-export interface RateLimiterStubLike {
-  fetch(request: Request): Promise<Response>;
-}
-
-export interface RateLimiterNamespaceBinding {
-  idFromName(name: string): unknown;
-  get(id: unknown): RateLimiterStubLike;
-}
-
-export interface QueueMessageLike<T> {
-  id?: string;
-  body: T;
-  attempts?: number;
-  ack(): void;
-  retry(options?: QueueRetryOptions): void;
-}
-
-export interface QueueBatchLike<T> {
-  queue: string;
-  messages: Array<QueueMessageLike<T>>;
+export interface RateLimiterBindingLike {
+  limit(input: { key: string; limit?: number; windowMs?: number }): Promise<{ allowed?: boolean; success?: boolean }>;
 }
 
 export interface ExecutionContextLike {
@@ -41,5 +23,5 @@ export interface ScheduledControllerLike {
 export interface AppEnv {
   APP_ENV?: string;
   AUDIT_QUEUE?: AuditQueueBinding;
-  RATE_LIMITER?: RateLimiterNamespaceBinding;
+  RATE_LIMITER?: RateLimiterBindingLike;
 }

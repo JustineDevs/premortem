@@ -1,6 +1,7 @@
 import {
   formatSourceCodeEvidence,
   primaryEvidenceLocation,
+  parseFileEvidenceRef,
   type EvidenceRefLike
 } from './evidence-projection';
 
@@ -37,11 +38,30 @@ export interface PublishedIssueBodyContext {
   weight?: number | null;
 }
 
-function buildRecommendedCodeDna(issue: PublishedIssueBodyInput): string {
+function formatEvidenceCitationComment(item: EvidenceRefLike, index: number): string {
+  const parsed = parseFileEvidenceRef(item.ref);
+  const citation = parsed
+    ? `${parsed.filePath}:${parsed.startLine}${parsed.endLine > parsed.startLine ? `-${parsed.endLine}` : ''}`
+    : item.ref;
+  const reason = item.reason ? ` — ${item.reason}` : '';
+  return `// Evidence citation ${index + 1}: ${citation}${reason}`;
+}
+
+function buildRecommendedCodeDna(
+  issue: PublishedIssueBodyInput,
+  evidence: EvidenceRefLike[]
+): string {
   const lines = [
-    `// Recommended change for ${issue.title}`,
-    `// ${issue.recommendedActionSummary}`,
-    ...issue.implementationSteps.map((step, index) => `// Step ${index + 1}: ${step}`)
+    `// Recommended code DNA for ${issue.title}`,
+    `// Goal: ${issue.recommendedActionSummary}`,
+    ...evidence.slice(0, 4).map(formatEvidenceCitationComment),
+    ...issue.implementationSteps.map((step, index) => `// Step ${index + 1}: ${step}`),
+    '',
+    'export function applyRecommendedChange() {',
+    '  // Apply the smallest safe fix that satisfies the evidence above.',
+    '  // Preserve surrounding behavior unless a step explicitly requires it.',
+    '  return true;',
+    '}'
   ];
   return lines.join('\n');
 }
@@ -127,7 +147,7 @@ function buildSystemGroundingManifest(
 }
 
 function formatEvidenceComparison(issue: PublishedIssueBodyInput, evidence: EvidenceRefLike[]) {
-  const recommendedCode = buildRecommendedCodeDna(issue);
+  const recommendedCode = buildRecommendedCodeDna(issue, evidence);
 
   return [
     '## Evidence vs recommendation',

@@ -1,6 +1,8 @@
 import type { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { ReviewStatus, ReviewAction, type ReviewActionValue } from '@premortem/domain';
 import { prisma } from './client';
+import { invalidateWorkspaceBundleCache } from './workspace';
 
 function asJsonObject(value: Record<string, unknown> | undefined = {}) {
   return value as Prisma.JsonObject;
@@ -9,6 +11,65 @@ function asJsonObject(value: Record<string, unknown> | undefined = {}) {
 function asJsonArray(value: unknown[]) {
   return value as Prisma.JsonArray;
 }
+
+function buildProjectListCacheKey(organizationId: string, take: number, cursor?: string) {
+  return `${organizationId}:${take}:${cursor ?? ''}`;
+}
+
+function buildIssueCandidateBatchKey(input: {
+  clusterId: string;
+  title: string;
+  category: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  confidence: number;
+  predictedFailureSummary: string;
+  whyItMatters: string;
+  triggerConditions: string[];
+  evidence: unknown[];
+  recommendedActionSummary: string;
+  implementationSteps: string[];
+  doneCriteria: string[];
+  affectedAssets: string[];
+  sourceAgents: string[];
+  sourceFindings: string[];
+}) {
+  return [
+    input.clusterId,
+    input.title,
+    input.category,
+    input.severity,
+    input.confidence.toFixed(3),
+    input.predictedFailureSummary,
+    input.whyItMatters,
+    JSON.stringify(input.triggerConditions),
+    JSON.stringify(input.evidence),
+    input.recommendedActionSummary,
+    JSON.stringify(input.implementationSteps),
+    JSON.stringify(input.doneCriteria),
+    JSON.stringify(input.affectedAssets),
+    JSON.stringify(input.sourceAgents),
+    JSON.stringify(input.sourceFindings)
+  ].join('\u0001');
+}
+
+const PROJECT_LIST_SELECT = {
+  id: true,
+  slug: true,
+  name: true,
+  metadata: true,
+  createdById: true,
+  createdAt: true,
+  updatedAt: true,
+  organizationId: true,
+  status: true,
+  provider: true,
+  connectionId: true,
+  repoUrl: true,
+  defaultBranch: true,
+  externalProjectId: true,
+  projectSettings: true,
+  connectedAt: true
+} as const;
 
 const LOCAL_TRANSACTION_OPTIONS = {
   maxWait: 10_000,
@@ -23,7 +84,7 @@ export async function createAuditRun(input: {
   triggeredById?: string;
   triggerSource?: Prisma.AuditRunCreateInput['triggerSource'];
 }) {
-  return prisma.auditRun.create({
+  const auditRun = await prisma.auditRun.create({
     data: {
       organizationId: input.organizationId,
       projectId: input.projectId,
@@ -34,35 +95,54 @@ export async function createAuditRun(input: {
       runStatus: 'queued'
     }
   });
+
+  invalidateRecentAuditRunsCache(input.organizationId);
+  return auditRun;
 }
 
 export async function markAuditRunning(auditRunId: string) {
   const leaseExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
-  return prisma.auditRun.update({
+  const auditRun = await prisma.auditRun.update({
     where: { id: auditRunId },
-    data: { runStatus: 'running', startedAt: new Date(), leaseExpiresAt }
+    data: { runStatus: 'running', startedAt: new Date(), leaseExpiresAt },
+    select: { organizationId: true }
   });
+
+  invalidateRecentAuditRunsCache(auditRun.organizationId);
+  return auditRun;
 }
 
 export async function markAuditCompleted(auditRunId: string, summary: Prisma.JsonObject) {
-  return prisma.auditRun.update({
+  const auditRun = await prisma.auditRun.update({
     where: { id: auditRunId },
-    data: { runStatus: 'completed', completedAt: new Date(), summary }
+    data: { runStatus: 'completed', completedAt: new Date(), summary },
+    select: { organizationId: true }
   });
+
+  invalidateRecentAuditRunsCache(auditRun.organizationId);
+  return auditRun;
 }
 
 export async function markAuditPaused(auditRunId: string, summary: Prisma.JsonObject) {
-  return prisma.auditRun.update({
+  const auditRun = await prisma.auditRun.update({
     where: { id: auditRunId },
-    data: { runStatus: 'paused', summary }
+    data: { runStatus: 'paused', summary },
+    select: { organizationId: true }
   });
+
+  invalidateRecentAuditRunsCache(auditRun.organizationId);
+  return auditRun;
 }
 
 export async function markAuditFailed(auditRunId: string, errorMessage: string) {
-  return prisma.auditRun.update({
+  const auditRun = await prisma.auditRun.update({
     where: { id: auditRunId },
-    data: { runStatus: 'failed', completedAt: new Date(), errorMessage }
+    data: { runStatus: 'failed', completedAt: new Date(), errorMessage },
+    select: { organizationId: true }
   });
+
+  invalidateRecentAuditRunsCache(auditRun.organizationId);
+  return auditRun;
 }
 
 export async function createAuditRunEvent(input: {
@@ -133,34 +213,38 @@ export async function persistFindings(input: {
     dedupeKeys: string[];
     tags: string[];
   }>;
-}) {
-  return prisma.$transaction(
-    input.findings.map((finding) =>
-      prisma.finding.create({
-        data: {
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          auditRunId: input.auditRunId,
-          agentRunId: input.agentRunId,
-          findingKey: finding.findingKey,
-          category: finding.category,
-          findingType: finding.findingType,
-          severity: finding.severity,
-          confidence: finding.confidence,
-          predictedFailureSummary: finding.predictedFailureSummary,
-          failureMode: finding.failureMode,
-          whyItMatters: finding.whyItMatters,
-          blastRadius: finding.blastRadius,
-          triggerConditions: asJsonArray(finding.triggerConditions),
-          affectedAssets: asJsonArray(finding.affectedAssets),
-          evidence: asJsonArray(finding.evidence),
-          recommendedControls: asJsonArray(finding.recommendedControls),
-          dedupeKeys: asJsonArray(finding.dedupeKeys),
-          tags: asJsonArray(finding.tags)
-        }
-      })
-    )
+}): Promise<Array<{ id: string }>> {
+  if (input.findings.length === 0) {
+    return [];
+  }
+
+  const uniqueFindings = Array.from(
+    new Map(input.findings.map((finding) => [finding.findingKey, finding])).values()
   );
+
+  return prisma.finding.createManyAndReturn({
+    data: uniqueFindings.map((finding) => ({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      auditRunId: input.auditRunId,
+      agentRunId: input.agentRunId,
+      findingKey: finding.findingKey,
+      category: finding.category,
+      findingType: finding.findingType,
+      severity: finding.severity,
+      confidence: finding.confidence,
+      predictedFailureSummary: finding.predictedFailureSummary,
+      failureMode: finding.failureMode,
+      whyItMatters: finding.whyItMatters,
+      blastRadius: finding.blastRadius,
+      triggerConditions: asJsonArray(finding.triggerConditions),
+      affectedAssets: asJsonArray(finding.affectedAssets),
+      evidence: asJsonArray(finding.evidence),
+      recommendedControls: asJsonArray(finding.recommendedControls),
+      dedupeKeys: asJsonArray(finding.dedupeKeys),
+      tags: asJsonArray(finding.tags)
+    }))
+  });
 }
 
 export async function createDedupeClusters(input: {
@@ -179,35 +263,67 @@ export async function createDedupeClusters(input: {
     findings: Array<{ findingId: string; role?: string; similarityScore?: number }>;
   }>;
 }) {
-  return prisma.$transaction(
-    input.clusters.map((cluster) =>
-      prisma.dedupeCluster.create({
-        data: {
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          auditRunId: input.auditRunId,
-          clusterKey: cluster.clusterKey,
-          categoryOwner: cluster.categoryOwner,
-          titleHint: cluster.titleHint,
-          severity: cluster.severity,
-          confidence: cluster.confidence,
-          blastRadius: cluster.blastRadius,
-          assetScope: asJsonArray(cluster.assetScope),
-          triggerSignature: asJsonArray(cluster.triggerSignature),
-          members: {
-            create: cluster.findings.map((member) => ({
-              findingId: member.findingId,
-              role: member.role ?? 'supporting',
-              similarityScore: member.similarityScore ?? 0.8
-            }))
-          }
-        },
-        include: {
-          members: true
+  if (input.clusters.length === 0) {
+    return [];
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const createdClusters = await tx.dedupeCluster.createManyAndReturn({
+      data: input.clusters.map((cluster) => ({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        auditRunId: input.auditRunId,
+        clusterKey: cluster.clusterKey,
+        categoryOwner: cluster.categoryOwner,
+        titleHint: cluster.titleHint,
+        severity: cluster.severity,
+        confidence: cluster.confidence,
+        blastRadius: cluster.blastRadius,
+        assetScope: asJsonArray(cluster.assetScope),
+        triggerSignature: asJsonArray(cluster.triggerSignature)
+      }))
+    });
+
+    const clusterIdByKey = new Map(createdClusters.map((cluster) => [cluster.clusterKey, cluster.id]));
+    await tx.dedupeClusterMember.createMany({
+      data: input.clusters.flatMap((cluster) => {
+        const clusterId = clusterIdByKey.get(cluster.clusterKey);
+        if (!clusterId) {
+          throw new Error(`Missing persisted cluster for clusterKey: ${cluster.clusterKey}`);
         }
+        return cluster.findings.map((member) => ({
+          clusterId,
+          findingId: member.findingId,
+          role: member.role ?? 'supporting',
+          similarityScore: member.similarityScore ?? 0.8
+        }));
       })
-    )
-  );
+    });
+
+    const persistedClusters = await tx.dedupeCluster.findMany({
+      where: {
+        id: {
+          in: createdClusters.map((cluster) => cluster.id)
+        }
+      },
+      include: {
+        members: {
+          select: {
+            findingId: true
+          }
+        }
+      }
+    });
+
+    const clusterByKey = new Map(persistedClusters.map((cluster) => [cluster.clusterKey, cluster]));
+    return input.clusters.map((cluster) => {
+      const persisted = clusterByKey.get(cluster.clusterKey);
+      if (!persisted) {
+        throw new Error(`Missing persisted cluster for clusterKey: ${cluster.clusterKey}`);
+      }
+      return persisted;
+    });
+  });
 }
 
 export async function persistIssueCandidates(input: {
@@ -236,67 +352,154 @@ export async function persistIssueCandidates(input: {
     validatorName: string;
   }>;
 }) {
-  return prisma.$transaction(
-    input.issues.map((issue) =>
-      prisma.issueCandidate.create({
-        data: {
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          auditRunId: input.auditRunId,
-          clusterId: issue.clusterId,
+  if (input.issues.length === 0) {
+    return [];
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const createdIssues = await tx.issueCandidate.createManyAndReturn({
+      data: input.issues.map((issue) => ({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        auditRunId: input.auditRunId,
+        clusterId: issue.clusterId,
+        title: issue.title,
+        category: issue.category,
+        severity: issue.severity,
+        confidence: issue.confidence,
+        predictedFailureSummary: issue.predictedFailureSummary,
+        whyItMatters: issue.whyItMatters,
+        triggerConditions: asJsonArray(issue.triggerConditions),
+        evidence: asJsonArray(issue.evidence),
+        recommendedActionSummary: issue.recommendedActionSummary,
+        implementationSteps: asJsonArray(issue.implementationSteps),
+        doneCriteria: asJsonArray(issue.doneCriteria),
+        affectedAssets: asJsonArray(issue.affectedAssets),
+        sourceAgents: asJsonArray(issue.sourceAgents),
+        sourceFindings: asJsonArray(issue.sourceFindings),
+        validationStatus: issue.validationStatus,
+        validationErrors: asJsonArray(issue.validationErrors)
+      }))
+    });
+
+    const versionRows: Array<{
+      issueCandidateId: string;
+      versionNo: number;
+      bodySnapshot: Prisma.JsonObject;
+      editedById?: string;
+      editReason?: string;
+    }> = [];
+    const validationRows: Array<{
+      issueCandidateId: string;
+      status: 'passed' | 'failed';
+      validatorName: string;
+      errors: Prisma.JsonArray;
+      warnings: Prisma.JsonArray;
+    }> = [];
+
+    const createdIssuesByKey = new Map<string, Array<(typeof createdIssues)[number]>>();
+    createdIssues.forEach((issue, index) => {
+      const key = buildIssueCandidateBatchKey({
+        clusterId: issue.clusterId,
+        title: issue.title,
+        category: issue.category,
+        severity: issue.severity,
+        confidence: Number(issue.confidence),
+        predictedFailureSummary: issue.predictedFailureSummary,
+        whyItMatters: issue.whyItMatters,
+        triggerConditions: Array.isArray(issue.triggerConditions)
+          ? issue.triggerConditions.filter((entry): entry is string => typeof entry === 'string')
+          : [],
+        evidence: Array.isArray(issue.evidence) ? issue.evidence : [],
+        recommendedActionSummary: issue.recommendedActionSummary,
+        implementationSteps: Array.isArray(issue.implementationSteps)
+          ? issue.implementationSteps.filter((entry): entry is string => typeof entry === 'string')
+          : [],
+        doneCriteria: Array.isArray(issue.doneCriteria)
+          ? issue.doneCriteria.filter((entry): entry is string => typeof entry === 'string')
+          : [],
+        affectedAssets: Array.isArray(issue.affectedAssets)
+          ? issue.affectedAssets.filter((entry): entry is string => typeof entry === 'string')
+          : [],
+        sourceAgents: Array.isArray(issue.sourceAgents)
+          ? issue.sourceAgents.filter((entry): entry is string => typeof entry === 'string')
+          : [],
+        sourceFindings: Array.isArray(issue.sourceFindings)
+          ? issue.sourceFindings.filter((entry): entry is string => typeof entry === 'string')
+          : []
+      });
+      const bucket = createdIssuesByKey.get(key);
+      const mappedIssue = createdIssues[index] ?? issue;
+      if (bucket) {
+        bucket.push(mappedIssue);
+      } else {
+        createdIssuesByKey.set(key, [mappedIssue]);
+      }
+    });
+
+    input.issues.forEach((issue, index) => {
+      const key = buildIssueCandidateBatchKey(issue);
+      const bucket = createdIssuesByKey.get(key);
+      const issueCandidateId = bucket?.shift()?.id ?? createdIssues[index]?.id;
+      if (!issueCandidateId) {
+        throw new Error(`Missing persisted issue candidate for title: ${issue.title}`);
+      }
+
+      versionRows.push({
+        issueCandidateId,
+        versionNo: 1,
+        bodySnapshot: asJsonObject({
           title: issue.title,
           category: issue.category,
           severity: issue.severity,
           confidence: issue.confidence,
           predictedFailureSummary: issue.predictedFailureSummary,
           whyItMatters: issue.whyItMatters,
-          triggerConditions: asJsonArray(issue.triggerConditions),
-          evidence: asJsonArray(issue.evidence),
+          triggerConditions: issue.triggerConditions,
+          evidence: issue.evidence,
           recommendedActionSummary: issue.recommendedActionSummary,
-          implementationSteps: asJsonArray(issue.implementationSteps),
-          doneCriteria: asJsonArray(issue.doneCriteria),
-          affectedAssets: asJsonArray(issue.affectedAssets),
-          sourceAgents: asJsonArray(issue.sourceAgents),
-          sourceFindings: asJsonArray(issue.sourceFindings),
-          validationStatus: issue.validationStatus,
-          validationErrors: asJsonArray(issue.validationErrors),
-          versions: {
-            create: {
-              versionNo: 1,
-              bodySnapshot: asJsonObject({
-                title: issue.title,
-                category: issue.category,
-                severity: issue.severity,
-                confidence: issue.confidence,
-                predictedFailureSummary: issue.predictedFailureSummary,
-                whyItMatters: issue.whyItMatters,
-                triggerConditions: issue.triggerConditions,
-                evidence: issue.evidence,
-                recommendedActionSummary: issue.recommendedActionSummary,
-                implementationSteps: issue.implementationSteps,
-                doneCriteria: issue.doneCriteria,
-                affectedAssets: issue.affectedAssets,
-                sourceAgents: issue.sourceAgents,
-                sourceFindings: issue.sourceFindings
-              })
-            }
-          },
-          validationResults: {
-            create: {
-              status: issue.validationStatus,
-              validatorName: issue.validatorName,
-              errors: asJsonArray(issue.validationErrors),
-              warnings: asJsonArray(issue.validationWarnings)
-            }
-          }
-        },
-        include: {
-          versions: true,
-          validationResults: true
+          implementationSteps: issue.implementationSteps,
+          doneCriteria: issue.doneCriteria,
+          affectedAssets: issue.affectedAssets,
+          sourceAgents: issue.sourceAgents,
+          sourceFindings: issue.sourceFindings
+        })
+      });
+
+      validationRows.push({
+        issueCandidateId,
+        status: issue.validationStatus,
+        validatorName: issue.validatorName,
+        errors: asJsonArray(issue.validationErrors),
+        warnings: asJsonArray(issue.validationWarnings)
+      });
+    });
+
+    if (versionRows.length > 0) {
+      await tx.issueCandidateVersion.createMany({ data: versionRows });
+    }
+
+    if (validationRows.length > 0) {
+      await tx.issueValidationResult.createMany({ data: validationRows });
+    }
+
+    return tx.issueCandidate.findMany({
+      where: {
+        id: {
+          in: createdIssues.map((issue) => issue.id)
         }
-      })
-    )
-  );
+      },
+      include: {
+        versions: {
+          orderBy: { versionNo: 'asc' }
+        },
+        validationResults: {
+          orderBy: { createdAt: 'asc' }
+        },
+        publishedIssue: true
+      }
+    });
+  });
 }
 
 export async function persistRejectedIssueCandidateArtifacts(input: {
@@ -324,74 +527,150 @@ export async function persistRejectedIssueCandidateArtifacts(input: {
     validatorName: string;
   }>;
 }) {
-  return prisma.$transaction(
-    input.issues.map((issue) =>
-      prisma.rejectedIssueCandidateArtifact.create({
-        data: {
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          auditRunId: input.auditRunId,
-          clusterId: issue.clusterId,
-          title: issue.title,
-          category: issue.category,
-          severity: issue.severity,
-          confidence: issue.confidence,
-          predictedFailureSummary: issue.predictedFailureSummary,
-          whyItMatters: issue.whyItMatters,
-          triggerConditions: asJsonArray(issue.triggerConditions),
-          evidence: asJsonArray(issue.evidence),
-          recommendedActionSummary: issue.recommendedActionSummary,
-          implementationSteps: asJsonArray(issue.implementationSteps),
-          doneCriteria: asJsonArray(issue.doneCriteria),
-          affectedAssets: asJsonArray(issue.affectedAssets),
-          sourceAgents: asJsonArray(issue.sourceAgents),
-          sourceFindings: asJsonArray(issue.sourceFindings),
-          validationErrors: asJsonArray(issue.validationErrors),
-          validationWarnings: asJsonArray(issue.validationWarnings),
-          validatorName: issue.validatorName
-        }
-      })
-    )
-  );
+  if (input.issues.length === 0) {
+    return { count: 0 };
+  }
+
+  return prisma.rejectedIssueCandidateArtifact.createMany({
+    data: input.issues.map((issue) => ({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      auditRunId: input.auditRunId,
+      clusterId: issue.clusterId,
+      title: issue.title,
+      category: issue.category,
+      severity: issue.severity,
+      confidence: issue.confidence,
+      predictedFailureSummary: issue.predictedFailureSummary,
+      whyItMatters: issue.whyItMatters,
+      triggerConditions: asJsonArray(issue.triggerConditions),
+      evidence: asJsonArray(issue.evidence),
+      recommendedActionSummary: issue.recommendedActionSummary,
+      implementationSteps: asJsonArray(issue.implementationSteps),
+      doneCriteria: asJsonArray(issue.doneCriteria),
+      affectedAssets: asJsonArray(issue.affectedAssets),
+      sourceAgents: asJsonArray(issue.sourceAgents),
+      sourceFindings: asJsonArray(issue.sourceFindings),
+      validationErrors: asJsonArray(issue.validationErrors),
+      validationWarnings: asJsonArray(issue.validationWarnings),
+      validatorName: issue.validatorName
+    }))
+  });
 }
 
 export async function getAuditRunDetails(auditRunId: string) {
   return prisma.auditRun.findUnique({
     where: { id: auditRunId },
-    include: {
+    select: {
+      id: true,
+      organizationId: true,
+      projectId: true,
+      branch: true,
+      commitSha: true,
+      runStatus: true,
+      errorMessage: true,
+      summary: true,
+      createdAt: true,
+      updatedAt: true,
+      graphSnapshot: true,
+      _count: {
+        select: {
+          agentRuns: true,
+          findings: true,
+          dedupeClusters: true,
+          issueCandidates: true,
+          rejectedIssueCandidateArtifacts: true,
+          events: true
+        }
+      },
       agentRuns: {
-        orderBy: { createdAt: 'asc' }
+        orderBy: { createdAt: 'asc' },
+        take: 100,
+        select: {
+          id: true,
+          agentName: true,
+          status: true,
+          startedAt: true,
+          completedAt: true
+        }
       },
       findings: {
-        orderBy: { createdAt: 'asc' }
+        orderBy: { createdAt: 'asc' },
+        take: 200,
+        select: {
+          id: true,
+          findingKey: true,
+          category: true,
+          severity: true,
+          predictedFailureSummary: true,
+          agentRunId: true,
+          confidence: true,
+          whyItMatters: true,
+          failureMode: true,
+          triggerConditions: true,
+          affectedAssets: true,
+          recommendedControls: true,
+          evidence: true
+        }
       },
       dedupeClusters: {
         orderBy: { createdAt: 'asc' },
+        take: 100,
         include: {
           members: {
-            select: { findingId: true }
+            select: { findingId: true },
+            take: 200
           }
         }
       },
       issueCandidates: {
         orderBy: { createdAt: 'asc' },
-        include: {
+        take: 100,
+        select: {
+          id: true,
+          title: true,
+          createdAt: true,
+          category: true,
+          validationStatus: true,
+          reviewerStatus: true,
+          priority: true,
+          confidence: true,
+          predictedFailureSummary: true,
+          whyItMatters: true,
+          triggerConditions: true,
+          recommendedActionSummary: true,
+          implementationSteps: true,
+          doneCriteria: true,
+          affectedAssets: true,
+          sourceAgents: true,
+          sourceFindings: true,
+          clusterId: true,
+          evidence: true,
           _count: {
             select: {
               versions: true,
               validationResults: true
             }
           },
-          publishedIssue: true
+          publishedIssue: true,
+          versions: {
+            orderBy: { versionNo: 'asc' },
+            take: 10
+          },
+          validationResults: {
+            orderBy: { createdAt: 'asc' },
+            take: 10
+          }
         }
       },
       rejectedIssueCandidateArtifacts: {
-        orderBy: { createdAt: 'asc' }
+        orderBy: { createdAt: 'asc' },
+        take: 100
       },
       events: {
-        orderBy: { createdAt: 'asc' }
-      },
-      graphSnapshot: true
+        orderBy: { createdAt: 'desc' },
+        take: 500
+      }
     }
   });
 }
@@ -420,31 +699,73 @@ export async function persistGraphSnapshot(input: {
 }
 
 const PROJECT_LIST_CACHE_TTL_MS = 120_000;
+type ProjectListItem = Prisma.ProjectGetPayload<{
+  select: typeof PROJECT_LIST_SELECT;
+}>;
+type ProjectListPage = {
+  projects: ProjectListItem[];
+  nextCursor: string | null;
+};
 const projectListCache = new Map<
   string,
-  { expiresAt: number; promise?: Promise<Awaited<ReturnType<typeof loadOrganizationProjects>>>; value?: Awaited<ReturnType<typeof loadOrganizationProjects>> }
+  { expiresAt: number; promise?: Promise<ProjectListPage>; value?: ProjectListPage }
 >();
+const projectListCacheGeneration = new Map<string, number>();
 
-async function loadOrganizationProjects(organizationId: string) {
-  return prisma.project.findMany({
-    where: { organizationId },
-    orderBy: { createdAt: 'desc' },
-    select: {
-      id: true,
-      name: true,
-      provider: true,
-      repoUrl: true,
-      defaultBranch: true,
-      status: true,
-      metadata: true,
-      externalProjectId: true,
-      projectSettings: true
-    }
-  });
+function getProjectListCacheGeneration(organizationId: string) {
+  return projectListCacheGeneration.get(organizationId) ?? 0;
 }
 
-export async function listOrganizationProjects(organizationId: string) {
-  const cacheKey = organizationId;
+export function invalidateProjectListCache(organizationId?: string) {
+  if (!organizationId) {
+    projectListCache.clear();
+    projectListCacheGeneration.clear();
+    return;
+  }
+
+  projectListCacheGeneration.set(organizationId, getProjectListCacheGeneration(organizationId) + 1);
+  for (const key of projectListCache.keys()) {
+    if (key.startsWith(`${organizationId}:`)) {
+      projectListCache.delete(key);
+    }
+  }
+}
+
+async function loadOrganizationProjects(
+  organizationId: string,
+  options?: { take?: number; cursor?: string }
+): Promise<ProjectListPage> {
+  const take = Math.min(Math.max(options?.take ?? 100, 1), 100);
+  const projects = await prisma.project.findMany({
+    where: { organizationId },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: take + 1,
+    ...(options?.cursor
+      ? {
+          cursor: {
+            id: options.cursor
+          },
+          skip: 1
+        }
+      : {}),
+    select: PROJECT_LIST_SELECT
+  });
+
+  const hasMore = projects.length > take;
+  const page = hasMore ? projects.slice(0, take) : projects;
+  return {
+    projects: page,
+    nextCursor: hasMore ? page.at(-1)?.id ?? null : null
+  };
+}
+
+export async function listOrganizationProjects(
+  organizationId: string,
+  options?: { take?: number; cursor?: string }
+) {
+  const take = Math.min(Math.max(options?.take ?? 100, 1), 100);
+  const cacheKey = buildProjectListCacheKey(organizationId, take, options?.cursor);
+  const cacheGeneration = getProjectListCacheGeneration(organizationId);
   const now = Date.now();
   const cached = projectListCache.get(cacheKey);
   if (cached?.value && cached.expiresAt > now) {
@@ -454,13 +775,15 @@ export async function listOrganizationProjects(organizationId: string) {
     return cached.promise;
   }
 
-  const promise = loadOrganizationProjects(organizationId)
-    .then((projects) => {
-      projectListCache.set(cacheKey, {
-        expiresAt: Date.now() + PROJECT_LIST_CACHE_TTL_MS,
-        value: projects
-      });
-      return projects;
+  const promise = loadOrganizationProjects(organizationId, options)
+    .then((result) => {
+      if (getProjectListCacheGeneration(organizationId) === cacheGeneration) {
+        projectListCache.set(cacheKey, {
+          expiresAt: Date.now() + PROJECT_LIST_CACHE_TTL_MS,
+          value: result
+        });
+      }
+      return result;
     })
     .finally(() => {
       const current = projectListCache.get(cacheKey);
@@ -541,6 +864,9 @@ export async function createOrganizationProject(input: {
         where: { projectId: project.id }
       })
     };
+  }).finally(() => {
+    invalidateProjectListCache(input.organizationId);
+    invalidateWorkspaceBundleCache(input.organizationId);
   });
 }
 
@@ -591,6 +917,8 @@ export async function updateProjectSettings(input: {
       ignorePaths: (input.ignorePaths ?? []) as Prisma.InputJsonValue,
       notificationSettings: (input.notificationSettings ?? {}) as Prisma.InputJsonValue
     }
+  }).finally(() => {
+    invalidateProjectListCache(input.organizationId);
   });
 }
 
@@ -652,7 +980,7 @@ export async function splitIssueCandidate(input: {
       }
     });
 
-    const clusterKey = `${parent.cluster.clusterKey}:split:${Date.now()}`;
+    const clusterKey = `${parent.cluster.clusterKey}:split:${randomUUID()}`;
     const splitCluster = await tx.dedupeCluster.create({
       data: {
         organizationId: parent.organizationId,
@@ -802,13 +1130,21 @@ export async function recordReviewAction(input: {
         return action;
       }
 
-      const versionCount = await tx.issueCandidateVersion.count({
-        where: { issueCandidateId: input.issueCandidateId }
+      await tx.$executeRaw`
+        SELECT pg_advisory_xact_lock(hashtext(${input.issueCandidateId}))
+      `;
+
+      const latestVersion = await tx.issueCandidateVersion.findFirst({
+        where: { issueCandidateId: input.issueCandidateId },
+        orderBy: { versionNo: 'desc' },
+        select: { versionNo: true }
       });
+      const nextVersionNo = (latestVersion?.versionNo ?? 0) + 1;
+
       await tx.issueCandidateVersion.create({
         data: {
           issueCandidateId: input.issueCandidateId,
-          versionNo: versionCount + 1,
+          versionNo: nextVersionNo,
           editedById: input.actorId,
           editReason: input.notes,
           bodySnapshot: asJsonObject(input.payload ?? {})
@@ -878,7 +1214,14 @@ const listRecentAuditRunsInclude = {
   _count: {
     select: {
       issueCandidates: true,
-      rejectedIssueCandidateArtifacts: true
+      rejectedIssueCandidateArtifacts: true,
+      events: true
+    }
+  },
+  findings: {
+    take: 200,
+    select: {
+      severity: true
     }
   },
   events: {

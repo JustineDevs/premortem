@@ -5,16 +5,90 @@
 import type { OrgPlan } from '@prisma/client';
 
 import { prisma } from './client';
+import { getUsageEventTotalsForOrganization } from './usage-metering';
 
 /** Business-model tier limits used across audit, publish, and workspace gating. */
 export const PLAN_LIMITS: Record<
   OrgPlan,
-  { maxRepos: number; auditsPerMonth: number; canPublish: boolean; label: string }
+  {
+    maxRepos: number;
+    auditsPerMonth: number;
+    publishesPerMonth: number | null;
+    canPublish: boolean;
+    label: string;
+    historyRetentionDays: number;
+    supportLevel: 'community' | 'email' | 'priority' | 'dedicated';
+    sarifExport: boolean;
+    webhooks: boolean;
+    graphitiMemory: boolean;
+    skillMarketplace: boolean;
+  }
 > = {
-  free: { maxRepos: 1, auditsPerMonth: 10, canPublish: false, label: 'Free' },
-  pro: { maxRepos: 10, auditsPerMonth: 100, canPublish: true, label: 'Starter' },
-  team: { maxRepos: 50, auditsPerMonth: 500, canPublish: true, label: 'Growth' },
-  enterprise: { maxRepos: 9999, auditsPerMonth: 10_000, canPublish: true, label: 'Enterprise' }
+  free: {
+    maxRepos: 1,
+    auditsPerMonth: 10,
+    publishesPerMonth: 3,
+    canPublish: true,
+    label: 'Free',
+    historyRetentionDays: 30,
+    supportLevel: 'community',
+    sarifExport: false,
+    webhooks: false,
+    graphitiMemory: false,
+    skillMarketplace: false
+  },
+  pro: {
+    maxRepos: 10,
+    auditsPerMonth: 100,
+    publishesPerMonth: null,
+    canPublish: true,
+    label: 'Starter',
+    historyRetentionDays: 90,
+    supportLevel: 'email',
+    sarifExport: true,
+    webhooks: true,
+    graphitiMemory: false,
+    skillMarketplace: false
+  },
+  team: {
+    maxRepos: 30,
+    auditsPerMonth: 300,
+    publishesPerMonth: null,
+    canPublish: true,
+    label: 'Growth',
+    historyRetentionDays: 365,
+    supportLevel: 'priority',
+    sarifExport: true,
+    webhooks: true,
+    graphitiMemory: true,
+    skillMarketplace: false
+  },
+  scale: {
+    maxRepos: 100,
+    auditsPerMonth: 1000,
+    publishesPerMonth: null,
+    canPublish: true,
+    label: 'Scale',
+    historyRetentionDays: 365,
+    supportLevel: 'priority',
+    sarifExport: true,
+    webhooks: true,
+    graphitiMemory: true,
+    skillMarketplace: true
+  },
+  enterprise: {
+    maxRepos: 9999,
+    auditsPerMonth: 10_000,
+    publishesPerMonth: null,
+    canPublish: true,
+    label: 'Enterprise',
+    historyRetentionDays: 3650,
+    supportLevel: 'dedicated',
+    sarifExport: true,
+    webhooks: true,
+    graphitiMemory: true,
+    skillMarketplace: true
+  }
 };
 
 export class EntitlementError extends Error {
@@ -36,28 +110,45 @@ export function auditQuotaForPlan(plan: OrgPlan): number {
 }
 
 /**
+ * Count only connected repositories that still consume plan quota.
+ *
+ * Archived and disconnected rows remain part of history, but they no longer
+ * consume tier capacity.
+ */
+export function countConnectedProjects(projects: Array<{ status?: string | null }>) {
+  return projects.reduce(
+    (total, project) => total + (project.status === 'active' ? 1 : 0),
+    0
+  );
+}
+
+/**
  * Read the current entitlement state for an organization.
  *
  * @param organizationId - Organization to inspect.
  * @returns Current plan, project count, and monthly audit usage.
  */
 export async function getOrganizationEntitlements(organizationId: string) {
-  const [organization, billing, projectCount, auditsThisMonth] = await Promise.all([
+  const [organization, billing, projectCount, auditsThisMonth, usageTotals] = await Promise.all([
     prisma.organization.findUniqueOrThrow({ where: { id: organizationId } }),
     prisma.organizationBillingAccount.findUnique({ where: { organizationId } }),
-    prisma.project.count({ where: { organizationId } }),
+    prisma.project.count({ where: { organizationId, status: 'active' } }),
     prisma.auditRun.count({
       where: {
         organizationId,
         createdAt: { gte: startOfUtcMonth() }
       }
-    })
+    }),
+    getUsageEventTotalsForOrganization(organizationId, startOfUtcMonth())
   ]);
 
   const plan = billing?.plan ?? organization.plan;
   const limits = PLAN_LIMITS[plan];
   const auditLimit = billing?.auditQuotaMonthly ?? limits.auditsPerMonth;
   const auditsUsed = billing?.auditsUsedMonth ?? auditsThisMonth;
+  const publishLimit = limits.publishesPerMonth;
+  const publishesUsed = usageTotals.publishes;
+  const canPublish = publishLimit === null || publishesUsed < publishLimit;
 
   return {
     plan,
@@ -65,7 +156,9 @@ export async function getOrganizationEntitlements(organizationId: string) {
     projectCount,
     auditsUsed,
     auditLimit,
-    canPublish: limits.canPublish
+    publishesUsed,
+    publishLimit,
+    canPublish
   };
 }
 
@@ -115,10 +208,14 @@ export async function assertCanRunAudit(organizationId: string) {
  */
 export async function assertCanPublish(organizationId: string) {
   const entitlements = await getOrganizationEntitlements(organizationId);
-  if (!entitlements.canPublish) {
+  if (entitlements.publishLimit !== null && entitlements.publishesUsed >= entitlements.publishLimit) {
+    const label = entitlements.limits.label;
+    const limit = entitlements.publishLimit;
     throw new EntitlementError(
       'feature_locked',
-      'GitLab publish is available on Starter plans and above. Upgrade from Free to publish approved issues.'
+      limit === 3
+        ? `${label} plan allows ${limit} publishes per month. Upgrade to Starter for unlimited publish.`
+        : `${label} plan allows ${limit} publishes per month. Upgrade to remove publish limits.`
     );
   }
 }
@@ -173,12 +270,22 @@ export async function findActiveAuditRun(input: {
   projectId: string;
   branch: string;
 }) {
+  const freshQueuedSince = new Date(Date.now() - 90 * 1000);
   return prisma.auditRun.findFirst({
     where: {
       organizationId: input.organizationId,
       projectId: input.projectId,
       branch: input.branch,
-      runStatus: { in: ['queued', 'running', 'paused'] }
+      OR: [
+        {
+          runStatus: 'queued',
+          createdAt: { gte: freshQueuedSince }
+        },
+        {
+          runStatus: { in: ['running', 'paused'] },
+          leaseExpiresAt: { gt: new Date() }
+        }
+      ]
     },
     orderBy: { createdAt: 'desc' }
   });

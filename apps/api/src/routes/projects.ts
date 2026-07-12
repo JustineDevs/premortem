@@ -5,11 +5,15 @@ import {
   EntitlementError,
   getPublishedIssueAccuracyForProject,
   listOrganizationProjects,
+  registerPublicGitHubProject,
   registerPublicGitLabProject,
+  resolveGitLabCredentialsForProject,
   updateProjectSettings,
   verifyGitLabRegistrationAccess
 } from '@premortem/db';
 import { ProjectConnectionStatus } from '@premortem/domain';
+import { captureServerException } from '@premortem/observability';
+import { syncGitLabQualityGate } from '@premortem/integrations';
 
 import { apiErrorResponse } from '../lib/error-response';
 import {
@@ -29,6 +33,65 @@ function normalizeProvider(provider: string | undefined): 'gitlab' | 'github' {
   return 'gitlab';
 }
 
+function inferPublicRepositoryProvider(reference: string, provider?: string): 'gitlab' | 'github' {
+  const explicit = normalizeProvider(provider);
+  if (provider === 'github') return 'github';
+  if (provider === 'gitlab') return 'gitlab';
+
+  const normalized = reference.trim().toLowerCase();
+  if (
+    normalized.includes('github.com/') ||
+    normalized.startsWith('git@github.com:') ||
+    normalized.startsWith('git://github.com/')
+  ) {
+    return 'github';
+  }
+
+  if (
+    normalized.includes('gitlab.com/') ||
+    normalized.startsWith('git@gitlab.com:') ||
+    normalized.startsWith('git://gitlab.com/')
+  ) {
+    return 'gitlab';
+  }
+
+  return explicit;
+}
+
+function fallbackRepoUrl(project: {
+  provider: 'gitlab' | 'github';
+  externalProjectId: string;
+  repoUrl: string | null;
+}) {
+  return (
+    project.repoUrl ??
+    (project.provider === 'github'
+      ? `https://github.com/${project.externalProjectId}`
+      : `https://gitlab.com/${project.externalProjectId}`)
+  );
+}
+
+async function syncProjectQualityGate(projectId: string) {
+  const credentials = await resolveGitLabCredentialsForProject(projectId);
+  if (!credentials) return null;
+
+  const { prisma } = await import('@premortem/db');
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { provider: true, externalProjectId: true }
+  });
+
+  if (!project || project.provider !== 'gitlab' || !project.externalProjectId) {
+    return null;
+  }
+
+  return syncGitLabQualityGate({
+    baseUrl: credentials.baseUrl,
+    token: credentials.token,
+    externalProjectId: project.externalProjectId
+  });
+}
+
 export async function handleProjectCreate(request: Request) {
   const body = (await readJsonRecord(request)) ?? {};
 
@@ -44,10 +107,6 @@ export async function handleProjectCreate(request: Request) {
 
   const actor = await resolveApiActorContext(request);
   requireApiRole(actor, ORG_WRITE_ROLES);
-  const organizationId = readOptionalString(body, 'organizationId');
-  if (organizationId && organizationId !== actor.organizationId) {
-    return Response.json({ error: 'organizationId is not allowed for this session.' }, { status: 403 });
-  }
   const resolvedOrganizationId = actor.organizationId;
 
   try {
@@ -96,19 +155,21 @@ export async function handleProjectCreate(request: Request) {
       scanCodeSnippet
     });
 
+    await syncProjectQualityGate(project.id).catch((error) =>
+      captureServerException(error, { context: 'gitlab-quality-gate-sync', projectId: project.id })
+    );
+
     return Response.json({
       id: project.id,
       name: project.name,
       provider: project.provider,
-      repoUrl: project.repoUrl ?? `https://gitlab.com/${project.externalProjectId}`,
+      repoUrl: fallbackRepoUrl(project),
       branch: project.defaultBranch ?? 'main',
+      status: project.status ?? ProjectConnectionStatus.ACTIVE,
       connectionStatus: project.status ?? ProjectConnectionStatus.ACTIVE,
       projectSettings: project.projectSettings ?? null,
       lastAuditScore: null,
       lastAuditDate: null,
-      infrastructureCount: 0,
-      apiEndpointsCount: 0,
-      unencryptedEndpointsCount: 0,
       scanCodeSnippet:
         typeof project.metadata === 'object' &&
         project.metadata !== null &&
@@ -123,35 +184,36 @@ export async function handleProjectCreate(request: Request) {
 
 export async function handleProjectList(request: Request) {
   const actor = await resolveApiActorContext(request);
-  const url = new URL(request.url);
-  const requestedOrgId = url.searchParams.get('organizationId');
-  if (requestedOrgId && requestedOrgId !== actor.organizationId) {
-    return Response.json({ error: 'organizationId is not allowed for this session.' }, { status: 403 });
-  }
   const organizationId = actor.organizationId;
-  const projects = await listOrganizationProjects(organizationId);
+  const url = new URL(request.url);
+  const cursor = url.searchParams.get('cursor')?.trim() || undefined;
+  const takeParam = Number.parseInt(url.searchParams.get('take') ?? '100', 10);
+  const take = Number.isFinite(takeParam) ? takeParam : 100;
+  const { projects, nextCursor } = await listOrganizationProjects(organizationId, {
+    cursor,
+    take
+  });
 
   return Response.json({
     projects: projects.map((project) => ({
       id: project.id,
       name: project.name,
       provider: project.provider,
-      repoUrl: project.repoUrl ?? `https://gitlab.com/${project.externalProjectId}`,
+      repoUrl: fallbackRepoUrl(project),
       branch: project.defaultBranch,
+      status: project.status ?? ProjectConnectionStatus.ACTIVE,
       connectionStatus: project.status ?? ProjectConnectionStatus.ACTIVE,
       projectSettings: project.projectSettings ?? null,
       lastAuditScore: null,
       lastAuditDate: null,
-      infrastructureCount: 0,
-      apiEndpointsCount: 0,
-      unencryptedEndpointsCount: 0,
       scanCodeSnippet:
         typeof project.metadata === 'object' &&
         project.metadata !== null &&
         'scanCodeSnippet' in project.metadata
           ? String((project.metadata as Record<string, unknown>).scanCodeSnippet)
           : undefined
-    }))
+    })),
+    nextCursor
   });
 }
 
@@ -178,6 +240,10 @@ export async function handleProjectSettingsPatch(request: Request, projectId: st
     ignorePaths: readOptionalStringArray(body, 'ignorePaths') ?? undefined,
     notificationSettings
   });
+
+  await syncProjectQualityGate(projectId).catch((error) =>
+    captureServerException(error, { context: 'gitlab-quality-gate-sync', projectId })
+  );
 
   return Response.json({ ok: true, projectSettings });
 }
@@ -206,6 +272,10 @@ export async function handleProjectAccuracy(request: Request, projectId: string)
 export async function handlePublicProjectCreate(request: Request) {
   const body = (await readJsonRecord(request)) ?? {};
   const reference = readRequiredString(body, 'reference');
+  const provider = inferPublicRepositoryProvider(
+    reference ?? '',
+    readOptionalString(body, 'provider')
+  );
 
   if (!reference) {
     return Response.json({ error: 'reference is required' }, { status: 400 });
@@ -227,18 +297,26 @@ export async function handlePublicProjectCreate(request: Request) {
   }
 
   try {
-    const project = await registerPublicGitLabProject({
-      organizationId: actor.organizationId,
-      repoUrlOrPath: reference,
-      createdById: actor.profileId
-    });
+    const project =
+      provider === 'github'
+        ? await registerPublicGitHubProject({
+            organizationId: actor.organizationId,
+            repoUrlOrPath: reference,
+            createdById: actor.profileId
+          })
+        : await registerPublicGitLabProject({
+            organizationId: actor.organizationId,
+            repoUrlOrPath: reference,
+            createdById: actor.profileId
+          });
 
     return Response.json({
       id: project.id,
       name: project.name,
       provider: project.provider,
-      repoUrl: project.repoUrl ?? `https://gitlab.com/${project.externalProjectId}`,
+      repoUrl: fallbackRepoUrl(project),
       branch: project.defaultBranch ?? 'main',
+      status: project.status ?? ProjectConnectionStatus.ACTIVE,
       connectionStatus: project.status ?? ProjectConnectionStatus.ACTIVE,
       publishCapable: false,
       source: 'public_watch'

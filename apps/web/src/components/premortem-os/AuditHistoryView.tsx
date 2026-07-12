@@ -1,7 +1,15 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AuditRun, Finding, SeverityType } from "@/lib/premortem-os/types";
+import {
+  formatDate,
+  formatDateTime,
+  getAuditRowKey,
+  safeNumber,
+  safeText
+} from '@/lib/premortem-os/format';
 import {
   History,
   ArrowRight,
@@ -20,18 +28,19 @@ import {
   Info,
   Download,
 } from "lucide-react";
-import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  Legend,
-} from "recharts";
-import { OsChartTooltip } from "./chart-tooltip";
 import { OsToast } from "./os-toast";
+
+const AuditHistoryChart = dynamic(
+  () => import('./audit-history-chart').then((module) => module.AuditHistoryChart),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-60 items-center justify-center rounded border border-dashed border-[#EAE6DF] bg-white/60 text-[10px] font-mono text-[#717A75]">
+        Loading timeline chart
+      </div>
+    )
+  }
+);
 
 const traceHref = (auditId: string) =>
   `/app?tab=audits&audit=${encodeURIComponent(auditId)}`;
@@ -75,28 +84,7 @@ export function AuditHistoryView({
   }>({});
   const [isComparing, setIsComparing] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const chartViewportRef = useRef<HTMLDivElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [chartWidth, setChartWidth] = useState(0);
-
-  useEffect(() => {
-    const viewport = chartViewportRef.current;
-    if (!viewport) return;
-
-    const updateWidth = () => {
-      setChartWidth(Math.floor(viewport.getBoundingClientRect().width));
-    };
-
-    updateWidth();
-
-    if (typeof ResizeObserver === "undefined") {
-      return;
-    }
-
-    const observer = new ResizeObserver(() => updateWidth());
-    observer.observe(viewport);
-    return () => observer.disconnect();
-  }, [selectedProjectId, audits.length]);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -114,6 +102,26 @@ export function AuditHistoryView({
     []
   );
 
+  useEffect(() => {
+    const auditIds = new Set(audits.map((audit) => audit.id));
+    const projectIds = new Set(audits.map((audit) => audit.projectId));
+
+    if (comparisonRunAId && !auditIds.has(comparisonRunAId)) {
+      setComparisonRunAId('');
+      setShowComparison(false);
+    }
+
+    if (comparisonRunBId && !auditIds.has(comparisonRunBId)) {
+      setComparisonRunBId('');
+      setShowComparison(false);
+    }
+
+    if (selectedProjectId !== 'ALL' && !projectIds.has(selectedProjectId)) {
+      setSelectedProjectId('ALL');
+      setShowComparison(false);
+    }
+  }, [audits, comparisonRunAId, comparisonRunBId, selectedProjectId]);
+
   // Filter historical audits based on project selection & search term.
   const filteredAudits = useMemo(
     () =>
@@ -121,8 +129,8 @@ export function AuditHistoryView({
         const matchesProj =
           selectedProjectId === "ALL" || a.projectId === selectedProjectId;
         const matchesSearch =
-          a.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          a.id.toLowerCase().includes(searchTerm.toLowerCase());
+          safeText(a.projectName, '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+          safeText(a.id, '').toLowerCase().includes(searchTerm.toLowerCase());
         return matchesProj && matchesSearch;
       }),
     [audits, selectedProjectId, searchTerm]
@@ -133,15 +141,19 @@ export function AuditHistoryView({
     () =>
       [...audits]
         .filter((a) => selectedProjectId === "ALL" || a.projectId === selectedProjectId)
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+        .sort((a, b) => {
+          const timeA = new Date(a.date).getTime();
+          const timeB = new Date(b.date).getTime();
+          return (Number.isNaN(timeA) ? 0 : timeA) - (Number.isNaN(timeB) ? 0 : timeB);
+        })
         .map((a) => ({
-          date: new Date(a.date).toLocaleDateString(undefined, {
+          date: formatDate(a.date, {
             month: "short",
             day: "numeric"
           }),
-          score: a.score,
-          projectName: a.projectName,
-          risks: a.findings?.length || 0
+          score: safeNumber(a.score, 0),
+          projectName: safeText(a.projectName, 'Unknown project'),
+          risks: safeNumber(a.findings?.length, 0)
         })),
     [audits, selectedProjectId]
   );
@@ -173,7 +185,7 @@ export function AuditHistoryView({
     const olderRun = timeA <= timeB ? runA : runB;
     const newerRun = timeA > timeB ? runA : runB;
 
-    const scoreDelta = newerRun.score - olderRun.score;
+    const scoreDelta = safeNumber(newerRun.score, 0) - safeNumber(olderRun.score, 0);
     const oldFindings = olderRun.findings || [];
     const newFindings = newerRun.findings || [];
 
@@ -200,26 +212,26 @@ export function AuditHistoryView({
       scoreDelta,
       securedVulnerabilities,
       newVulnerabilitiesIntroduced,
-      oldCritical: olderRun.criticalCount || 0,
-      newCritical: newerRun.criticalCount || 0,
-      oldHigh: olderRun.highCount || 0,
-      newHigh: newerRun.highCount || 0,
-      oldMedium: olderRun.mediumCount || 0,
-      newMedium: newerRun.mediumCount || 0
+      oldCritical: safeNumber(olderRun.criticalCount, 0),
+      newCritical: safeNumber(newerRun.criticalCount, 0),
+      oldHigh: safeNumber(olderRun.highCount, 0),
+      newHigh: safeNumber(newerRun.highCount, 0),
+      oldMedium: safeNumber(olderRun.mediumCount, 0),
+      newMedium: safeNumber(newerRun.mediumCount, 0)
     };
   }, [runA, runB]);
 
   const exportHistoryCsv = () => {
     const header = ["id", "project", "date", "score", "critical", "high", "medium", "low"];
     const rows = filteredAudits.map((a) => [
-      a.id,
-      a.projectName,
-      new Date(a.date).toISOString(),
-      String(a.score),
-      String(a.criticalCount ?? 0),
-      String(a.highCount ?? 0),
-      String(a.mediumCount ?? 0),
-      String(a.lowCount ?? 0)
+      safeText(a.id, 'unknown'),
+      safeText(a.projectName, 'Unknown project'),
+      formatDateTime(a.date),
+      String(safeNumber(a.score, 0)),
+      String(safeNumber(a.criticalCount, 0)),
+      String(safeNumber(a.highCount, 0)),
+      String(safeNumber(a.mediumCount, 0)),
+      String(safeNumber(a.lowCount, 0))
     ]);
     const csv = [header, ...rows]
       .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
@@ -289,10 +301,14 @@ export function AuditHistoryView({
 
         {/* Global project filter */}
         <div className="flex items-center gap-2 text-xs">
-          <span className="font-mono text-[10px] uppercase font-bold text-zinc-500">
+          <label
+            htmlFor="audit-history-project-filter"
+            className="font-mono text-[10px] uppercase font-bold text-zinc-500"
+          >
             Milestones Filter:
-          </span>
+          </label>
           <select
+            id="audit-history-project-filter"
             value={selectedProjectId}
             onChange={(e) => {
               setSelectedProjectId(e.target.value);
@@ -331,6 +347,7 @@ export function AuditHistoryView({
               <button
                 type="button"
                 onClick={exportHistoryCsv}
+                aria-label="Export filtered audit history as CSV"
                 className="flex cursor-pointer items-center gap-1 rounded border border-[#EAE6DF] bg-white px-2 py-1 font-mono text-[9px] font-bold uppercase text-[#5C6560] hover:border-[#8A958F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-950"
               >
                 <Download size={11} aria-hidden />
@@ -353,70 +370,7 @@ export function AuditHistoryView({
             </span>
           </div>
 
-          <div
-            ref={chartViewportRef}
-            className="relative z-10 h-60 w-full pt-4"
-          >
-            {chartWidth > 0 ? (
-              <ResponsiveContainer width={chartWidth} height="100%">
-                <LineChart
-                  data={chartData}
-                  margin={{ top: 10, right: 30, left: 0, bottom: 24 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F1EFE9" />
-                  <XAxis
-                    dataKey="date"
-                    stroke="#5C6560"
-                    tick={{ fill: "#5C6560", fontSize: 10 }}
-                    fontSize={10}
-                    fontFamily="JetBrains Mono, monospace"
-                  />
-                  <YAxis
-                    stroke="#5C6560"
-                    tick={{ fill: "#5C6560", fontSize: 10 }}
-                    fontSize={10}
-                    fontFamily="JetBrains Mono, monospace"
-                    domain={[0, 100]}
-                  />
-                  <Tooltip
-                    content={<OsChartTooltip />}
-                    wrapperStyle={{ zIndex: 50, outline: "none" }}
-                    cursor={{
-                      stroke: "#064E3B",
-                      strokeWidth: 1,
-                      strokeDasharray: "4 4",
-                    }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="score"
-                    stroke="#064E3B"
-                    strokeWidth={2.5}
-                    activeDot={{
-                      r: 6,
-                      fill: "#064E3B",
-                      stroke: "#FAF8F5",
-                      strokeWidth: 2,
-                    }}
-                    name="Compliance Rating"
-                  />
-                  <Legend
-                    verticalAlign="bottom"
-                    height={28}
-                    formatter={() => (
-                      <span className="text-[10px] font-mono text-[#5C6560]">
-                        Compliance Rating
-                      </span>
-                    )}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex h-full items-center justify-center rounded border border-dashed border-[#EAE6DF] bg-white/60 text-[10px] font-mono text-[#717A75]">
-                Waiting for chart layout
-              </div>
-            )}
-          </div>
+          <AuditHistoryChart data={chartData} />
         </div>
       )}
 
@@ -452,12 +406,16 @@ export function AuditHistoryView({
               className="w-full p-2.5 bg-[#FAF8F5] border border-[#EAE6DF] rounded text-zinc-800 font-semibold focus:outline-none"
             >
               <option value="">Select Audit Run (A)</option>
-              {audits.map((a) => (
-                <option key={a.id} value={a.id}>
-                  [{a.projectName}] - Score: {a.score} | (
-                  {new Date(a.date).toLocaleDateString()})
-                </option>
-              ))}
+              {audits.map((a, index) => {
+                const auditRowKey = getAuditRowKey(a, index);
+                const auditId = safeText(a.id, auditRowKey);
+                return (
+                  <option key={`${auditRowKey}-a`} value={auditId}>
+                  [{safeText(a.projectName, 'Unknown project')}] - Score: {safeNumber(a.score, 0)} | (
+                  {formatDate(a.date)})
+                  </option>
+                );
+              })}
             </select>
           </div>
 
@@ -478,12 +436,16 @@ export function AuditHistoryView({
               className="w-full p-2.5 bg-[#FAF8F5] border border-[#EAE6DF] rounded text-zinc-800 font-semibold focus:outline-none"
             >
               <option value="">Select Audit Run (B)</option>
-              {audits.map((a) => (
-                <option key={a.id} value={a.id}>
-                  [{a.projectName}] - Score: {a.score} | (
-                  {new Date(a.date).toLocaleDateString()})
-                </option>
-              ))}
+              {audits.map((a, index) => {
+                const auditRowKey = getAuditRowKey(a, index);
+                const auditId = safeText(a.id, auditRowKey);
+                return (
+                  <option key={`${auditRowKey}-b`} value={auditId}>
+                  [{safeText(a.projectName, 'Unknown project')}] - Score: {safeNumber(a.score, 0)} | (
+                  {formatDate(a.date)})
+                  </option>
+                );
+              })}
             </select>
           </div>
 
@@ -492,6 +454,7 @@ export function AuditHistoryView({
               type="button"
               onClick={() => void triggerComparison()}
               disabled={isComparing}
+              aria-label="Compare the selected audit runs"
               className="w-full p-2.5 text-center bg-emerald-950 font-bold hover:bg-emerald-900 text-[#FAF8F5] rounded transition-all cursor-pointer uppercase font-mono tracking-wider text-[11px] h-[38px] flex items-center justify-center gap-2 select-none disabled:opacity-50"
             >
               <RotateCw
@@ -518,18 +481,14 @@ export function AuditHistoryView({
                 </span>
                 <div className="text-xs font-mono font-bold inline-flex items-center gap-2">
                   <span className="text-zinc-600 font-bold">
-                    {comparisonResults.olderRun.id} (
-                    {new Date(
-                      comparisonResults.olderRun.date,
-                    ).toLocaleDateString()}
+                    {safeText(comparisonResults.olderRun.id, 'unknown')} (
+                    {formatDate(comparisonResults.olderRun.date)}
                     )
                   </span>
                   <ArrowRight size={13} className="text-zinc-400" />
                   <span className="text-emerald-900 font-bold">
-                    {comparisonResults.newerRun.id} (
-                    {new Date(
-                      comparisonResults.newerRun.date,
-                    ).toLocaleDateString()}
+                    {safeText(comparisonResults.newerRun.id, 'unknown')} (
+                    {formatDate(comparisonResults.newerRun.date)}
                     )
                   </span>
                 </div>
@@ -630,7 +589,7 @@ export function AuditHistoryView({
                   ) : (
                     comparisonResults.securedVulnerabilities.map((v, idx) => (
                       <div
-                        key={v.id}
+                        key={`${safeText(v.id, 'secured')}-${idx}`}
                         className="border border-emerald-100 bg-white p-3.5 rounded shadow-xs space-y-1.5 relative overflow-hidden group"
                       >
                         <div className="flex justify-between items-center font-mono text-[9px]">
@@ -681,9 +640,9 @@ export function AuditHistoryView({
                     </div>
                   ) : (
                     comparisonResults.newVulnerabilitiesIntroduced.map(
-                      (v) => (
+                      (v, idx) => (
                         <div
-                          key={v.id}
+                          key={`${safeText(v.id, 'introduced')}-${idx}`}
                           className="border border-rose-200 bg-white p-3.5 rounded shadow-xs space-y-1.5 relative overflow-hidden group"
                         >
                           <div className="flex justify-between items-center font-mono text-[9px]">
@@ -740,40 +699,43 @@ export function AuditHistoryView({
               </tr>
             </thead>
             <tbody className="divide-y divide-[#EAE6DF]/60">
-              {filteredAudits.map((a) => {
+              {filteredAudits.map((a, index) => {
                 const totalRisks =
-                  (a.criticalCount || 0) +
-                  (a.highCount || 0) +
-                  (a.mediumCount || 0) +
-                  (a.lowCount || 0);
+                  safeNumber(a.criticalCount, 0) +
+                  safeNumber(a.highCount, 0) +
+                  safeNumber(a.mediumCount, 0) +
+                  safeNumber(a.lowCount, 0);
                 const isSelectedForComp =
                   comparisonRunAId === a.id || comparisonRunBId === a.id;
+                const auditRowKey = getAuditRowKey(a, index);
+                const auditId = safeText(a.id, auditRowKey);
+                const score = safeNumber(a.score, 0);
 
                 return (
                   <tr
-                    key={a.id}
+                    key={`${auditRowKey}-row`}
                     className={`hover:bg-[#FAF8F5]/30 transition-all ${isSelectedForComp ? "bg-slate-100/50" : ""}`}
                   >
                     <td className="p-3 font-mono font-bold text-slate-800">
-                      {a.id}
+                      {auditId}
                     </td>
                     <td className="p-3 font-semibold text-zinc-900 font-display">
-                      {a.projectName}
+                      {safeText(a.projectName, 'Unknown project')}
                     </td>
                     <td className="p-3 text-zinc-500 font-mono text-[11px]">
-                      {new Date(a.date).toLocaleString()}
+                      {formatDateTime(a.date)}
                     </td>
                     <td className="p-3 text-center font-mono font-bold">
                       <span
                         className={`inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] ${
-                          a.score >= 85
+                          score >= 85
                             ? "bg-emerald-50 text-emerald-800"
-                            : a.score >= 60
+                            : score >= 60
                               ? "bg-amber-50 text-amber-800"
                               : "bg-rose-50 text-rose-800"
                         }`}
                       >
-                        {a.score}%
+                        {score}%
                       </span>
                     </td>
                     <td className="p-3 text-center font-mono font-bold text-rose-600">

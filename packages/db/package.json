@@ -9,6 +9,38 @@
       "types": "./dist/db/src/index.d.ts",
       "default": "./dist/db/src/index.js"
     },
+    "./client": {
+      "types": "./dist/db/src/client.d.ts",
+      "default": "./dist/db/src/client.js"
+    },
+    "./actor-context": {
+      "types": "./dist/db/src/actor-context.d.ts",
+      "default": "./dist/db/src/actor-context.js"
+    },
+    "./supabase-auth": {
+      "types": "./dist/db/src/supabase-auth.d.ts",
+      "default": "./dist/db/src/supabase-auth.js"
+    },
+    "./workspace-auth": {
+      "types": "./dist/db/src/workspace-auth.d.ts",
+      "default": "./dist/db/src/workspace-auth.js"
+    },
+    "./entitlements": {
+      "types": "./dist/db/src/entitlements.d.ts",
+      "default": "./dist/db/src/entitlements.js"
+    },
+    "./activity": {
+      "types": "./dist/db/src/activity.d.ts",
+      "default": "./dist/db/src/activity.js"
+    },
+    "./dev-fixtures": {
+      "types": "./dist/db/src/dev-fixtures.d.ts",
+      "default": "./dist/db/src/dev-fixtures.js"
+    },
+    "./smoke-stranger-workspace": {
+      "types": "./dist/db/src/smoke-stranger-workspace.d.ts",
+      "default": "./dist/db/src/smoke-stranger-workspace.js"
+    },
     "./notifications": {
       "types": "./dist/db/src/notifications.d.ts",
       "default": "./dist/db/src/notifications.js"
@@ -16,7 +48,7 @@
   },
   "scripts": {
     "build": "prisma generate && tsc -p tsconfig.json",
-    "postbuild": "node scripts/fix-dist-imports.mjs",
+    "postbuild": "tsx --tsconfig ../../tsconfig.base.json scripts/fix-dist-imports.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prisma": "prisma",
     "generate": "prisma generate"
@@ -27,7 +59,9 @@
     "@premortem/llm": "workspace:*",
     "@premortem/notifications": "workspace:*",
     "@premortem/observability": "workspace:*",
-    "@prisma/client": "^5.20.0"
+    "@premortem/skills": "workspace:*",
+    "@prisma/client": "^5.20.0",
+    "@supabase/supabase-js": "^2.108.0"
   },
   "devDependencies": {
     "prisma": "^5.20.0",

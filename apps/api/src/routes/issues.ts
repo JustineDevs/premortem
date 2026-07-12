@@ -11,6 +11,7 @@ import {
 } from '@premortem/db';
 import {
   ReviewAction,
+  ConsoleReviewAction,
   ReviewStatus,
   allowsPublishDryRun,
   allowsReconcileDryRun,
@@ -104,6 +105,29 @@ export async function handleIssueApprove(request: Request, issueCandidateId: str
       return issueCandidateNotFoundResponse(issueCandidateId);
     }
     throw error;
+  }
+}
+
+export async function handleIssueAction(request: Request, issueCandidateId: string) {
+  const body = (await readJsonRecord(request)) ?? {};
+  const action = body.action;
+
+  switch (action) {
+    case ConsoleReviewAction.CONFIRM:
+    case ConsoleReviewAction.RESOLVE:
+      return handleIssueApprove(request, issueCandidateId);
+    case ConsoleReviewAction.DISMISS:
+      return handleIssueReject(request, issueCandidateId);
+    case ConsoleReviewAction.DEFER:
+      return handleIssueEdit(request, issueCandidateId);
+    case ConsoleReviewAction.MERGE:
+      return handleIssueMerge(request, issueCandidateId);
+    case ConsoleReviewAction.SPLIT:
+      return handleIssueSplit(request, issueCandidateId);
+    case ConsoleReviewAction.PUBLISH:
+      return handleIssuePublish(request, issueCandidateId);
+    default:
+      return Response.json({ error: 'Unsupported review action' }, { status: 400 });
   }
 }
 

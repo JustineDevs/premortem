@@ -13,8 +13,10 @@ export function isStripePriceCatalogConfigured() {
   return Boolean(
     process.env.STRIPE_PRICE_PRO &&
       process.env.STRIPE_PRICE_TEAM &&
+      process.env.STRIPE_PRICE_SCALE &&
       process.env.STRIPE_PRICE_PRO_ANNUAL &&
-      process.env.STRIPE_PRICE_TEAM_ANNUAL
+      process.env.STRIPE_PRICE_TEAM_ANNUAL &&
+      process.env.STRIPE_PRICE_SCALE_ANNUAL
   );
 }
 
@@ -24,14 +26,14 @@ export function isStripeBillingConfigured() {
     isStripeSecretConfigured() &&
       process.env.STRIPE_WEBHOOK_SECRET &&
       process.env.STRIPE_PRICE_PRO &&
-      process.env.STRIPE_PRICE_TEAM
+      process.env.STRIPE_PRICE_TEAM &&
+      process.env.STRIPE_PRICE_SCALE
   );
 }
 
 /**
- * Live Checkout flow. Test keys cannot update account profile via API and often
- * lack a dashboard business name, so local/hackathon upgrades use plan patch instead.
+ * Live Checkout flow is used whenever billing is configured, including test keys.
  */
 export function shouldUseStripeCheckout() {
-  return isStripeBillingConfigured() && !isStripeTestMode();
+  return isStripeBillingConfigured();
 }

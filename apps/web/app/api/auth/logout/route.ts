@@ -6,14 +6,11 @@ import { createRouteHandlerSupabaseClient } from '@/lib/supabase/route-handler';
 
 export async function POST(request: NextRequest) {
   const authClient = await createRouteHandlerSupabaseClient(request);
-
-  if (authClient) {
-    await authClient.supabase.auth.signOut();
-  }
+  await authClient.supabase.auth.signOut();
 
   const redirect = NextResponse.redirect(
     new URL(authLinks.login, getPublicAppOrigin(getRequestOrigin(request))),
     303
   );
-  return authClient ? authClient.attachCookies(redirect) : redirect;
+  return authClient.attachCookies(redirect);
 }

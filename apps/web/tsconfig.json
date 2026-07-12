@@ -10,6 +10,33 @@
       "@premortem/security": [
         "../../packages/security/src"
       ],
+      "@premortem/llm": [
+        "../../packages/llm/src"
+      ],
+      "@premortem/db/actor-context": [
+        "../../packages/db/src/actor-context"
+      ],
+      "@premortem/db/supabase-auth": [
+        "../../packages/db/src/supabase-auth"
+      ],
+      "@premortem/db/workspace-auth": [
+        "../../packages/db/src/workspace-auth"
+      ],
+      "@premortem/ingestion": [
+        "../../packages/ingestion/src"
+      ],
+      "@premortem/observability": [
+        "../../packages/observability/src"
+      ],
+      "@premortem/observability/boot": [
+        "../../packages/observability/src/boot"
+      ],
+      "@premortem/observability/events": [
+        "../../packages/observability/src/events"
+      ],
+      "@premortem/observability/server": [
+        "../../packages/observability/src/server"
+      ],
       "@/*": [
         "./src/*"
       ]
@@ -37,6 +64,7 @@
     "src/**/*.tsx",
     "src/**/*.js",
     "src/**/*.jsx",
+    "middleware.ts",
     ".next/types/**/*.ts"
   ],
   "exclude": [

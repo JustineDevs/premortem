@@ -1,4 +1,5 @@
 node_modules
+.pnpm-store/
 .env
 .env.*
 !.env.example
@@ -15,7 +16,12 @@ apps/web/.wrangler/tmp/
 /.wrangler/state/
 /.wrangler/tmp/
 .open-next
+.open-next/cache/
+.open-next/.build/
 .cloudflare-pages
+.vercel/output/
+.vercel/cache/
+.vercel/node/
 .cursor/hooks/state/
 .turbo
 .cache/
@@ -23,9 +29,30 @@ apps/web/.wrangler/tmp/
 coverage
 dist
 *.log
+*.log.*
+*.pid
+*.pid.lock
+*.seed
 *.tsbuildinfo
+*.stackdump
+*.bak
+*.orig
+*.rej
+*.swp
+*.swo
+*.sqlite-shm
+*.sqlite-wal
+*.db-journal
 packages/*/src/**/*.js
+packages/domain/src/*.js
 **/__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.nyc_output/
+.eslintcache
+.parcel-cache/
+.direnv/
 
 # Internal / private design and strategy
 /internal/
@@ -71,3 +98,5 @@ packages/*/src/**/*.js
 .ma/
 packages/evals/promptfoo/results*.json
 apps/web/tmp-auth-probe-*
+.vercel
+.env*

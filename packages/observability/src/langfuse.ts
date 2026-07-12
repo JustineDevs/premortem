@@ -13,8 +13,13 @@ export function isLangfuseConfigured() {
 }
 
 export function getLangfuseClient() {
-  if (!isLangfuseConfigured()) return null;
   if (client) return client;
+
+  if (!isLangfuseConfigured()) {
+    throw new Error(
+      'Langfuse is required. Set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY before loading the app.'
+    );
+  }
 
   client = new LangfuseClient({
     publicKey: process.env.LANGFUSE_PUBLIC_KEY!,
@@ -27,27 +32,25 @@ export function getLangfuseClient() {
 
 export async function getManagedPrompt(name: string, options: ManagedPromptOptions = {}) {
   const langfuse = getLangfuseClient();
-  if (!langfuse) return options.fallback ?? null;
 
-  const label = options.label ?? process.env.LANGFUSE_PROMPT_LABEL?.trim();
-  if (!label) return options.fallback ?? null;
-
-  try {
-    if (options.type === 'chat') {
-      return await langfuse.prompt.get(name, {
-        label,
-        type: 'chat'
-      });
-    }
-
-    return await langfuse.prompt.get(name, {
-      label,
-      type: 'text',
-      fallback: options.fallback
-    });
-  } catch {
-    return options.fallback ?? null;
+  const label = options.label ?? process.env.LANGFUSE_PROMPT_LABEL?.trim() ?? 'production';
+  if (!label) {
+    throw new Error(
+      'Langfuse prompt sync requires LANGFUSE_PROMPT_LABEL or an explicit label option.'
+    );
   }
+
+  if (options.type === 'chat') {
+    return langfuse.prompt.get(name, {
+      label,
+      type: 'chat'
+    });
+  }
+
+  return langfuse.prompt.get(name, {
+    label,
+    type: 'text'
+  });
 }
 
 export async function createLangfuseScore(input: {
@@ -57,8 +60,6 @@ export async function createLangfuseScore(input: {
   comment?: string;
 }) {
   const langfuse = getLangfuseClient();
-  if (!langfuse) return;
-
   await langfuse.score.create(input);
 }
 
@@ -66,4 +67,21 @@ export async function shutdownLangfuse() {
   if (!client) return;
   await client.shutdown();
   client = null;
+}
+
+export async function probeLangfuseDelivery(input?: {
+  traceId?: string;
+  name?: string;
+  value?: number;
+  comment?: string;
+}) {
+  const langfuse = getLangfuseClient();
+  langfuse.score.create({
+    traceId: input?.traceId ?? `premortem-smoke-${Date.now().toString(36)}`,
+    name: input?.name ?? 'premortem.observability_smoke',
+    value: input?.value ?? 1,
+    comment: input?.comment ?? 'Premortem smoke verification'
+  });
+  await langfuse.score.flush();
+  await shutdownLangfuse();
 }

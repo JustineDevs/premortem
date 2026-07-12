@@ -1,10 +1,16 @@
 'use client';
 
-import { useWorkspaceMutations, useWorkspaceQuery } from '@/hooks/use-os-console-data';
+import {
+  useWorkspaceMutations,
+  useWorkspaceQuery,
+  useAuthStatusQuery,
+  type OsAuthStatusQueryState
+} from '@/hooks/use-os-console-data';
 
-export function useWorkspace() {
-  const query = useWorkspaceQuery();
-  const mutations = useWorkspaceMutations();
+export function useWorkspace(options?: { authStatusQuery?: OsAuthStatusQueryState | null }) {
+  const authStatusQuery = options?.authStatusQuery ?? useAuthStatusQuery();
+  const query = useWorkspaceQuery({ authStatusQuery });
+  const mutations = useWorkspaceMutations({ authStatusQuery });
 
   return {
     workspace: query.data ?? null,
@@ -23,12 +29,16 @@ export function useWorkspace() {
     revokeApiKey: mutations.revokeApiKey,
     registerIntegration: mutations.registerIntegration,
     syncIntegration: mutations.syncIntegration,
+    createSlackConnectSession: mutations.createSlackConnectSession,
+    syncSlackConnection: mutations.syncSlackConnection,
     startCheckout: mutations.startCheckout,
     startBillingPortal: mutations.startBillingPortal,
+    cancelSubscription: mutations.cancelSubscription,
     reconcileIssues: mutations.reconcileIssues,
     cancelAudit: mutations.cancelAudit,
     pauseAudit: mutations.pauseAudit,
     resumeAudit: mutations.resumeAudit,
-    stopAllRuntime: mutations.stopAllRuntime
+    stopAllRuntime: mutations.stopAllRuntime,
+    installSkill: mutations.installSkill
   };
 }

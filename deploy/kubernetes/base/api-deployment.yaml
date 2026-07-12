@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: premortem-api
+  namespace: premortem
+  labels:
+    app.kubernetes.io/name: premortem-api
+    app.kubernetes.io/component: api
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 25%
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: premortem-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: premortem-api
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: premortem-runtime
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: premortem-api
+      containers:
+        - name: api
+          image: premortem-api:prod
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 18787
+          envFrom:
+            - configMapRef:
+                name: premortem-runtime-config
+            - secretRef:
+                name: premortem-runtime-secrets
+          env:
+            - name: PREMORTEM_API_HOST
+              value: 0.0.0.0
+            - name: PREMORTEM_API_PORT
+              value: "18787"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            failureThreshold: 30
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop:
+                - ALL

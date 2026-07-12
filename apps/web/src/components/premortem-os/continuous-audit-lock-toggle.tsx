@@ -1,6 +1,5 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
 import { Lock, LockOpen, Radio } from 'lucide-react';
 
 interface ContinuousAuditLockToggleProps {
@@ -18,14 +17,6 @@ export function ContinuousAuditLockToggle({
   pipelineActive = false,
   layout = 'sidebar'
 }: ContinuousAuditLockToggleProps) {
-  const [animating, setAnimating] = useState(false);
-
-  useEffect(() => {
-    setAnimating(true);
-    const timer = window.setTimeout(() => setAnimating(false), 420);
-    return () => window.clearTimeout(timer);
-  }, [enabled]);
-
   const showLive = enabled && pipelineActive;
   const LockIcon = enabled ? Lock : LockOpen;
   const statusHint = enabled
@@ -78,7 +69,7 @@ export function ContinuousAuditLockToggle({
         </div>
 
         <span
-          className={`continuous-audit-lock-icon shrink-0 ${animating ? (enabled ? 'locking' : 'unlocking') : ''} ${
+          className={`continuous-audit-lock-icon shrink-0 ${
             enabled ? 'is-locked' : 'is-unlocked'
           }`}
         >

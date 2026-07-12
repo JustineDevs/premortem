@@ -19,6 +19,9 @@ export interface AuditCheckpoint {
   findingCount: number;
   clusterCount: number;
   graphSnapshotId?: string | null;
+  projectId?: string;
+  branch?: string;
+  commitSha?: string | null;
   savedAt: string;
   reason?: string;
 }
@@ -41,6 +44,9 @@ export function parseAuditCheckpoint(summary: unknown): AuditCheckpoint | null {
     clusterCount: typeof record.clusterCount === 'number' ? record.clusterCount : 0,
     graphSnapshotId:
       typeof record.graphSnapshotId === 'string' ? record.graphSnapshotId : null,
+    projectId: typeof record.projectId === 'string' ? record.projectId : undefined,
+    branch: typeof record.branch === 'string' ? record.branch : undefined,
+    commitSha: typeof record.commitSha === 'string' ? record.commitSha : null,
     savedAt: typeof record.savedAt === 'string' ? record.savedAt : new Date().toISOString(),
     reason: typeof record.reason === 'string' ? record.reason : undefined
   };

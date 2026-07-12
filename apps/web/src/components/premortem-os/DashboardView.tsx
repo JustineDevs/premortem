@@ -1,7 +1,16 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { premortemBrand } from '@/lib/premortem-os/branding';
+import { buildOsQueryKey, type OsQueryScope } from '@/hooks/use-os-console-data';
+import { isUnauthorizedBffError, shouldRetryBffQuery } from '@/lib/bff-client';
+import {
+  formatDate,
+  getAuditRowKey,
+  parseDateValue,
+  safeNumber
+} from '@/lib/premortem-os/format';
 import { 
   Project, 
   AuditRun, 
@@ -11,21 +20,36 @@ import {
   ShieldCheck, 
   ShieldAlert, 
   RefreshCw, 
-  Radio,
   ArrowUpRight,
   TrendingUp,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Download
 } from 'lucide-react';
 import { OsTableSkeleton } from './os-skeleton';
 import { AuditRuntimeConsole } from './audit-runtime-console';
-import { ContinuousAuditLockToggle } from './continuous-audit-lock-toggle';
 
 const CLUSTER_PREVIEW_COUNT = 3;
 const AUDIT_PREVIEW_COUNT = 5;
 const PROJECT_PREVIEW_COUNT = 4;
+const ACTIVE_AUDIT_STATUSES = new Set(['RUNNING', 'PAUSED', 'QUEUED']);
+
+function isValidAuditId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value !== 'null' && value !== 'undefined';
+}
+
+function pickMostRecentAudit(audits: AuditRun[], status?: string) {
+  return audits.reduce<AuditRun | undefined>((latest, audit) => {
+    if (status && audit.status !== status) return latest;
+    if (!latest) return audit;
+    const currentTime = parseDateValue(audit.date)?.getTime() ?? Number.NEGATIVE_INFINITY;
+    const latestTime = parseDateValue(latest.date)?.getTime() ?? Number.NEGATIVE_INFINITY;
+    return currentTime > latestTime ? audit : latest;
+  }, undefined);
+}
 
 interface DashboardViewProps {
+  queryScope?: OsQueryScope;
   projects: Project[];
   audits: AuditRun[];
   riskClusters: RiskCluster[];
@@ -34,16 +58,16 @@ interface DashboardViewProps {
   onOpenRiskCluster?: (cluster: RiskCluster) => void;
   onNavigateTab?: (tab: string) => void;
   systemScore: number;
-  apiHealthy?: boolean | null;
   runningAudits?: number;
   isLoading?: boolean;
-  continuousAuditEnabled?: boolean;
-  onToggleContinuousAudit?: () => void;
-  isTogglingContinuousAudit?: boolean;
-  continuousAuditPipelineActive?: boolean;
+  runtimeModeLabel?: string;
+  onStartAudit?: () => void | Promise<void>;
+  onPauseAudit?: (auditId: string) => void | Promise<void>;
   onStopAllRuntime?: () => void | Promise<void>;
   onResumeAudit?: (auditId: string) => void | Promise<void>;
   showStopAll?: boolean;
+  isStartAuditPending?: boolean;
+  isPausePending?: boolean;
   isStopAllPending?: boolean;
   isResumePending?: boolean;
   gitLabConnected?: boolean;
@@ -112,6 +136,7 @@ function SeeMoreButton({
 }
 
 export function DashboardView({ 
+  queryScope = null,
   projects, 
   audits, 
   riskClusters,
@@ -120,16 +145,16 @@ export function DashboardView({
   onOpenRiskCluster,
   onNavigateTab,
   systemScore,
-  apiHealthy = null,
   runningAudits = 0,
   isLoading = false,
-  continuousAuditEnabled = false,
-  onToggleContinuousAudit,
-  isTogglingContinuousAudit = false,
-  continuousAuditPipelineActive = false,
+  runtimeModeLabel = 'Manual',
+  onStartAudit,
+  onPauseAudit,
   onStopAllRuntime,
   onResumeAudit,
   showStopAll = false,
+  isStartAuditPending = false,
+  isPausePending = false,
   isStopAllPending = false,
   isResumePending = false,
   gitLabConnected = false,
@@ -140,90 +165,139 @@ export function DashboardView({
   const safeRiskClusters = Array.isArray(riskClusters) ? riskClusters : [];
   const [clustersExpanded, setClustersExpanded] = useState(false);
   const [projectsExpanded, setProjectsExpanded] = useState(false);
-  const [monitorSnapshot, setMonitorSnapshot] = useState<{
-    agentRuns: Array<{ agentName: string; status: string; startedAt?: string | null }>;
-    events: Array<{ eventType: string; actor: string; createdAt: string }>;
-    summary?: unknown;
-  } | null>(null);
+  const [isExportingSarif, setIsExportingSarif] = useState(false);
 
-  const monitorAudit =
-    safeAudits.find((audit) => audit.status === 'RUNNING') ??
-    safeAudits.find((audit) => audit.status === 'PAUSED') ??
-    safeAudits.find((audit) => audit.status === 'COMPLETED') ??
-    safeAudits[0];
-
-  React.useEffect(() => {
-    if (!monitorAudit?.id) {
-      setMonitorSnapshot(null);
-      return;
+  const monitorAudit = useMemo(() => {
+    return (
+      pickMostRecentAudit(safeAudits, 'RUNNING') ??
+      pickMostRecentAudit(safeAudits, 'PAUSED') ??
+      pickMostRecentAudit(safeAudits, 'QUEUED') ??
+      pickMostRecentAudit(safeAudits, 'COMPLETED') ??
+      safeAudits[0]
+    );
+  }, [safeAudits]);
+  const monitorAuditId = isValidAuditId(monitorAudit?.id) ? monitorAudit.id : '';
+  const shouldPollMonitor = useMemo(
+    () =>
+      monitorAudit ? ACTIVE_AUDIT_STATUSES.has(monitorAudit.status) : false,
+    [monitorAudit]
+  );
+  const { data: monitorSnapshot } = useQuery({
+    queryKey: buildOsQueryKey(queryScope, 'dashboard-monitor-snapshot', monitorAuditId),
+    enabled: Boolean(monitorAuditId),
+    staleTime: 15_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    retry: shouldRetryBffQuery,
+    refetchInterval: (query) => {
+      if (isUnauthorizedBffError(query.state.error)) return false;
+      return shouldPollMonitor ? 5000 : false;
+    },
+    queryFn: async () => {
+      const response = await fetch(`/api/audits/${monitorAuditId}?hydrate=0`);
+      if (!response.ok) {
+        throw new Error('Failed to load dashboard monitor snapshot.');
+      }
+      const payload = await response.json();
+      const snapshot = payload.snapshot ?? payload.auditRun ?? null;
+      return snapshot as
+        | {
+            agentRuns: Array<{ agentName: string; status: string; startedAt?: string | null }>;
+            events: Array<{ eventType: string; actor: string; createdAt: string }>;
+            summary?: unknown;
+          }
+        | null;
     }
+  });
+  
+  const totalAuditsCount = useMemo(
+    () => safeAudits.filter((a) => a.status === 'COMPLETED').length,
+    [safeAudits]
+  );
+  const recentAudit = useMemo(() => {
+    const completedAudits = safeAudits.filter((a) => a.status === 'COMPLETED');
+    return completedAudits.reduce<AuditRun | undefined>((latest, audit) => {
+      if (!latest) return audit;
+      const currentTime = parseDateValue(audit.date)?.getTime() ?? Number.NEGATIVE_INFINITY;
+      const latestTime = parseDateValue(latest.date)?.getTime() ?? Number.NEGATIVE_INFINITY;
+      return currentTime > latestTime ? audit : latest;
+    }, undefined);
+  }, [safeAudits]);
 
-    let cancelled = false;
+  const handleExportSarif = useCallback(async () => {
+    const targetAudit = monitorAudit ?? recentAudit;
+    if (!targetAudit) return;
 
-    const loadSnapshot = () => {
-      void fetch(`/api/audits/${monitorAudit.id}?hydrate=0`)
-        .then((response) => response.json())
-        .then((payload) => {
-          const snapshot = payload.snapshot ?? payload.auditRun;
-          if (cancelled || !snapshot) return;
-          setMonitorSnapshot({
-            agentRuns: snapshot.agentRuns ?? [],
-            events: snapshot.events ?? [],
-            summary: snapshot.summary
-          });
-        })
-        .catch(() => {
-          if (!cancelled) setMonitorSnapshot(null);
-        });
-    };
+    setIsExportingSarif(true);
+    try {
+      const response = await fetch(`/api/audits/${targetAudit.id}/sarif`, {
+        headers: { accept: 'application/sarif+json' }
+      });
+      if (!response.ok) {
+        throw new Error(`SARIF export failed (${response.status})`);
+      }
 
-    loadSnapshot();
-
-    if (monitorAudit.status !== 'RUNNING' && monitorAudit.status !== 'PAUSED') {
-      return () => {
-        cancelled = true;
-      };
+      const sarif = await response.text();
+      const blob = new Blob([sarif], { type: 'application/sarif+json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `premortem-audit-${targetAudit.id}.sarif.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsExportingSarif(false);
     }
+  }, [monitorAudit, recentAudit]);
 
-    const timer = window.setInterval(loadSnapshot, 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [monitorAudit?.id, monitorAudit?.status]);
-  
-  const totalAuditsCount = safeAudits.filter((a) => a.status === 'COMPLETED').length;
-  const recentAudit = safeAudits.find((a) => a.status === 'COMPLETED');
-  
-  const totalFindingsCount = safeAudits.reduce((sum, current) => {
-    return sum + (current.findings?.length || 0);
-  }, 0);
+  const totalFindingsCount = useMemo(
+    () =>
+      safeAudits.reduce((sum, current) => {
+        const hydratedFindings = safeNumber(current.findings?.length, 0);
+        const summaryFindings =
+          safeNumber(current.criticalCount, 0) +
+          safeNumber(current.highCount, 0) +
+          safeNumber(current.mediumCount, 0) +
+          safeNumber(current.lowCount, 0);
+        return sum + Math.max(hydratedFindings, summaryFindings);
+      }, 0),
+    [safeAudits]
+  );
 
-  const stats = {
-    critical: safeAudits.reduce((sum, item) => sum + (item.criticalCount || 0), 0),
-    high: safeAudits.reduce((sum, item) => sum + (item.highCount || 0), 0),
-    medium: safeAudits.reduce((sum, item) => sum + (item.mediumCount || 0), 0),
-    low: safeAudits.reduce((sum, item) => sum + (item.lowCount || 0), 0),
-  };
+  const stats = useMemo(
+    () => ({
+      critical: safeAudits.reduce((sum, item) => sum + safeNumber(item.criticalCount, 0), 0),
+      high: safeAudits.reduce((sum, item) => sum + safeNumber(item.highCount, 0), 0),
+      medium: safeAudits.reduce((sum, item) => sum + safeNumber(item.mediumCount, 0), 0),
+      low: safeAudits.reduce((sum, item) => sum + safeNumber(item.lowCount, 0), 0)
+    }),
+    [safeAudits]
+  );
 
   const clustersToShow: RiskCluster[] = safeRiskClusters;
   const hasRealClusters = clustersToShow.length > 0;
   const workspaceEmpty = safeProjects.length === 0 && safeAudits.length === 0 && !isLoading;
 
-  const visibleClusters = clustersExpanded
-    ? clustersToShow
-    : clustersToShow.slice(0, CLUSTER_PREVIEW_COUNT);
+  const visibleClusters = useMemo(
+    () => (clustersExpanded ? clustersToShow : clustersToShow.slice(0, CLUSTER_PREVIEW_COUNT)),
+    [clustersExpanded, clustersToShow]
+  );
 
-  const visibleProjects = projectsExpanded
-    ? safeProjects
-    : safeProjects.slice(0, PROJECT_PREVIEW_COUNT);
+  const visibleProjects = useMemo(
+    () => (projectsExpanded ? safeProjects : safeProjects.slice(0, PROJECT_PREVIEW_COUNT)),
+    [projectsExpanded, safeProjects]
+  );
 
-  const visibleAudits = safeAudits.slice(0, AUDIT_PREVIEW_COUNT);
-  const activeAuditCount = safeAudits.filter(
-    (audit) => audit.status === 'RUNNING'
-  ).length;
+  const visibleAudits = useMemo(() => safeAudits.slice(0, AUDIT_PREVIEW_COUNT), [safeAudits]);
+  const activeAuditCount = useMemo(
+    () => safeAudits.filter((audit) => audit.status === 'RUNNING' || audit.status === 'QUEUED').length,
+    [safeAudits]
+  );
   const activeRuntimeCount = Math.max(runningAudits, activeAuditCount);
-  const pausedAuditCount = safeAudits.filter((audit) => audit.status === 'PAUSED').length;
+  const pausedAuditCount = useMemo(
+    () => safeAudits.filter((audit) => audit.status === 'PAUSED').length,
+    [safeAudits]
+  );
   const runtimeStatusLabel =
     activeRuntimeCount > 0
       ? activeRuntimeCount === 1
@@ -249,30 +323,15 @@ export function DashboardView({
             Real-time compliance validation, AI-guided trace inspections, and automatic risk remediation.
           </p>
         </div>
-        
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-3 w-full md:w-auto">
-          {onToggleContinuousAudit ? (
-            <div className="min-w-[260px]">
-              <ContinuousAuditLockToggle
-                layout="card"
-                enabled={continuousAuditEnabled}
-                onToggle={onToggleContinuousAudit}
-                isPending={isTogglingContinuousAudit}
-                pipelineActive={continuousAuditPipelineActive}
-              />
-            </div>
-          ) : null}
-          <div className={`flex items-center gap-1.5 px-3 py-1 border rounded font-mono text-[11px] self-start ${
-            apiHealthy === false
-              ? 'bg-rose-50 text-rose-800 border-rose-200'
-              : apiHealthy === true
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                : 'bg-zinc-50 text-zinc-600 border-zinc-200'
-          }`}>
-            <Radio size={12} className={apiHealthy === true ? 'text-emerald-600 animate-pulse' : 'text-zinc-500'} />
-            <span>{apiHealthy === false ? 'API offline' : apiHealthy === true ? 'Runtime online' : 'Checking runtime…'}</span>
-          </div>
-        </div>
+        <button
+          type="button"
+          onClick={() => void handleExportSarif()}
+          disabled={isExportingSarif}
+          className="inline-flex items-center gap-1.5 rounded border border-[#EAE6DF] bg-white px-3 py-2 text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-[#1E2522] transition-colors hover:bg-[#FAF8F5] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Download size={12} aria-hidden />
+          <span>{isExportingSarif ? 'Exporting SARIF' : 'Export SARIF'}</span>
+        </button>
       </div>
 
       {workspaceEmpty ? (
@@ -281,7 +340,7 @@ export function DashboardView({
           <p className="mt-1 text-xs text-[#5C6560] leading-relaxed">
             {gitLabConnected
               ? discoveredRepoCount > 0
-                ? `GitLab is connected (${discoveredRepoCount} repositories discovered). Register a project in Projects Inventory, then launch a security scan.`
+                ? `GitLab is connected (${discoveredRepoCount} ${discoveredRepoCount === 1 ? 'repository is' : 'repositories are'} discovered). Open Projects Inventory to enable one, then launch a security scan.`
                 : 'GitLab is connected. Open Projects Inventory to register a repository, then launch your first security scan.'
               : 'Connect GitLab under Integrations and Scope, register a project, then launch your first security scan.'}
           </p>
@@ -370,9 +429,11 @@ export function DashboardView({
           </div>
 
           <div className="mt-4 pt-4 border-t border-[#EAE6DF]/60 text-xs text-[#5C6560] font-mono flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-            <span>TOTAL FINDINGS OVERALL HISTORY: {totalFindingsCount}</span>
-            <span className="text-[10px] px-2 py-0.5 bg-[#FAF8F5] border border-[#EAE6DF] text-[#717A75] rounded">
-              LATEST RUN: {recentAudit ? new Date(recentAudit.date).toLocaleDateString() : 'N/A'}
+            <span>
+              COMPLETED AUDITS: {totalAuditsCount} · TOTAL FINDINGS OVERALL HISTORY: {totalFindingsCount}
+            </span>
+              <span className="text-[10px] px-2 py-0.5 bg-[#FAF8F5] border border-[#EAE6DF] text-[#717A75] rounded">
+              LATEST RUN: {recentAudit ? formatDate(recentAudit.date) : 'N/A'}
             </span>
           </div>
         </div>
@@ -394,9 +455,14 @@ export function DashboardView({
           }
           events={monitorSnapshot?.events ?? []}
           summary={monitorSnapshot?.summary}
+          runtimeModeLabel={runtimeModeLabel}
+          onStartAudit={onStartAudit}
+          onPause={onPauseAudit}
           onStopAll={onStopAllRuntime}
           onResume={onResumeAudit}
           showStopAll={showStopAll}
+          isStartAuditPending={isStartAuditPending}
+          isPausePending={isPausePending}
           isStopAllPending={isStopAllPending}
           isResumePending={isResumePending}
         />
@@ -503,39 +569,45 @@ export function DashboardView({
                   </tr>
                 </thead>
                 <tbody className="text-xs divide-y divide-[#EAE6DF]/60">
-                  {visibleAudits.length === 0 ? (
+                {visibleAudits.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="py-8 px-3 text-center text-[#5C6560]">
                         No audit runs yet. Register a project and launch a security scan to populate this table.
                       </td>
                     </tr>
                   ) : (
-                  visibleAudits.map((audit) => {
-                    const totalRisks = (audit.criticalCount || 0) + (audit.highCount || 0) + (audit.mediumCount || 0) + (audit.lowCount || 0);
+                  visibleAudits.map((audit, index) => {
+                    const totalRisks =
+                      safeNumber(audit.criticalCount, 0) +
+                      safeNumber(audit.highCount, 0) +
+                      safeNumber(audit.mediumCount, 0) +
+                      safeNumber(audit.lowCount, 0);
+                    const score = safeNumber(audit.score, 0);
+                    const rowKey = getAuditRowKey(audit, index);
                     return (
-                      <tr key={audit.id} className="hover:bg-[#FCECF3]/10 transition-all">
+                      <tr key={rowKey} className="hover:bg-[#FCECF3]/10 transition-all">
                         <td className="py-3 px-3 font-mono text-[11px] text-[#717A75]">
-                          {new Date(audit.date).toLocaleDateString()}
+                          {formatDate(audit.date)}
                         </td>
                         <td className="py-3 px-3 font-semibold text-[#1E2522] font-display">
                           {audit.projectName}
                         </td>
                         <td className="py-3 px-3">
                           <span className={`inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded border ${
-                            audit.score >= 85 
+                            score >= 85
                               ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
-                              : audit.score >= 60 
+                              : score >= 60
                                 ? 'bg-amber-50 border-amber-200 text-amber-800'
                                 : 'bg-rose-50 border-rose-200 text-rose-800'
                           }`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${
-                              audit.score >= 85 ? 'bg-emerald-600' : audit.score >= 60 ? 'bg-amber-500' : 'bg-rose-600'
+                              score >= 85 ? 'bg-emerald-600' : score >= 60 ? 'bg-amber-500' : 'bg-rose-600'
                             }`} />
-                            {audit.score >= 85 ? 'SECURE' : 'ATTENTION REQUIRED'}
+                            {score >= 85 ? 'SECURE' : 'ATTENTION REQUIRED'}
                           </span>
                         </td>
                         <td className="py-3 px-3 text-center font-mono font-bold tabular-nums">
-                          {audit.score}
+                          {score}
                         </td>
                         <td className="py-3 px-3 text-center font-mono font-bold text-rose-600 text-sm tabular-nums">
                           {totalRisks}
@@ -543,7 +615,7 @@ export function DashboardView({
                         <td className="py-3 px-3 text-right">
                           <button 
                             type="button"
-                            onClick={() => onSelectAudit(audit.id)}
+                            onClick={() => onSelectAudit(rowKey)}
                             className="p-1 px-2 border border-[#EAE6DF] hover:border-emerald-950 text-[10px] rounded hover:bg-[#FAF8F5] transition-all inline-flex items-center gap-1 font-semibold text-[#1E2522]"
                           >
                             <span>Inspect</span>
@@ -584,9 +656,9 @@ export function DashboardView({
               </p>
 
               <div className="space-y-3 pt-2">
-                <label className="block text-[10px] font-mono tracking-wider text-[#72C8AF] uppercase">
+                <span className="block text-[10px] font-mono tracking-wider text-[#72C8AF] uppercase">
                   Select Scope Repository:
-                </label>
+                </span>
                 <div className="space-y-2">
                   {visibleProjects.length === 0 ? (
                     <button
@@ -594,8 +666,14 @@ export function DashboardView({
                       onClick={() => onNavigateTab?.('projects')}
                       className="w-full text-left p-3 rounded bg-emerald-900/50 border border-dashed border-emerald-700/80 hover:border-[#72C8AF]/40 hover:bg-emerald-900 transition-all text-xs text-[#B2C5BD]"
                     >
-                      <span className="block font-bold text-white font-display">No projects registered</span>
-                      <span className="text-[10px] font-mono mt-1 block">Open Projects Inventory to register a repository</span>
+                      <span className="block font-bold text-white font-display">
+                        {gitLabConnected && discoveredRepoCount > 0 ? 'No enabled projects yet' : 'No projects registered'}
+                      </span>
+                      <span className="text-[10px] font-mono mt-1 block">
+                        {gitLabConnected && discoveredRepoCount > 0
+                          ? `GitLab discovered ${discoveredRepoCount} ${discoveredRepoCount === 1 ? 'repository' : 'repositories'}. Open Projects Inventory to enable one.`
+                          : 'Open Projects Inventory to register a repository'}
+                      </span>
                     </button>
                   ) : (
                   visibleProjects.map((proj) => (

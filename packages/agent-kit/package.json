@@ -12,7 +12,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "postbuild": "node ../../scripts/fix-esm-imports.mjs dist",
+    "postbuild": "tsx --tsconfig ../../tsconfig.base.json ../../scripts/fix-esm-imports.ts dist",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

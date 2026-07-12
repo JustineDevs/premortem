@@ -1,5 +1,6 @@
 export type GraphNodeKind =
   | 'repo'
+  | 'app'
   | 'package'
   | 'service'
   | 'pipeline'
@@ -9,7 +10,8 @@ export type GraphNodeKind =
   | 'file'
   | 'symbol'
   | 'owner'
-  | 'artifact';
+  | 'artifact'
+  | 'vulnerability';
 
 export interface GraphNode {
   id: string;

@@ -13,17 +13,19 @@ import { ExternalLink } from "lucide-react";
 import type { WorkspaceIntegration } from "@/hooks/workspace-types";
 
 interface ProviderConnectCardsProps {
-  connectedProviders: string[];
   integrations?: WorkspaceIntegration[];
 }
 
+const EMPTY_INTEGRATIONS: WorkspaceIntegration[] = [];
+
 export function ProviderConnectCards({
-  connectedProviders,
-  integrations = [],
+  integrations = EMPTY_INTEGRATIONS,
 }: ProviderConnectCardsProps) {
-  const connected = new Set(
-    connectedProviders.map((name) => name.toLowerCase()),
-  );
+  const connected = new Set<string>();
+  for (const integration of integrations) {
+    if (integration.provider) connected.add(integration.provider.toLowerCase());
+    if (integration.name) connected.add(integration.name.toLowerCase());
+  }
   const gitLabAccess = resolveGitLabAccessState(integrations);
   const liveOptions = integrationConnectOptions.filter(
     (option) => option.status === "available",
@@ -111,7 +113,7 @@ export function ProviderConnectCards({
 
       {hiddenConnectorCount > 0 ? (
         <p className="text-[10px] font-mono text-[#717A75] uppercase tracking-wider">
-          Additional connector types are not enabled in this build.
+          Additional connector types are on the roadmap.
         </p>
       ) : null}
     </div>

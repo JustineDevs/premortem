@@ -1,10 +1,1 @@
-import { bffErrorResponse } from '@/lib/server/bff-errors';
-import { proxyPremortemApi } from '@/lib/server/proxy-api';
-
-export async function GET(request: Request) {
-  try {
-    return await proxyPremortemApi('/api/reconciliation', undefined, request);
-  } catch (error) {
-    return bffErrorResponse(error, 'Failed to load reconciliation');
-  }
-}
+export { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT } from '@/lib/server/proxy-route';

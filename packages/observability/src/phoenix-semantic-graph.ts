@@ -176,17 +176,10 @@ export async function fetchPhoenixSemanticGraphForAudit(input: {
   startedAt?: string | Date | null;
   completedAt?: string | Date | null;
 }): Promise<PhoenixSemanticGraphPayload> {
-  const emptyPayload = (source: PhoenixSemanticGraphPayload['source']): PhoenixSemanticGraphPayload => ({
-    configured: isPhoenixClientConfigured(),
-    auditRunId: input.auditRunId,
-    traceIds: [],
-    nodes: [],
-    edges: [],
-    source
-  });
-
   if (!isPhoenixClientConfigured()) {
-    return emptyPayload('unconfigured');
+    throw new Error(
+      'Phoenix semantic graph is required. Set PHOENIX_API_KEY to enable trace inspection.'
+    );
   }
 
   const startTime = input.startedAt ? new Date(input.startedAt) : undefined;
@@ -199,21 +192,31 @@ export async function fetchPhoenixSemanticGraphForAudit(input: {
 
   try {
     matchedSpans = await fetchSpansByAuditAttribute(input.auditRunId, startTime, endTime);
-  } catch {
-    matchedSpans = [];
+  } catch (error) {
+    throw new Error(
+      `Failed to fetch Phoenix spans for audit attribute ${input.auditRunId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   }
 
   if (matchedSpans.length === 0) {
     try {
       const candidates = await fetchCandidateAuditSpans(startTime, endTime);
       matchedSpans = candidates.filter((span) => attributeMatchesAuditRun(span, input.auditRunId));
-    } catch {
-      matchedSpans = [];
+    } catch (error) {
+      throw new Error(
+        `Failed to fetch Phoenix candidate spans for audit ${input.auditRunId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
     }
   }
 
   if (matchedSpans.length === 0) {
-    return emptyPayload('empty');
+    throw new Error(
+      `Phoenix semantic graph missing spans for audit ${input.auditRunId}. Audit tracing must emit Phoenix spans.`
+    );
   }
 
   let spans = matchedSpans;
@@ -225,14 +228,20 @@ export async function fetchPhoenixSemanticGraphForAudit(input: {
       if (traceSpans.length > matchedSpans.length) {
         spans = traceSpans;
       }
-    } catch {
-      spans = matchedSpans;
+    } catch (error) {
+      throw new Error(
+        `Failed to expand Phoenix traces for audit ${input.auditRunId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
     }
   }
 
   const graph = buildGraphFromSpans(spans);
   if (graph.nodes.length === 0) {
-    return emptyPayload('empty');
+    throw new Error(
+      `Phoenix semantic graph produced no nodes for audit ${input.auditRunId}. Trace instrumentation may be broken.`
+    );
   }
 
   return {

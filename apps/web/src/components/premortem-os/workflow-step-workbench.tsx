@@ -1,6 +1,5 @@
 'use client';
 
-import React from 'react';
 import { ChevronDown, ChevronRight, ChevronUp, Info, Workflow, X } from 'lucide-react';
 
 import type { Finding } from '@/lib/premortem-os/types';
@@ -16,10 +15,9 @@ interface WorkflowStepWorkbenchProps {
   activeNodeId: string | null;
   findingsList: Finding[];
   auditSnapshot: WorkflowAuditSnapshot | null;
-  isSimulating: boolean;
-  simulationIndex: number;
-  nodes: CanvasNode[];
   selectedFindingIdForDetail: string | null;
+  selectedAgentRunId: string | null;
+  findingPathFilter: string | null;
   onSelectFinding: (findingId: string | null) => void;
   onClearSelection: () => void;
   onSelectStep: (stepId: string) => void;
@@ -39,10 +37,9 @@ export function WorkflowStepWorkbench({
   activeNodeId,
   findingsList,
   auditSnapshot,
-  isSimulating,
-  simulationIndex,
-  nodes,
   selectedFindingIdForDetail,
+  selectedAgentRunId,
+  findingPathFilter,
   onSelectFinding,
   onClearSelection,
   onSelectStep,
@@ -51,8 +48,6 @@ export function WorkflowStepWorkbench({
   canCollapse = false,
   isCollapsed = false
 }: WorkflowStepWorkbenchProps) {
-  const activeNodeIndex = activeNode ? nodes.findIndex((node) => node.id === activeNode.id) : -1;
-
   return (
     <div
       className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-white"
@@ -74,7 +69,7 @@ export function WorkflowStepWorkbench({
               type="button"
               onClick={onClearSelection}
               aria-label="Clear selection"
-              className="cursor-pointer rounded p-1.5 text-[#8A958F] transition-all hover:bg-[#FAF8F5] hover:text-[#1E2522]"
+              className="cursor-pointer rounded-md border border-transparent p-1.5 text-[#8A958F] transition-all hover:bg-[#FAF8F5] hover:text-[#1E2522] focus-visible:outline-none focus-visible:ring-0"
             >
               <X size={15} />
             </button>
@@ -99,7 +94,7 @@ export function WorkflowStepWorkbench({
               onClick={onToggleCollapse}
               aria-label={isCollapsed ? 'Show segment inspection' : 'Hide segment inspection'}
               title={isCollapsed ? 'Show segment inspection' : 'Hide segment inspection'}
-              className="inline-flex items-center gap-1 rounded border border-[#CDC7BD] bg-white px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-[#5C6560] transition-colors hover:bg-[#FAF8F5] hover:text-[#1E2522]"
+              className="inline-flex items-center gap-1 rounded-md border border-transparent bg-white px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-[#5C6560] transition-colors hover:bg-[#FAF8F5] hover:text-[#1E2522] focus-visible:outline-none focus-visible:ring-0"
             >
               {isCollapsed ? <ChevronDown size={12} aria-hidden /> : <ChevronUp size={12} aria-hidden />}
               {isCollapsed ? 'Show' : 'Hide'}
@@ -112,8 +107,21 @@ export function WorkflowStepWorkbench({
         {activeNode ? (
           <div className="space-y-6 pb-4">
             {activeNode.id === 'node-run-audit' && (
-              <WorkflowDualLanePanel auditSnapshot={auditSnapshot} compact />
+              <WorkflowDualLanePanel
+                auditSnapshot={auditSnapshot}
+                selectedAgentRunId={selectedAgentRunId}
+                compact
+              />
             )}
+
+            {findingPathFilter ? (
+              <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-[10px] leading-relaxed text-emerald-950">
+                <span className="font-mono font-bold uppercase tracking-wider text-emerald-700">
+                  File filter
+                </span>
+                <div className="mt-1 break-all font-mono text-[9px]">{findingPathFilter}</div>
+              </div>
+            ) : null}
 
             <div className="grid grid-cols-1 gap-3 pb-2 md:grid-cols-2">
               <div className="flex min-h-[5.25rem] flex-col justify-between rounded border border-[#EAE6DF] bg-[#FAF8F5] p-3.5">
@@ -121,9 +129,7 @@ export function WorkflowStepWorkbench({
                   Run duration
                 </span>
                 <span className="font-mono text-[11.5px] font-bold text-emerald-950">
-                  {isSimulating && simulationIndex === activeNodeIndex
-                    ? 'replaying...'
-                    : activeNode.metadata.duration || 'pending'}
+                  {activeNode.metadata.duration || 'pending'}
                 </span>
               </div>
               <div className="flex min-h-[5.25rem] flex-col justify-between rounded border border-[#EAE6DF] bg-[#FAF8F5] p-3.5">
@@ -182,7 +188,7 @@ export function WorkflowStepWorkbench({
                 <button
                   type="button"
                   onClick={() => onNavigateTab(activeNode.targetLinkTab)}
-                  className="flex w-full cursor-pointer items-center justify-center gap-1 rounded border border-[#CDC7BD] bg-white py-1 px-2.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-neutral-800 transition-all hover:bg-neutral-50"
+                  className="flex w-full cursor-pointer items-center justify-center gap-1 rounded-md border border-transparent bg-white py-1 px-2.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-neutral-800 transition-all hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-0"
                 >
                   <span>View in {activeNode.targetLinkTab.toUpperCase()} tab</span>
                   <ChevronRight size={12} aria-hidden />
@@ -211,9 +217,9 @@ export function WorkflowStepWorkbench({
                         <button
                           type="button"
                           onClick={() => onSelectFinding(isDetailActive ? null : findingId)}
-                          className={`grid w-full cursor-pointer select-none grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 rounded border p-2.5 text-left transition-all ${
+                          className={`grid w-full cursor-pointer select-none grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 rounded-md border border-transparent p-2.5 text-left transition-all ${
                             isDetailActive
-                              ? 'border-[#1E2522] bg-[#1E2522] text-white'
+                              ? 'border-emerald-900 bg-emerald-950 text-white'
                               : isHighSeverity
                                 ? 'border-rose-200 bg-rose-50/50 hover:bg-rose-50'
                                 : 'border-zinc-200 bg-zinc-50 hover:bg-zinc-100/50'

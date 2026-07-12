@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import type { AppRole, Prisma } from '@prisma/client';
 import { normalizeWorkItemAttributeConfig } from '@premortem/domain';
 export declare const DEFAULT_WORKSPACE_POLICIES: readonly [{
     readonly id: "transport-ssl";
@@ -492,9 +492,20 @@ export declare function syncProviderConnection(connectionId: string): Promise<{
     createdById: string;
     lastSyncedAt: Date | null;
 }>;
+export declare function resolveEffectiveWorkspaceRole(input: {
+    organization: {
+        plan: string;
+        createdById: string;
+        memberCount?: number;
+    };
+    billingPlan?: string | null;
+    membershipRole: string | null | undefined;
+    profileId: string;
+}): AppRole;
 export declare function updateBillingPlan(input: {
     organizationId: string;
-    plan: 'free' | 'pro' | 'team' | 'enterprise';
+    plan: 'free' | 'pro' | 'team' | 'scale' | 'enterprise';
+    actorProfileId?: string | null;
 }): Promise<{
     updatedAt: Date;
     id: string;

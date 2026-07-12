@@ -1,14 +1,25 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import type { RuntimeAuditSnapshot } from '@/lib/premortem-api/client';
+import { buildOsQueryKey, type OsQueryScope } from '@/hooks/use-os-console-data';
+import { isUnauthorizedBffError, shouldRetryBffQuery } from '@/lib/bff-client';
 import { premortemBrand } from '@/lib/premortem-os/branding';
+import {
+  formatDateTime,
+  safeNumber,
+  safeText,
+  safeUppercase
+} from '@/lib/premortem-os/format';
 import { AuditRun, Finding, TraceStep, SeverityType, ConsoleReviewActionValue, RiskCluster } from '@/lib/premortem-os/types';
-import { mapSnapshotToAuditRun } from '@/lib/premortem-api/map-runtime-to-console';
+import { mapFindingComplianceFromAudit, mapSnapshotToAuditRun } from '@/lib/premortem-api/map-runtime-to-console';
 import { ConsoleReviewAction, ConsoleIssueStatus } from '@premortem/domain';
 import { AuditsInvestigationsPanel } from './audits-investigations-panel';
 import { AuditRuntimeConsole } from './audit-runtime-console';
 import { FindingSourceEvidence } from './finding-source-evidence';
 import { SwarmDualLanePanel } from './swarm-dual-lane-panel';
+import { OsEmptyState } from './os-empty-state';
 import { OsTabs } from './os-tabs';
 import { OsToast } from './os-toast';
 import {
@@ -36,6 +47,7 @@ import {
   ThumbsUp,
   Ban,
   Terminal,
+  Download,
   Save,
   GitMerge,
   ExternalLink,
@@ -47,45 +59,60 @@ import {
   Sparkle
 } from 'lucide-react';
 import { parseAuditCheckpoint } from '@premortem/domain';
+import {
+  AiCheckpointCard,
+  AiReasoningCard,
+  AiTaskList
+} from './ai-elements';
 
-const synthesisField = (value: string | undefined, _emptyLabel?: string) =>
-  (value?.trim() ? value : '');
+const synthesisField = (value: string | undefined) => (value?.trim() ? value : '');
+
+const severityStylesMap: Record<SeverityType, { text: string; bg: string; dot: string }> = {
+  CRITICAL: { text: 'text-rose-600', bg: 'bg-rose-50 border-rose-200', dot: 'bg-rose-600' },
+  HIGH: { text: 'text-amber-600', bg: 'bg-amber-50 border-amber-200', dot: 'bg-amber-500' },
+  MEDIUM: { text: 'text-indigo-600', bg: 'bg-indigo-50 border-indigo-200', dot: 'bg-indigo-500' },
+  LOW: { text: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200', dot: 'bg-emerald-500' }
+};
+
+const statusBadgeMap: Record<string, string> = {
+  OPEN: 'bg-zinc-100 text-zinc-700 border border-zinc-200',
+  CONFIRMED: 'bg-amber-50 text-amber-700 border border-amber-200 uppercase font-bold',
+  DISMISSED: 'bg-stone-100 text-stone-500 border border-stone-200 line-through',
+  RESOLVED: 'bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold',
+  PUBLISHED: 'bg-orange-50 text-orange-800 border border-orange-200 font-bold uppercase'
+};
+const ACTIVE_AUDIT_STATUSES = new Set(['RUNNING', 'PAUSED', 'QUEUED']);
+
+function isValidAuditId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value !== 'null' && value !== 'undefined';
+}
+
+function pickMostRecentCompletedAudit(audits: AuditRun[]) {
+  return audits.reduce<AuditRun | null>((latest, audit) => {
+    if (audit.status !== 'COMPLETED') return latest;
+    if (!latest) return audit;
+    const latestTime = new Date(latest.date).getTime();
+    const currentTime = new Date(audit.date).getTime();
+    if (Number.isNaN(latestTime) && Number.isNaN(currentTime)) return latest;
+    if (Number.isNaN(latestTime)) return audit;
+    if (Number.isNaN(currentTime)) return latest;
+    return currentTime > latestTime ? audit : latest;
+  }, null);
+}
 
 function getSeverityStyles(severity: SeverityType) {
-  switch (severity) {
-    case 'CRITICAL':
-      return { text: 'text-rose-600', bg: 'bg-rose-50 border-rose-200', dot: 'bg-rose-600' };
-    case 'HIGH':
-      return { text: 'text-amber-600', bg: 'bg-amber-50 border-amber-200', dot: 'bg-amber-500' };
-    case 'MEDIUM':
-      return { text: 'text-indigo-600', bg: 'bg-indigo-50 border-indigo-200', dot: 'bg-indigo-500' };
-    case 'LOW':
-      return { text: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200', dot: 'bg-emerald-500' };
-  }
+  return severityStylesMap[severity];
 }
 
 function getStatusBadge(status: string) {
-  switch (status) {
-    case 'OPEN':
-      return 'bg-zinc-100 text-zinc-700 border border-zinc-200';
-    case 'CONFIRMED':
-      return 'bg-amber-50 text-amber-700 border border-amber-200 uppercase font-bold';
-    case 'DISMISSED':
-      return 'bg-stone-100 text-stone-500 border border-stone-200 line-through';
-    case 'RESOLVED':
-      return 'bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold';
-    case 'PUBLISHED':
-      return 'bg-orange-50 text-orange-800 border border-orange-200 font-bold uppercase';
-    default:
-      return 'bg-zinc-100 text-zinc-700';
-  }
+  return statusBadgeMap[status] ?? 'bg-zinc-100 text-zinc-700';
 }
 
 interface AuditsViewProps {
+  queryScope?: OsQueryScope;
   audits: AuditRun[];
   selectedAuditId: string | null;
   focusCluster?: RiskCluster | null;
-  onFocusClusterComplete?: () => void;
   onSelectAudit: (auditId: string) => void;
   onUpdateFindingStatus: (auditId: string, issueId: string, action: ConsoleReviewActionValue) => void;
   onUpdateFindingFields: (auditId: string, findingId: string, fields: Partial<Finding>) => void;
@@ -94,18 +121,23 @@ interface AuditsViewProps {
   onDeployPatch: (auditId: string, issueId: string) => void;
   isPatching: boolean;
   onTriggerScan: (projectId: string) => void;
+  runtimeModeLabel?: string;
+  onStartAudit?: () => void | Promise<void>;
+  onPauseAudit?: (auditId: string) => void | Promise<void>;
   onStopAllRuntime?: () => void | Promise<void>;
   onResumeAudit?: (auditId: string) => void | Promise<void>;
   showStopAll?: boolean;
+  isStartAuditPending?: boolean;
+  isPausePending?: boolean;
   isStopAllPending?: boolean;
   isResumePending?: boolean;
 }
 
 export function AuditsView({
+  queryScope = null,
   audits,
   selectedAuditId,
   focusCluster = null,
-  onFocusClusterComplete,
   onSelectAudit,
   onUpdateFindingStatus,
   onUpdateFindingFields,
@@ -114,13 +146,18 @@ export function AuditsView({
   onDeployPatch,
   isPatching,
   onTriggerScan,
+  runtimeModeLabel = 'Manual',
+  onStartAudit,
+  onPauseAudit,
   onStopAllRuntime,
   onResumeAudit,
   showStopAll = false,
+  isStartAuditPending = false,
+  isPausePending = false,
   isStopAllPending = false,
   isResumePending = false
 }: AuditsViewProps) {
-  const [activeTab, setActiveTab] = useState<'summary' | 'findings' | 'swarm'>('findings');
+  const [activeTab, setActiveTab] = useState<'summary' | 'findings' | 'swarm'>('summary');
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
   const [severityFilter, setSeverityFilter] = useState<'ALL' | SeverityType>('ALL');
 
@@ -128,31 +165,92 @@ export function AuditsView({
   const [workspaceMode, setWorkspaceMode] = useState<'inspect' | 'synthesis'>('inspect');
   const [isSyncingToGitLab, setIsSyncingToGitLab] = useState(false);
   const [isSavingSynthesis, setIsSavingSynthesis] = useState(false);
+  const [isExportingSarif, setIsExportingSarif] = useState(false);
   const [mergeTargetId, setMergeTargetId] = useState<string>('');
   const [splitTitle, setSplitTitle] = useState('');
   const [isSplitting, setIsSplitting] = useState(false);
   const [activeAgentId, setActiveAgentId] = useState<string>('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastTone, setToastTone] = useState<'success' | 'error'>('success');
-  const [runtimeSnapshot, setRuntimeSnapshot] = useState<{
-    agentRuns: Array<{ id: string; agentName: string; status: string; startedAt?: string | null; completedAt?: string | null }>;
-    lineage: Array<{ stage: string; id: string; label: string; parentId?: string }>;
-    graphSnapshot?: { nodeCount: number; edgeCount: number } | null;
-    events: Array<{ eventType: string; actor: string; createdAt: string }>;
-    findings: Array<{ id: string; title: string; category: string; severity: string; agentRunId: string }>;
-    summary?: unknown;
-  } | null>(null);
+  const focusedClusterKeyRef = useRef<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const selectedAudit = audits.find((a) => a.id === selectedAuditId) || audits[0];
+  const latestCompletedAudit = useMemo(
+    () => pickMostRecentCompletedAudit(audits),
+    [audits]
+  );
+  const selectedAudit =
+    audits.find((a) => a.id === selectedAuditId) ||
+    latestCompletedAudit ||
+    audits[0];
+  const selectedAuditRecordId = isValidAuditId(selectedAuditId)
+    ? selectedAuditId
+    : isValidAuditId(selectedAudit?.id)
+      ? selectedAudit.id
+      : '';
+  const shouldPollSnapshot =
+    (selectedAudit ? ACTIVE_AUDIT_STATUSES.has(selectedAudit.status) : false) ||
+    activeTab === 'swarm';
+  const { data: runtimeSnapshot } = useQuery<RuntimeAuditSnapshot | null>({
+    queryKey: buildOsQueryKey(queryScope, 'audit-runtime-snapshot', selectedAuditRecordId),
+    enabled: selectedAuditRecordId.length > 0,
+    staleTime: 15_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    retry: shouldRetryBffQuery,
+    refetchInterval: (query) => {
+      if (isUnauthorizedBffError(query.state.error)) return false;
+      return shouldPollSnapshot ? 5000 : false;
+    },
+    queryFn: async (): Promise<RuntimeAuditSnapshot | null> => {
+      const response = await fetch(`/api/audits/${selectedAuditRecordId}?hydrate=1`, {
+        cache: 'no-store'
+      });
+      if (!response.ok) {
+        throw new Error('Failed to load audit snapshot.');
+      }
+      const payload = await response.json();
+      const snapshot = payload.snapshot ?? payload.auditRun ?? null;
+      if (snapshot) {
+        const hydrated = mapSnapshotToAuditRun(
+          snapshot,
+          safeText(selectedAudit?.projectName, 'Selected project'),
+          selectedAudit?.date
+        );
+        onAuditHydrated(selectedAuditRecordId, hydrated);
+      }
+      return snapshot as RuntimeAuditSnapshot | null;
+    }
+  });
   const runtimeCheckpoint = parseAuditCheckpoint(runtimeSnapshot?.summary);
+  const activeAudit = useMemo(() => {
+    if (!runtimeSnapshot || !selectedAudit) return selectedAudit ?? null;
+    return mapSnapshotToAuditRun(
+      runtimeSnapshot,
+      safeText(selectedAudit.projectName, 'Selected project'),
+      selectedAudit.date
+    );
+  }, [runtimeSnapshot, selectedAudit]);
+  const selectedAuditScore = safeNumber(activeAudit?.score, 0);
+  const currentCompliance = activeAudit ? mapFindingComplianceFromAudit(activeAudit) : null;
 
   const showToast = (message: string, tone: 'success' | 'error' = 'success') => {
     setToastMessage(message);
     setToastTone(tone);
-    setTimeout(() => setToastMessage(null), 3050);
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => setToastMessage(null), 3050);
   };
 
-  const alert = (message: string) => showToast(message, 'error');
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    },
+    []
+  );
 
   const setSeverityFilterFromValue = (value: string) => {
     if (value === 'ALL') {
@@ -165,128 +263,132 @@ export function AuditsView({
     }
   };
 
-  React.useEffect(() => {
-    if (!selectedAudit?.id) {
-      setRuntimeSnapshot(null);
-      return;
-    }
+  const findings = activeAudit?.findings ?? [];
+  const defaultFindingId =
+    findings.find((finding) => !finding.mergedIntoId)?.id ?? findings[0]?.id ?? null;
+  const effectiveSelectedFindingId =
+    selectedFindingId && findings.some((finding) => finding.id === selectedFindingId)
+      ? selectedFindingId
+      : defaultFindingId;
+  const focusClusterForAudit =
+    focusCluster && focusCluster.auditRunId === selectedAudit?.id ? focusCluster : null;
+  const clusterKey = focusClusterForAudit
+    ? `${selectedAudit?.id ?? 'unknown'}:${focusClusterForAudit.id}:${focusClusterForAudit.severity}`
+    : null;
+  const selectedAuditLineage = activeAudit?.lineage ?? [];
 
-    let cancelled = false;
-    let inFlight = false;
-    let currentController: AbortController | null = null;
+  useEffect(() => {
+    focusedClusterKeyRef.current = null;
+    setSeverityFilter('ALL');
+    setSelectedFindingId(null);
+  }, [selectedAudit?.id]);
 
-    const loadSnapshot = async (hydrate: boolean) => {
-      if (cancelled || inFlight) return;
-      inFlight = true;
-      const controller = new AbortController();
-      currentController = controller;
-      try {
-        const response = await fetch(
-          `/api/audits/${selectedAudit.id}${hydrate ? '?hydrate=1' : '?hydrate=0'}`,
-          { signal: controller.signal }
-        );
-        const payload = await response.json();
-        const snapshot = payload.snapshot ?? payload.auditRun;
-        if (cancelled || !snapshot) return;
-        setRuntimeSnapshot(snapshot);
-        if (snapshot.agentRuns?.[0]?.id && !activeAgentId) {
-          setActiveAgentId(snapshot.agentRuns[0].id);
-        }
+  useEffect(() => {
+    if (effectiveSelectedFindingId === selectedFindingId) return;
+    setSelectedFindingId(effectiveSelectedFindingId);
+  }, [effectiveSelectedFindingId, selectedFindingId]);
 
-        const hydrated = mapSnapshotToAuditRun(snapshot, selectedAudit.projectName);
-        onAuditHydrated(selectedAudit.id, hydrated);
-      } catch {
-        if (!cancelled) setRuntimeSnapshot(null);
-      } finally {
-        inFlight = false;
-        if (currentController === controller) {
-          currentController = null;
-        }
+  useEffect(() => {
+    if (!clusterKey || clusterKey === focusedClusterKeyRef.current) return;
+
+    const clusterSeverity = focusClusterForAudit?.severity;
+    const clusterIssueIds = new Set<string>();
+    for (const entry of selectedAuditLineage) {
+      if (entry.stage === 'issue_candidate' && entry.parentId === focusClusterForAudit!.id) {
+        clusterIssueIds.add(entry.id);
       }
-    };
-
-    void loadSnapshot(true);
-
-    const shouldPoll =
-      selectedAudit.status === 'RUNNING' ||
-      selectedAudit.status === 'PAUSED' ||
-      activeTab === 'swarm';
-    if (!shouldPoll)
-      return () => {
-        cancelled = true;
-        currentController?.abort();
-      };
-
-    const timer = window.setInterval(() => {
-      void loadSnapshot(false);
-    }, 2000);
-    return () => {
-      cancelled = true;
-      currentController?.abort();
-      window.clearInterval(timer);
-    };
-  }, [selectedAudit?.id, selectedAudit?.projectName, selectedAudit?.status, activeTab, onAuditHydrated]);
-
-  React.useEffect(() => {
-    if (selectedAudit && selectedAudit.findings?.length > 0) {
-      // Find first finding that is not merged or split
-      const nonMerged = selectedAudit.findings.find(f => !f.mergedIntoId);
-      setSelectedFindingId(nonMerged ? nonMerged.id : selectedAudit.findings[0].id);
-    } else {
-      setSelectedFindingId(null);
     }
-  }, [selectedAuditId, selectedAudit]);
-
-  React.useEffect(() => {
-    if (!focusCluster || focusCluster.auditRunId !== selectedAudit?.id) return;
-
-    const findings = selectedAudit.findings ?? [];
-    if (findings.length === 0) return;
-
-    setActiveTab('findings');
-    setSeverityFilter(focusCluster.severity);
-
-    const clusterIssueIds = new Set(
-      (selectedAudit.lineage ?? [])
-        .filter((entry) => entry.stage === 'issue_candidate' && entry.parentId === focusCluster.id)
-        .map((entry) => entry.id)
-    );
-
     const clusterFinding =
       findings.find((finding) => clusterIssueIds.has(finding.id) && !finding.mergedIntoId) ??
-      findings.find((finding) => finding.severity === focusCluster.severity && !finding.mergedIntoId);
-
-    if (clusterFinding) {
-      setSelectedFindingId(clusterFinding.id);
-    }
-
-    onFocusClusterComplete?.();
-  }, [
-    focusCluster,
-    selectedAudit?.id,
-    selectedAudit?.findings,
-    selectedAudit?.lineage,
-    onFocusClusterComplete
-  ]);
+      findings.find((finding) => finding.severity === clusterSeverity && !finding.mergedIntoId);
+    focusedClusterKeyRef.current = clusterKey;
+    setActiveTab('findings');
+    setSeverityFilter(clusterSeverity ?? 'ALL');
+    setSelectedFindingId(clusterFinding?.id ?? defaultFindingId);
+  }, [clusterKey, defaultFindingId, findings, focusClusterForAudit, selectedAuditLineage]);
 
   if (!selectedAudit) {
     return (
-      <div className="flex-1 p-8 text-center text-xs text-[#5C6560] italic">
-        Loading cybersecurity continuous audit logs...
+      <div className="flex-1 overflow-y-auto p-8">
+        <OsEmptyState
+          icon={Activity}
+          title="No audit runs yet"
+          description="Register a project in Projects Inventory, then launch a security scan to populate this view."
+          action={
+            onStartAudit ? (
+              <button
+                type="button"
+                onClick={() => void onStartAudit()}
+                className="rounded border border-emerald-800 bg-emerald-950 px-4 py-2 text-[10px] font-mono font-bold uppercase tracking-wider text-[#72C8AF] transition-colors hover:bg-emerald-900"
+              >
+                Start audit
+              </button>
+            ) : null
+          }
+        />
       </div>
     );
   }
-
-  const findings = selectedAudit.findings || [];
   
   // Exclude findings that have been merged into others to support a clean list
-  const visibleFindings = findings.filter(f => !f.mergedIntoId);
+  const visibleFindings = [] as typeof findings;
+  const filteredFindings = [] as typeof findings;
+  for (const finding of findings) {
+    if (finding.mergedIntoId) continue;
+    visibleFindings.push(finding);
+    if (severityFilter === 'ALL' || finding.severity === severityFilter) {
+      filteredFindings.push(finding);
+    }
+  }
 
-  const filteredFindings = visibleFindings.filter(f => {
-    return severityFilter === 'ALL' || f.severity === severityFilter;
-  });
-
-  const activeFinding = findings.find(f => f.id === selectedFindingId) || filteredFindings[0] || findings[0];
+  const activeFinding =
+    findings.find((finding) => finding.id === effectiveSelectedFindingId) ||
+    filteredFindings[0] ||
+    findings[0];
+  const reasoningFinding = activeFinding ?? findings[0] ?? null;
+  const reasoningEvidenceRefs = reasoningFinding?.evidenceRefs ?? [];
+  const reasoningCheckpointPhase =
+    runtimeCheckpoint?.phase?.replace(/_/g, ' ') ?? activeAudit?.status ?? selectedAudit.status;
+  const reasoningSummary = reasoningFinding
+    ? `Audit ${selectedAuditRecordId} is currently ${activeAudit?.status ?? selectedAudit.status.toLowerCase()} and the selected finding ${reasoningFinding.title} anchors the live reasoning trail at ${reasoningFinding.filepath}:${reasoningFinding.line}.`
+    : `Audit ${selectedAuditRecordId} is currently ${activeAudit?.status ?? selectedAudit.status.toLowerCase()} with ${findings.length} findings and no selected finding. The panel stays live so reviewers can jump into the next actionable item instead of reading placeholder copy.`;
+  const reasoningSteps = [
+    `Checkpoint phase: ${reasoningCheckpointPhase}.`,
+    `Findings in scope: ${findings.length}. Selected finding: ${reasoningFinding ? `${reasoningFinding.title} (${reasoningFinding.severity})` : 'none yet'}.`,
+    reasoningFinding
+      ? `Evidence refs: ${reasoningEvidenceRefs.length}. Source anchor: ${reasoningFinding.filepath}:${reasoningFinding.line}.`
+      : 'Use Focus first finding to move the panel onto a concrete issue before publishing.'
+  ];
+  const handleFocusFirstFinding = () => {
+    if (!defaultFindingId) return;
+    setSelectedFindingId(defaultFindingId);
+    setActiveTab('findings');
+  };
+  const handleOpenSwarmTrace = () => {
+    setActiveTab('swarm');
+  };
+  const handleCopyReasoningPath = async () => {
+    if (!reasoningFinding) return;
+    const pathText = `${reasoningFinding.filepath}:${reasoningFinding.line}`;
+    try {
+      await navigator.clipboard.writeText(pathText);
+      showToast(`Copied ${pathText}.`);
+    } catch {
+      showToast('Unable to copy reasoning path.', 'error');
+    }
+  };
+  const handleCopyReasoningEvidence = async () => {
+    if (!reasoningFinding) return;
+    const evidenceText =
+      reasoningFinding.evidenceRefs?.map((ref) => ref.ref).filter(Boolean).join('\n') ||
+      reasoningFinding.evidence;
+    try {
+      await navigator.clipboard.writeText(evidenceText);
+      showToast('Copied evidence trail.');
+    } catch {
+      showToast('Unable to copy evidence trail.', 'error');
+    }
+  };
 
   // 1. Live Synthesis fields updates on parent state
   const handleFieldChange = (fieldName: string, val: string) => {
@@ -305,9 +407,42 @@ export function AuditsView({
         recommendation: activeFinding.recommendation
       });
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to save synthesis fields.');
+      showToast(error instanceof Error ? error.message : 'Failed to save synthesis fields.', 'error');
     } finally {
       setIsSavingSynthesis(false);
+    }
+  };
+
+  const handleExportSarif = async () => {
+    if (!selectedAudit) return;
+
+    setIsExportingSarif(true);
+    try {
+      const response = await fetch(`/api/audits/${selectedAudit.id}/sarif`, {
+        headers: { accept: 'application/sarif+json' }
+      });
+      if (!response.ok) {
+        const errPayload = await response.json().catch(() => ({}));
+        throw new Error(
+          typeof errPayload.error === 'string'
+            ? errPayload.error
+            : `SARIF export failed (${response.status})`
+        );
+      }
+
+      const sarif = await response.text();
+      const blob = new Blob([sarif], { type: 'application/sarif+json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `premortem-audit-${selectedAudit.id}.sarif.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast('SARIF export downloaded.');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Failed to export SARIF.', 'error');
+    } finally {
+      setIsExportingSarif(false);
     }
   };
 
@@ -353,7 +488,9 @@ export function AuditsView({
             ? errPayload.error
             : `Publish failed (${publishResponse.status})`;
         if (errPayload.code === 'feature_locked') {
-          throw new Error(`${message} Upgrade to Starter in Settings → Billing to publish to GitLab.`);
+          throw new Error(
+            `${message} Free tier includes 3 publishes per month. Upgrade to Starter in Settings → Billing for unlimited publish.`,
+          );
         }
         if (errPayload.code === 'publish_not_approved') {
           throw new Error(message);
@@ -369,8 +506,9 @@ export function AuditsView({
       };
 
       if (publishResult.dryRun) {
-        alert(
-          'Publish dry-run only: no GitLab issue was created. Remove PREMORTEM_PUBLISH_DRY_RUN from .env.local and restart dev to create real GitLab issues.'
+        showToast(
+          'Publish dry-run only: no GitLab issue was created. Remove PREMORTEM_PUBLISH_DRY_RUN from .env.local and restart dev to create real GitLab issues.',
+          'error'
         );
         return;
       }
@@ -406,7 +544,7 @@ export function AuditsView({
         );
       }
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to publish to GitLab.');
+      showToast(error instanceof Error ? error.message : 'Failed to publish to GitLab.', 'error');
     } finally {
       setIsSyncingToGitLab(false);
     }
@@ -424,7 +562,7 @@ export function AuditsView({
       body: JSON.stringify({ mergedIntoIssueCandidateId: activeFinding.id })
     });
     if (!mergeResponse.ok) {
-      alert('Failed to merge findings.');
+      showToast('Failed to merge findings.', 'error');
       return;
     }
 
@@ -466,7 +604,7 @@ export function AuditsView({
         if (auditPayload.snapshot) {
           onAuditHydrated(
             selectedAudit.id,
-            mapSnapshotToAuditRun(auditPayload.snapshot, selectedAudit.projectName)
+            mapSnapshotToAuditRun(auditPayload.snapshot, selectedAudit.projectName, selectedAudit.date)
           );
         }
       }
@@ -476,19 +614,22 @@ export function AuditsView({
       });
       setSplitTitle('');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to split finding.');
+      showToast(error instanceof Error ? error.message : 'Failed to split finding.', 'error');
     } finally {
       setIsSplitting(false);
     }
   };
 
-  const runtimeAgentRuns = runtimeSnapshot?.agentRuns ?? selectedAudit.agentRuns ?? [];
+  const runtimeAgentRuns = runtimeSnapshot?.agentRuns ?? activeAudit?.agentRuns ?? [];
   const snapshotFindings = runtimeSnapshot?.findings ?? [];
   const swarmAgents: SwarmLaneAgent[] = runtimeAgentRuns.map((run) => {
     const agentFindings = snapshotFindings.filter((finding) => finding.agentRunId === run.id);
-    const lineageLabels = (runtimeSnapshot?.lineage ?? selectedAudit.lineage ?? [])
-      .filter((entry) => entry.parentId === run.id || entry.id === run.id)
-      .map((entry) => entry.label);
+    const lineageLabels: string[] = [];
+    for (const entry of runtimeSnapshot?.lineage ?? activeAudit?.lineage ?? []) {
+      if (entry.parentId === run.id || entry.id === run.id) {
+        lineageLabels.push(entry.label);
+      }
+    }
     return {
       id: run.id,
       name: run.agentName,
@@ -517,14 +658,14 @@ export function AuditsView({
 
   const selectedAgent = swarmAgents.find((a) => a.id === activeAgentId) || swarmAgents[0];
   const graphNodeCount =
-    runtimeSnapshot?.graphSnapshot?.nodeCount ?? selectedAudit.graphSnapshot?.nodeCount ?? 0;
-  const lineageEntries = runtimeSnapshot?.lineage ?? selectedAudit.lineage ?? [];
+    runtimeSnapshot?.graphSnapshot?.nodeCount ?? activeAudit?.graphSnapshot?.nodeCount ?? 0;
+  const lineageEntries = runtimeSnapshot?.lineage ?? activeAudit?.lineage ?? [];
 
   return (
-    <div className="flex-1 flex overflow-hidden font-sans h-screen" id="audits-view-panel">
+    <div className="flex min-h-0 flex-1 overflow-hidden font-sans" id="audits-view-panel">
       <AuditsInvestigationsPanel
         audits={audits}
-        selectedAuditId={selectedAudit.id}
+        selectedAuditId={selectedAuditRecordId}
         onSelectAudit={onSelectAudit}
       />
 
@@ -536,28 +677,37 @@ export function AuditsView({
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] uppercase tracking-wider font-mono bg-neutral-100 px-1.5 py-0.5 rounded text-neutral-600 border border-neutral-200">
-                  REF: {selectedAudit.id.toUpperCase()}
+                  REF: {safeUppercase(selectedAuditRecordId)}
                 </span>
                 <span className="text-[11px] font-mono text-[#717A75]">
-                  Audited on {new Date(selectedAudit.date).toLocaleString()}
+                  Audited on {formatDateTime(activeAudit?.date ?? selectedAudit.date)}
                 </span>
               </div>
               <h2 className="text-xl font-bold tracking-tight text-[#1E2522] font-display mt-2">
-                {selectedAudit.projectName} Continuous Security Audit
+                {safeText(activeAudit?.projectName ?? selectedAudit.projectName, 'Selected project')} Continuous Security Audit
               </h2>
             </div>
 
             {/* Compliance Index Circular Gauge */}
-            <div className="flex items-center gap-4 bg-[#F2EFF6]/60 p-3 rounded border border-[#EAE6DF] shrink-0 font-mono text-xs">
-              <div>
-                <span className="block text-[8px] uppercase tracking-widest text-neutral-500">COMPLIANCE INDEX</span>
-                <span className="text-xl font-bold font-display text-zinc-900">{selectedAudit.score}%</span>
+              <div className="flex items-center gap-4 bg-[#F2EFF6]/60 p-3 rounded border border-[#EAE6DF] shrink-0 font-mono text-xs">
+                <div>
+                  <span className="block text-[8px] uppercase tracking-widest text-neutral-500">COMPLIANCE INDEX</span>
+                  <span className="text-xl font-bold font-display text-zinc-900">{selectedAuditScore}%</span>
+                </div>
+                <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm bg-emerald-950 text-white shadow-inner">
+                  {selectedAuditScore}
+                </div>
               </div>
-              <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm bg-emerald-950 text-white shadow-inner">
-                {selectedAudit.score}
-              </div>
+              <button
+                type="button"
+                onClick={() => void handleExportSarif()}
+                disabled={isExportingSarif}
+                className="inline-flex items-center gap-1.5 rounded border border-[#EAE6DF] bg-white px-3 py-2 text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-[#1E2522] transition-colors hover:bg-[#FAF8F5] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Download size={12} aria-hidden />
+                <span>{isExportingSarif ? 'Exporting SARIF' : 'Export SARIF'}</span>
+              </button>
             </div>
-          </div>
 
           {/* Sub-tabs switch */}
           <OsTabs
@@ -583,13 +733,14 @@ export function AuditsView({
                 <div className="p-4 bg-zinc-50 border border-zinc-200 rounded text-xs space-y-1">
                   <h4 className="font-bold text-[#1E2522]">Compliance summary</h4>
                   <p className="text-[#5C6560]">
-                    Structured from the persisted audit checkpoint, runtime counts, and trace lineage.
+                    {currentCompliance ?? 'COMPLIANT'} · {findings.length} findings ·{' '}
+                    {runtimeCheckpoint?.clusterCount ?? 0} clusters
                   </p>
                 </div>
                 <div className="p-4 bg-white border border-[#EAE6DF] rounded text-xs space-y-1">
-                  <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A958F]">Phase</span>
+                  <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A958F]">Execution milestone</span>
                   <p className="font-semibold text-[#1E2522]">
-                    {runtimeCheckpoint?.phase?.replace(/_/g, ' ') ?? selectedAudit.status}
+                    {runtimeCheckpoint?.phase?.replace(/_/g, ' ') ?? activeAudit?.status ?? selectedAudit.status}
                   </p>
                 </div>
                 <div className="p-4 bg-white border border-[#EAE6DF] rounded text-xs space-y-1">
@@ -601,8 +752,131 @@ export function AuditsView({
                 <div className="p-4 bg-white border border-[#EAE6DF] rounded text-xs space-y-1">
                   <span className="block text-[10px] font-mono uppercase tracking-wider text-[#8A958F]">Checkpoint saved</span>
                   <p className="font-semibold text-[#1E2522]">
-                    {runtimeCheckpoint?.savedAt ? new Date(runtimeCheckpoint.savedAt).toLocaleString() : new Date(selectedAudit.date).toLocaleString()}
+                    {runtimeCheckpoint?.savedAt ? new Date(runtimeCheckpoint.savedAt).toLocaleString() : new Date(activeAudit?.date ?? selectedAudit.date).toLocaleString()}
                   </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-4">
+                <div className="space-y-4">
+                  <AiReasoningCard
+                    title="Audit reasoning"
+                    summary={reasoningSummary}
+                    steps={reasoningSteps}
+                  />
+
+                  <div className="rounded-lg border border-[#EAE6DF] bg-white p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-mono text-[10px] font-bold uppercase tracking-[0.24em] text-[#717A75]">
+                          Live reviewer controls
+                        </p>
+                        <p className="mt-1 text-xs text-[#5C6560]">
+                          This panel exists to bind the checkpoint, the selected finding, and its evidence trail to real reviewer actions.
+                        </p>
+                      </div>
+                      <span className="inline-flex rounded border border-[#EAE6DF] bg-[#FAF8F5] px-2 py-1 font-mono text-[9px] font-bold uppercase tracking-[0.18em] text-[#5C6560]">
+                        {reasoningFinding ? reasoningFinding.status : 'No finding selected'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] font-mono">
+                      <div className="rounded border border-[#EAE6DF] bg-[#FAF8F5] px-3 py-2">
+                        <span className="block uppercase tracking-[0.18em] text-[#8A958F]">Checkpoint</span>
+                        <p className="mt-1 text-[#1E2522] font-semibold">{reasoningCheckpointPhase}</p>
+                      </div>
+                      <div className="rounded border border-[#EAE6DF] bg-[#FAF8F5] px-3 py-2">
+                        <span className="block uppercase tracking-[0.18em] text-[#8A958F]">Evidence refs</span>
+                        <p className="mt-1 text-[#1E2522] font-semibold">
+                          {reasoningFinding ? reasoningEvidenceRefs.length : 0}
+                        </p>
+                      </div>
+                    </div>
+
+                    {reasoningFinding ? (
+                      <div className="rounded border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-950">
+                        <p className="font-semibold">{reasoningFinding.title}</p>
+                        <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.18em] text-emerald-800">
+                          {reasoningFinding.filepath}:{reasoningFinding.line}
+                        </p>
+                        <p className="mt-2 leading-relaxed text-emerald-900/90">
+                          {reasoningFinding.description}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="rounded border border-dashed border-[#EAE6DF] bg-[#FAF8F5] px-3 py-2 text-xs text-[#5C6560]">
+                        Select a finding to bind the reasoning panel to a concrete issue.
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={handleFocusFirstFinding}
+                        className="inline-flex items-center gap-1 rounded border border-emerald-800 bg-emerald-950 px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-[#72C8AF] transition-colors hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={!defaultFindingId}
+                      >
+                        Focus first finding
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleOpenSwarmTrace}
+                        className="inline-flex items-center gap-1 rounded border border-[#EAE6DF] bg-white px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-[#1E2522] transition-colors hover:bg-[#FAF8F5]"
+                      >
+                        Open swarm trace
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCopyReasoningPath}
+                        className="inline-flex items-center gap-1 rounded border border-[#EAE6DF] bg-white px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-[#1E2522] transition-colors hover:bg-[#FAF8F5] disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={!reasoningFinding}
+                      >
+                        Copy file path
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCopyReasoningEvidence}
+                        className="inline-flex items-center gap-1 rounded border border-[#EAE6DF] bg-white px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-[#1E2522] transition-colors hover:bg-[#FAF8F5] disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={!reasoningFinding}
+                      >
+                        Copy evidence trail
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <AiCheckpointCard
+                    item={{
+                      phase: runtimeCheckpoint?.phase?.replace(/_/g, ' ') ?? activeAudit?.status ?? selectedAudit.status,
+                      savedAt: runtimeCheckpoint?.savedAt
+                        ? new Date(runtimeCheckpoint.savedAt).toLocaleString()
+                        : new Date(activeAudit?.date ?? selectedAudit.date).toLocaleString(),
+                      summary: runtimeCheckpoint
+                        ? `Checkpoint captured ${runtimeCheckpoint.completedSpecialists.length} specialist(s), ${runtimeCheckpoint.findingCount} findings, and ${runtimeCheckpoint.clusterCount} clusters.`
+                        : `No persisted checkpoint was found yet for this audit.`
+                    }}
+                  />
+
+                  <AiTaskList
+                    items={[
+                      {
+                        label: 'Trace review',
+                        detail: 'Inspect the active finding, its source evidence, and the execution trace.',
+                        state: activeAudit ? 'completed' : 'pending'
+                      },
+                      {
+                        label: 'Finding review',
+                        detail: 'Confirm, dismiss, split, or merge issues before publish.',
+                        state: findings.length > 0 ? 'running' : 'pending'
+                      },
+                      {
+                        label: 'Publish readiness',
+                        detail: 'Validate GitLab synchronization and remediation state.',
+                        state: isPublishedIssueUrl(activeAudit?.findings?.[0]?.gitlabIssueId) ? 'completed' : 'pending'
+                      }
+                    ]}
+                  />
                 </div>
               </div>
 
@@ -700,8 +974,15 @@ export function AuditsView({
                 </div>
 
                 {filteredFindings.length === 0 ? (
-                  <div className="p-8 text-center text-xs text-[#5C6560] italic">
-                    No findings match current severity limits.
+                  <div className="p-8 text-center text-xs text-[#5C6560] space-y-3">
+                    <p className="italic">No findings match the current severity filter.</p>
+                    <button
+                      type="button"
+                      onClick={() => setSeverityFilter('ALL')}
+                      className="inline-flex items-center justify-center rounded border border-[#EAE6DF] bg-white px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-[#1E2522] transition-colors hover:bg-[#FAF8F5]"
+                    >
+                      Reset to all risk sizes
+                    </button>
                   </div>
                 ) : (
                   filteredFindings.map((f) => {
@@ -875,9 +1156,8 @@ export function AuditsView({
                                 </div>
                               </div>
                             ))}
-                            {lineageEntries
-                              .filter((entry) => entry.id === activeFinding.id || entry.parentId === activeFinding.id)
-                              .map((entry) => (
+                            {lineageEntries.map((entry) =>
+                              entry.id === activeFinding.id || entry.parentId === activeFinding.id ? (
                                 <div key={`lineage-${entry.id}`} className="relative flex gap-4">
                                   <div className="w-5 h-5 rounded-full bg-orange-700 text-white flex items-center justify-center font-mono text-[10px] font-bold shrink-0 mt-0.5">
                                     L
@@ -887,7 +1167,8 @@ export function AuditsView({
                                     <p className="text-[#5C6560]">{entry.label}</p>
                                   </div>
                                 </div>
-                              ))}
+                              ) : null
+                            )}
                           </div>
                         </div>
                       )}
@@ -909,7 +1190,7 @@ export function AuditsView({
                           <FolderLock size={12} />
                           REMEDIATION RECOMMENDATION
                         </h4>
-                        <div className="p-4 bg-emerald-50/50 border border-emerald-200/60 rounded text-xs leading-relaxed text-zinc-800">
+                        <div className="p-4 bg-emerald-50/50 border border-emerald-200/60 rounded text-xs leading-relaxed text-emerald-950">
                           {activeFinding.recommendation}
                         </div>
                       </div>
@@ -993,7 +1274,7 @@ export function AuditsView({
                       <div className="p-5 border rounded-lg bg-orange-50/40 border-orange-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2.5">
-                            <span className="p-1 px-2 bg-orange-500 rounded text-stone-100 font-mono font-bold text-[10px] tracking-wider flex items-center gap-1.5">
+                            <span className="p-1 px-2 bg-orange-500 rounded text-white font-mono font-bold text-[10px] tracking-wider flex items-center gap-1.5">
                               <ProviderIcon 
                                 slug="gitlab"
                                 className="w-3 h-3 inline invert"
@@ -1010,7 +1291,7 @@ export function AuditsView({
                         </div>
 
                         {isPublishedIssueUrl(activeFinding.gitlabIssueId) ? (
-                          <div className="p-2.5 bg-emerald-955 text-white bg-emerald-950 rounded flex items-center gap-2 text-xs font-mono font-bold shadow-sm">
+                          <div className="p-2.5 bg-emerald-950 text-white rounded flex items-center gap-2 text-xs font-mono font-bold shadow-sm">
                             <CheckSquare size={14} className="text-emerald-400" />
                             <span className="truncate">CREATED AS {activeFinding.gitlabIssueId}</span>
                           </div>
@@ -1025,10 +1306,14 @@ export function AuditsView({
                       <div className="space-y-5 border border-zinc-200 rounded-lg p-5 bg-[#FAF8F5]/30">
                         {/* 1. Problem / title */}
                         <div className="space-y-1.5 text-xs">
-                          <label className="block font-mono font-bold text-zinc-600 uppercase tracking-wide text-[9.5px]">
+                          <label
+                            htmlFor="finding-title"
+                            className="block font-mono font-bold text-zinc-600 uppercase tracking-wide text-[9.5px]"
+                          >
                             Consolidated Problem Title (Editable)
                           </label>
                           <input 
+                            id="finding-title"
                             type="text" 
                             value={activeFinding.title}
                             onChange={(e) => handleFieldChange('title', e.target.value)}
@@ -1038,10 +1323,14 @@ export function AuditsView({
 
                         {/* 2. Structured Failure Problem Description */}
                         <div className="space-y-1.5 text-xs">
-                          <label className="block font-mono font-bold text-zinc-600 uppercase tracking-wide text-[9.5px]">
+                          <label
+                            htmlFor="finding-description"
+                            className="block font-mono font-bold text-zinc-600 uppercase tracking-wide text-[9.5px]"
+                          >
                             1. Failure Problem Description (Observed code/behaviors)
                           </label>
                           <textarea 
+                            id="finding-description"
                             rows={3}
                             value={activeFinding.description}
                             onChange={(e) => handleFieldChange('description', e.target.value)}
@@ -1051,12 +1340,16 @@ export function AuditsView({
 
                         {/* 3. Expected Behavior */}
                         <div className="space-y-1.5 text-xs">
-                          <label className="block font-mono font-bold text-zinc-600 uppercase tracking-wide text-[9.5px]">
+                          <label
+                            htmlFor="finding-expected-behavior"
+                            className="block font-mono font-bold text-zinc-600 uppercase tracking-wide text-[9.5px]"
+                          >
                             2. Expected Secure Behavior (Perspectives of maintainers)
                           </label>
                           <textarea 
+                            id="finding-expected-behavior"
                             rows={3}
-                            value={synthesisField(activeFinding.expectedBehavior, 'expected behavior')}
+                            value={synthesisField(activeFinding.expectedBehavior)}
                             placeholder="Expected secure behavior from runtime synthesis (edit to enrich before publish)"
                             onChange={(e) => handleFieldChange('expectedBehavior', e.target.value)}
                             className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs text-zinc-800 leading-relaxed font-sans focus:ring-1 focus:ring-emerald-950 focus:outline-none"
@@ -1065,10 +1358,14 @@ export function AuditsView({
 
                         {/* 4. Suggested Fix */}
                         <div className="space-y-1.5 text-xs">
-                          <label className="block font-mono font-bold text-zinc-600 uppercase tracking-wide text-[9.5px]">
+                          <label
+                            htmlFor="finding-recommendation"
+                            className="block font-mono font-bold text-zinc-600 uppercase tracking-wide text-[9.5px]"
+                          >
                             3. Suggested Refactoring Fix Strategies
                           </label>
                           <textarea 
+                            id="finding-recommendation"
                             rows={3}
                             value={activeFinding.recommendation}
                             onChange={(e) => handleFieldChange('recommendation', e.target.value)}
@@ -1078,12 +1375,16 @@ export function AuditsView({
 
                         {/* 5. Success Criteria */}
                         <div className="space-y-1.5 text-xs">
-                          <label className="block font-mono font-bold text-zinc-600 uppercase tracking-wide text-[9.5px]">
+                          <label
+                            htmlFor="finding-success-criteria"
+                            className="block font-mono font-bold text-zinc-600 uppercase tracking-wide text-[9.5px]"
+                          >
                             4. Success Conditions for Closure (Testable test cases)
                           </label>
                           <textarea 
+                            id="finding-success-criteria"
                             rows={3}
-                            value={synthesisField(activeFinding.successCriteria, 'success criteria')}
+                            value={synthesisField(activeFinding.successCriteria)}
                             placeholder="Testable success criteria from runtime (edit before publish)"
                             onChange={(e) => handleFieldChange('successCriteria', e.target.value)}
                             className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs text-zinc-800 leading-relaxed font-sans focus:ring-1 focus:ring-emerald-950 focus:outline-none"
@@ -1092,12 +1393,16 @@ export function AuditsView({
 
                         {/* 6. Why It Matters */}
                         <div className="space-y-1.5 text-xs">
-                          <label className="block font-mono font-bold text-zinc-600 uppercase tracking-wide text-[9.5px]">
+                          <label
+                            htmlFor="finding-why-it-matters"
+                            className="block font-mono font-bold text-zinc-600 uppercase tracking-wide text-[9.5px]"
+                          >
                             5. Why It Matters (DX or reliability impacts justification)
                           </label>
                           <textarea 
+                            id="finding-why-it-matters"
                             rows={3}
-                            value={synthesisField(activeFinding.whyItMatters, 'why it matters')}
+                            value={synthesisField(activeFinding.whyItMatters)}
                             placeholder="Business impact rationale from runtime synthesis"
                             onChange={(e) => handleFieldChange('whyItMatters', e.target.value)}
                             className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs text-zinc-800 leading-relaxed font-sans focus:ring-1 focus:ring-emerald-950 focus:outline-none"
@@ -1128,19 +1433,23 @@ export function AuditsView({
                         </p>
 
                         <div className="mt-3 space-y-2 text-xs">
+                          <label htmlFor="merge-target-id" className="sr-only">
+                            Choose a duplicate finding to merge
+                          </label>
                           <select
+                            id="merge-target-id"
                             value={mergeTargetId}
                             onChange={(e) => setMergeTargetId(e.target.value)}
                             className="w-full min-w-0 p-2 border border-[#EAE6DF] rounded bg-white font-sans focus:outline-none focus:border-emerald-950 text-neutral-800"
                           >
                             <option value="">-- Choose overlapping duplicate finding to merge --</option>
-                            {findings
-                              .filter(f => f.id !== activeFinding.id && !f.mergedIntoId)
-                              .map(f => (
+                            {findings.map((f) =>
+                              f.id !== activeFinding.id && !f.mergedIntoId ? (
                                 <option key={f.id} value={f.id}>
                                   [{f.severity}] {f.title} ({f.filepath})
                                 </option>
-                              ))}
+                              ) : null
+                            )}
                           </select>
 
                           <div className="flex justify-end">
@@ -1169,7 +1478,11 @@ export function AuditsView({
                         </div>
 
                         <div className="space-y-2">
+                          <label htmlFor="split-finding-title" className="sr-only">
+                            Title for the split follow-up issue
+                          </label>
                           <input
+                            id="split-finding-title"
                             type="text"
                             value={splitTitle}
                             onChange={(e) => setSplitTitle(e.target.value)}
@@ -1272,7 +1585,7 @@ export function AuditsView({
                 <div className="p-3 bg-white border border-[#EAE6DF] rounded text-center space-y-1">
                   <span className="block text-[9px] uppercase tracking-wider font-mono text-[#8A958F]">CURRENT PHASE</span>
                   <p className="text-xl font-bold font-display text-zinc-900">
-                    {runtimeCheckpoint?.phase?.replace(/_/g, ' ') ?? selectedAudit.status}
+                    {runtimeCheckpoint?.phase?.replace(/_/g, ' ') ?? activeAudit?.status ?? selectedAudit.status}
                   </p>
                 </div>
 
@@ -1291,13 +1604,18 @@ export function AuditsView({
 
               <AuditRuntimeConsole
                 auditId={selectedAudit.id}
-                auditStatus={selectedAudit.status}
+                auditStatus={activeAudit?.status ?? selectedAudit.status}
                 agentRuns={runtimeAgentRuns}
                 events={runtimeSnapshot?.events ?? []}
                 summary={runtimeSnapshot?.summary}
+                runtimeModeLabel={runtimeModeLabel}
+                onStartAudit={onStartAudit}
+                onPause={onPauseAudit}
                 onStopAll={onStopAllRuntime}
                 onResume={onResumeAudit}
                 showStopAll={showStopAll}
+                isStartAuditPending={isStartAuditPending}
+                isPausePending={isPausePending}
                 isStopAllPending={isStopAllPending}
                 isResumePending={isResumePending}
               />
@@ -1323,7 +1641,7 @@ export function AuditsView({
                       <Terminal size={12} />
                       Agent telemetry buffer
                     </span>
-                    <span>Agent Instance: {selectedAgent.name}</span>
+                    <span>Agent Instance: {safeText(selectedAgent.name, 'Agent')}</span>
                   </div>
 
                   <div className="bg-neutral-950 font-mono text-[11px] text-zinc-300 rounded-lg p-5 overflow-hidden shadow-inner border border-neutral-800 leading-relaxed max-h-48 overflow-y-auto">
@@ -1333,13 +1651,13 @@ export function AuditsView({
                           key={log}
                           className={
                             log.includes('CRITICAL') || log.includes('HIGH')
-                              ? 'text-rose-500 font-bold'
-                              : log.includes('MEDIUM')
+                          ? 'text-rose-500 font-bold'
+                          : log.includes('MEDIUM')
                                 ? 'text-amber-500'
                                 : 'text-zinc-300'
                           }
                         >
-                          &gt; [{selectedAgent.id.toUpperCase()}] {log}
+                          &gt; [{safeUppercase(selectedAgent.id)}] {log}
                         </p>
                       ))}
                     </div>

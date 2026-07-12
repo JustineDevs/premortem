@@ -14,22 +14,18 @@ export function isNeo4jGraphEnabled(): boolean {
   return Boolean(process.env.NEO4J_URI ?? createNeo4jConfig().uri);
 }
 
-/** Serialize graph node and edge properties into Neo4j-safe JSON text. */
-function serializeProps(props: Record<string, unknown> | undefined): string {
-  return JSON.stringify(props ?? {});
-}
+function normalizeProps(
+  value: unknown,
+  omitKeys: string[] = []
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
 
-/** Deserialize persisted Neo4j JSON text back into plain graph properties. */
-function deserializeProps(value: unknown): Record<string, unknown> | undefined {
-  if (typeof value !== 'string' || value.length === 0) return undefined;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : undefined;
-  } catch {
-    return undefined;
+  const props = { ...(value as Record<string, unknown>) };
+  for (const key of omitKeys) {
+    delete props[key];
   }
+
+  return Object.keys(props).length > 0 ? props : undefined;
 }
 
 /** Persist an audit graph snapshot in Neo4j (ACID transaction, audit-scoped nodes). */
@@ -41,14 +37,14 @@ export async function writeGraphSnapshotToNeo4j(snapshot: GraphSnapshotPayload):
     id: node.id,
     label: node.label,
     kind: node.kind,
-    propsJson: serializeProps(node.props)
+    props: node.props ?? {}
   }));
 
   const edges = snapshot.edges.map((edge) => ({
     from: edge.from,
     to: edge.to,
     type: edge.type,
-    propsJson: serializeProps(edge.props)
+    props: edge.props ?? {}
   }));
 
   try {
@@ -74,7 +70,7 @@ export async function writeGraphSnapshotToNeo4j(snapshot: GraphSnapshotPayload):
           `
           UNWIND $nodes AS node
           MERGE (n:GraphNode {auditRunId: $auditRunId, id: node.id})
-          SET n.label = node.label, n.kind = node.kind, n.propsJson = node.propsJson
+          SET n.label = node.label, n.kind = node.kind, n += node.props
           WITH n
           MATCH (a:AuditRun {id: $auditRunId})
           MERGE (a)-[:HAS_NODE]->(n)
@@ -90,7 +86,7 @@ export async function writeGraphSnapshotToNeo4j(snapshot: GraphSnapshotPayload):
           MATCH (f:GraphNode {auditRunId: $auditRunId, id: edge.from})
           MATCH (t:GraphNode {auditRunId: $auditRunId, id: edge.to})
           MERGE (f)-[r:RELATES_TO {type: edge.type}]->(t)
-          SET r.propsJson = edge.propsJson
+          SET r += edge.props
           `,
           { auditRunId: snapshot.auditRunId, edges }
         );
@@ -128,7 +124,7 @@ export async function readGraphSnapshotFromNeo4j(auditRunId: string): Promise<Gr
       tx.run(
         `
         MATCH (:AuditRun {id: $auditRunId})-[:HAS_NODE]->(n:GraphNode)
-        RETURN n.id AS id, n.label AS label, n.kind AS kind, n.propsJson AS propsJson
+        RETURN n.id AS id, n.label AS label, n.kind AS kind, properties(n) AS props
         ORDER BY n.id
         `,
         { auditRunId }
@@ -144,7 +140,7 @@ export async function readGraphSnapshotFromNeo4j(auditRunId: string): Promise<Gr
         `
         MATCH (:AuditRun {id: $auditRunId})-[:HAS_NODE]->(f:GraphNode)-[r:RELATES_TO]->(t:GraphNode)
         WHERE t.auditRunId = $auditRunId
-        RETURN f.id AS from, t.id AS to, r.type AS type, r.propsJson AS propsJson
+        RETURN f.id AS from, t.id AS to, r.type AS type, properties(r) AS props
         ORDER BY f.id, t.id, r.type
         `,
         { auditRunId }
@@ -158,13 +154,13 @@ export async function readGraphSnapshotFromNeo4j(auditRunId: string): Promise<Gr
         id: String(record.get('id')),
         label: String(record.get('label')),
         kind: String(record.get('kind')) as GraphSnapshotPayload['nodes'][number]['kind'],
-        props: deserializeProps(record.get('propsJson'))
+        props: normalizeProps(record.get('props'), ['id', 'label', 'kind', 'auditRunId'])
       })),
       edges: edgeResult.records.map((record) => ({
         from: String(record.get('from')),
         to: String(record.get('to')),
         type: String(record.get('type')),
-        props: deserializeProps(record.get('propsJson'))
+        props: normalizeProps(record.get('props'), ['type'])
       }))
     };
   } finally {

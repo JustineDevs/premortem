@@ -16,6 +16,7 @@ import { zoom as d3Zoom, zoomIdentity, type D3ZoomEvent, type ZoomBehavior } fro
 import 'd3-transition';
 import type { Simulation } from 'd3-force';
 
+import type { WorkflowDiffState } from './workflow-diff-model';
 import type { WorkflowGraphEdge, WorkflowGraphNode } from './workflow-graph.types';
 
 type GraphNodeDatum = WorkflowGraphNode & {
@@ -45,6 +46,10 @@ interface WorkflowD3GraphProps {
   graphEdges: WorkflowGraphEdge[];
   selectedGraphNodeId?: string | null;
   selectedEdgeId?: string | null;
+  highlightedNodeIds?: readonly string[] | null;
+  highlightedEdgeIds?: readonly string[] | null;
+  nodeStates?: Record<string, WorkflowDiffState>;
+  edgeStates?: Record<string, WorkflowDiffState>;
   memoryUpdating?: boolean;
   showEdgeLabels?: boolean;
   emptyMessage?: string;
@@ -52,6 +57,7 @@ interface WorkflowD3GraphProps {
   phoenixConfigured?: boolean;
   onSelectGraphNode?: (id: string | null) => void;
   onSelectGraphEdge?: (id: string | null) => void;
+  onNodeContextMenu?: (node: WorkflowGraphNode, position: { x: number; y: number }) => void;
 }
 
 const TYPE_COLORS = [
@@ -121,13 +127,18 @@ export function WorkflowD3Graph({
   graphEdges,
   selectedGraphNodeId = null,
   selectedEdgeId = null,
+  highlightedNodeIds = null,
+  highlightedEdgeIds = null,
+  nodeStates,
+  edgeStates,
   memoryUpdating = false,
   showEdgeLabels = true,
   emptyMessage,
   semanticIncluded = false,
   phoenixConfigured = false,
   onSelectGraphNode,
-  onSelectGraphEdge
+  onSelectGraphEdge,
+  onNodeContextMenu
 }: WorkflowD3GraphProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const viewportRef = useRef<SVGGElement | null>(null);
@@ -136,15 +147,14 @@ export function WorkflowD3Graph({
   const nodeLayerRef = useRef<SVGGElement | null>(null);
   const simulationRef = useRef<Simulation<GraphNodeDatum, GraphLinkDatum> | null>(null);
   const zoomBehaviorRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
-  const seedPositionsRef = useRef(new Map<string, { x: number; y: number }>());
+  const seedPositions = useMemo(() => new Map<string, { x: number; y: number }>(), []);
   const initializedGraphRef = useRef<string | null>(null);
   const [canvasSize, setCanvasSize] = useState<CanvasSize>({ width: 0, height: 0 });
   const [visibleCount, setVisibleCount] = useState(0);
 
-  const graphSignature = useMemo(
-    () => `${graphNodes.map((node) => node.id).join('|')}::${graphEdges.map((edge) => edge.id).join('|')}`,
-    [graphEdges, graphNodes]
-  );
+  const graphSignature = `${graphNodes.map((node) => node.id).join('|')}::${graphEdges
+    .map((edge) => edge.id)
+    .join('|')}`;
 
   const graphWidth = Math.max(canvasSize.width, 640);
   const graphHeight = Math.max(canvasSize.height, 220);
@@ -163,6 +173,14 @@ export function WorkflowD3Graph({
   }, [graphNodes, memoryUpdating, visibleCount]);
 
   const visibleNodeSet = useMemo(() => new Set(visibleNodes.map((node) => node.id)), [visibleNodes]);
+  const highlightedNodeSet = useMemo(
+    () => new Set((highlightedNodeIds ?? []).filter((id): id is string => Boolean(id))),
+    [highlightedNodeIds]
+  );
+  const highlightedEdgeSet = useMemo(
+    () => new Set((highlightedEdgeIds ?? []).filter((id): id is string => Boolean(id))),
+    [highlightedEdgeIds]
+  );
 
   const activeLinks = useMemo(() => {
     return graphEdges.filter((edge) => visibleNodeSet.has(edge.from) && visibleNodeSet.has(edge.to));
@@ -174,10 +192,13 @@ export function WorkflowD3Graph({
 
     const updateSize = () => {
       const { width, height } = element.getBoundingClientRect();
-      setCanvasSize({
-        width: Math.max(Math.round(width), 640),
-        height: Math.max(Math.round(height), 220)
-      });
+      const nextWidth = Math.max(Math.round(width), 640);
+      const nextHeight = Math.max(Math.round(height), 220);
+      setCanvasSize((current) =>
+        current.width === nextWidth && current.height === nextHeight
+          ? current
+          : { width: nextWidth, height: nextHeight }
+      );
     };
 
     updateSize();
@@ -190,7 +211,6 @@ export function WorkflowD3Graph({
 
   useEffect(() => {
     if (memoryUpdating) {
-      setVisibleCount(0);
       let cancelled = false;
       const start = performance.now();
 
@@ -228,7 +248,7 @@ export function WorkflowD3Graph({
     const currentNodes = visibleNodes.map((node, index): GraphNodeDatum => {
       const degree = degreeMap.get(node.id) ?? 0;
       const radius = degreeRadius(degree);
-      const seed = seedPositionsRef.current.get(node.id);
+      const seed = seedPositions.get(node.id);
       const anchor = laneAnchor(node, graphWidth, graphHeight);
       const spread = 28 + (index % 4) * 4;
       const angle = (index % 8) * (Math.PI / 4);
@@ -353,34 +373,85 @@ export function WorkflowD3Graph({
         (exit) => exit.transition().duration(140).style('opacity', 0).remove()
       );
 
-    const activeNodeIds = new Set<string>();
-    if (selectedGraphNodeId) {
-      activeNodeIds.add(selectedGraphNodeId);
-      for (const edge of linkData) {
-        if (edge.sourceId === selectedGraphNodeId) activeNodeIds.add(edge.targetId);
-        if (edge.targetId === selectedGraphNodeId) activeNodeIds.add(edge.sourceId);
-      }
-    }
-
     const renderStyles = () => {
+      const activeNodeIds = new Set<string>();
+      if (selectedGraphNodeId) {
+        activeNodeIds.add(selectedGraphNodeId);
+        for (const edge of linkData) {
+          if (edge.sourceId === selectedGraphNodeId) activeNodeIds.add(edge.targetId);
+          if (edge.targetId === selectedGraphNodeId) activeNodeIds.add(edge.sourceId);
+        }
+      }
+
       nodeSelection
-        .attr('opacity', (d) =>
-        selectedGraphNodeId && !activeNodeIds.has(d.id) ? 0.62 : 1
-        )
+        .attr('opacity', (d) => {
+          if (highlightedNodeSet.size > 0 && !highlightedNodeSet.has(d.id)) {
+            return 0.2;
+          }
+          return selectedGraphNodeId && !activeNodeIds.has(d.id) ? 0.62 : 1;
+        })
         .each(function updateNodeStyles(this: SVGGElement, d: GraphNodeDatum) {
           const isSelected = selectedGraphNodeId === d.id;
           const isConnected = activeNodeIds.has(d.id);
+          const diffState = nodeStates?.[d.id];
+          const nodeFill =
+            diffState === 'new'
+              ? '#FEE2E2'
+              : diffState === 'resolved'
+                ? '#DCFCE7'
+                : diffState === 'unchanged'
+                  ? '#E5E7EB'
+                  : d.color;
           select(this)
             .select<SVGCircleElement>('circle.graph-node-core')
+            .attr('fill', nodeFill)
             .attr('stroke', isSelected ? '#064E3B' : 'transparent')
             .attr('stroke-width', isSelected ? 2 : 0)
             .attr('opacity', isConnected ? 1 : 0.84);
         });
 
       linkSelection
-        .attr('stroke', (d: GraphLinkDatum) => (selectedEdgeId === d.id ? '#D6B4FF' : '#B8B0A6'))
-        .attr('stroke-width', (d: GraphLinkDatum) => (selectedEdgeId === d.id ? 2 : 1.2))
-        .attr('stroke-opacity', (d: GraphLinkDatum) => (selectedEdgeId === d.id ? 1 : 0.6));
+        .attr('stroke', (d: GraphLinkDatum) => {
+          if (highlightedEdgeSet.has(d.id)) return '#F59E0B';
+          const diffState = edgeStates?.[d.id];
+          if (diffState === 'new') return '#EF4444';
+          if (diffState === 'resolved') return '#16A34A';
+          if (selectedEdgeId === d.id) return '#D6B4FF';
+          if (highlightedNodeSet.size > 0) {
+            const touched = highlightedNodeSet.has(d.sourceId) || highlightedNodeSet.has(d.targetId);
+            return touched ? '#F59E0B' : '#D9C8A9';
+          }
+          return '#B8B0A6';
+        })
+        .attr('stroke-width', (d: GraphLinkDatum) => {
+          if (highlightedEdgeSet.has(d.id)) return 2.5;
+          const diffState = edgeStates?.[d.id];
+          if (diffState === 'new' || diffState === 'resolved') return 2.2;
+          return selectedEdgeId === d.id ? 2 : 1.2;
+        })
+        .attr('stroke-opacity', (d: GraphLinkDatum) => {
+          if (highlightedEdgeSet.has(d.id)) return 1;
+          if (highlightedNodeSet.size > 0) {
+            return highlightedNodeSet.has(d.sourceId) || highlightedNodeSet.has(d.targetId) ? 1 : 0.18;
+          }
+          return selectedEdgeId === d.id ? 1 : 0.6;
+        })
+        .attr('stroke-dasharray', (d: GraphLinkDatum) => {
+          if (highlightedEdgeSet.has(d.id)) return '6 4';
+          const diffState = edgeStates?.[d.id];
+          if (diffState === 'new' || diffState === 'resolved') return '5 4';
+          return null;
+        })
+        .style('animation', (d: GraphLinkDatum) => {
+          if (
+            highlightedEdgeSet.has(d.id) ||
+            (highlightedNodeSet.size > 0 &&
+              (highlightedNodeSet.has(d.sourceId) || highlightedNodeSet.has(d.targetId)))
+          ) {
+            return 'workflow-link-pulse 1.35s ease-in-out infinite';
+          }
+          return null;
+        });
 
       linkLabelSelection
         .attr('fill', (d: GraphLinkDatum) => (selectedEdgeId === d.id ? '#E7D9FF' : '#D7E4DA'))
@@ -392,6 +463,18 @@ export function WorkflowD3Graph({
         event.stopPropagation();
         onSelectGraphEdge?.(null);
         onSelectGraphNode?.(d.id);
+      })
+      .on('contextmenu', function handleGraphNodeContextMenu(
+        this: SVGGElement,
+        event: MouseEvent,
+        d: GraphNodeDatum
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        onNodeContextMenu?.(d, {
+          x: event.clientX,
+          y: event.clientY
+        });
       })
       .call(dragBehavior as any);
 
@@ -457,7 +540,7 @@ export function WorkflowD3Graph({
       initializedGraphRef.current = graphSignature;
       const initialTransform = zoomIdentity.translate(0, 0).scale(DEFAULT_VIEW_SCALE);
       if (!zoomBehaviorRef.current) {
-          zoomBehaviorRef.current = d3Zoom<SVGSVGElement, unknown>()
+        zoomBehaviorRef.current = d3Zoom<SVGSVGElement, unknown>()
           .scaleExtent([MIN_VIEW_SCALE, MAX_VIEW_SCALE])
           .filter((event: WheelEvent | MouseEvent) => {
             if ((event as WheelEvent).ctrlKey) return false;
@@ -484,11 +567,6 @@ export function WorkflowD3Graph({
     renderStyles();
 
     return () => {
-      currentNodes.forEach((node) => {
-        if (Number.isFinite(node.x) && Number.isFinite(node.y)) {
-          seedPositionsRef.current.set(node.id, { x: node.x ?? 0, y: node.y ?? 0 });
-        }
-      });
       simulation.stop();
     };
   }, [
@@ -498,12 +576,113 @@ export function WorkflowD3Graph({
     graphSignature,
     graphWidth,
     memoryUpdating,
+    onNodeContextMenu,
     onSelectGraphEdge,
     onSelectGraphNode,
-    selectedEdgeId,
-    selectedGraphNodeId,
     showEdgeLabels,
+    seedPositions,
     visibleNodes
+  ]);
+
+  useEffect(() => {
+    if (!svgRef.current || !viewportRef.current || !linkLayerRef.current || !nodeLayerRef.current) {
+      return;
+    }
+
+    const nodeSelection = select(nodeLayerRef.current).selectAll<SVGGElement, GraphNodeDatum>('g.graph-node');
+    const linkSelection = select(linkLayerRef.current).selectAll<SVGLineElement, GraphLinkDatum>('line.graph-link');
+    const linkLabelSelection = select(linkLabelLayerRef.current).selectAll<SVGTextElement, GraphLinkDatum>('text.graph-edge-label');
+
+    const activeNodeIds = new Set<string>();
+    if (selectedGraphNodeId) {
+      activeNodeIds.add(selectedGraphNodeId);
+      for (const edge of activeLinks) {
+        if (edge.from === selectedGraphNodeId) activeNodeIds.add(edge.to);
+        if (edge.to === selectedGraphNodeId) activeNodeIds.add(edge.from);
+      }
+    }
+
+    nodeSelection
+      .attr('opacity', (d) => {
+        if (highlightedNodeSet.size > 0 && !highlightedNodeSet.has(d.id)) {
+          return 0.2;
+        }
+        return selectedGraphNodeId && !activeNodeIds.has(d.id) ? 0.62 : 1;
+      })
+      .each(function updateNodeStyles(this: SVGGElement, d: GraphNodeDatum) {
+        const isSelected = selectedGraphNodeId === d.id;
+        const isConnected = activeNodeIds.has(d.id);
+        const diffState = nodeStates?.[d.id];
+        const nodeFill =
+          diffState === 'new'
+            ? '#FEE2E2'
+            : diffState === 'resolved'
+              ? '#DCFCE7'
+              : diffState === 'unchanged'
+                ? '#E5E7EB'
+                : d.color;
+        select(this)
+          .select<SVGCircleElement>('circle.graph-node-core')
+          .attr('fill', nodeFill)
+          .attr('stroke', isSelected ? '#064E3B' : 'transparent')
+          .attr('stroke-width', isSelected ? 2 : 0)
+          .attr('opacity', isConnected ? 1 : 0.84);
+      });
+
+    linkSelection
+      .attr('stroke', (d: GraphLinkDatum) => {
+        if (highlightedEdgeSet.has(d.id)) return '#F59E0B';
+        const diffState = edgeStates?.[d.id];
+        if (diffState === 'new') return '#EF4444';
+        if (diffState === 'resolved') return '#16A34A';
+        if (selectedEdgeId === d.id) return '#D6B4FF';
+        if (highlightedNodeSet.size > 0) {
+          const touched = highlightedNodeSet.has(d.sourceId) || highlightedNodeSet.has(d.targetId);
+          return touched ? '#F59E0B' : '#D9C8A9';
+        }
+        return '#B8B0A6';
+      })
+      .attr('stroke-width', (d: GraphLinkDatum) => {
+        if (highlightedEdgeSet.has(d.id)) return 2.5;
+        const diffState = edgeStates?.[d.id];
+        if (diffState === 'new' || diffState === 'resolved') return 2.2;
+        return selectedEdgeId === d.id ? 2 : 1.2;
+      })
+      .attr('stroke-opacity', (d: GraphLinkDatum) => {
+        if (highlightedEdgeSet.has(d.id)) return 1;
+        if (highlightedNodeSet.size > 0) {
+          return highlightedNodeSet.has(d.sourceId) || highlightedNodeSet.has(d.targetId) ? 1 : 0.18;
+        }
+        return selectedEdgeId === d.id ? 1 : 0.6;
+      })
+      .attr('stroke-dasharray', (d: GraphLinkDatum) => {
+        if (highlightedEdgeSet.has(d.id)) return '6 4';
+        const diffState = edgeStates?.[d.id];
+        if (diffState === 'new' || diffState === 'resolved') return '5 4';
+        return null;
+      })
+      .style('animation', (d: GraphLinkDatum) => {
+        if (
+          highlightedEdgeSet.has(d.id) ||
+          (highlightedNodeSet.size > 0 &&
+            (highlightedNodeSet.has(d.sourceId) || highlightedNodeSet.has(d.targetId)))
+        ) {
+          return 'workflow-link-pulse 1.35s ease-in-out infinite';
+        }
+        return null;
+      });
+
+    linkLabelSelection
+      .attr('fill', (d: GraphLinkDatum) => (selectedEdgeId === d.id ? '#E7D9FF' : '#D7E4DA'))
+      .text((d: GraphLinkDatum) => d.label ?? '');
+  }, [
+    activeLinks,
+    edgeStates,
+    highlightedEdgeSet,
+    highlightedNodeSet,
+    nodeStates,
+    selectedEdgeId,
+    selectedGraphNodeId
   ]);
 
   return (
@@ -543,6 +722,12 @@ export function WorkflowD3Graph({
         preserveAspectRatio="none"
         aria-hidden
       >
+        <style>{`
+          @keyframes workflow-link-pulse {
+            0%, 100% { stroke-dashoffset: 0; }
+            50% { stroke-dashoffset: 10; }
+          }
+        `}</style>
         <defs>
           <marker
             id="workflow-d3-arrow"

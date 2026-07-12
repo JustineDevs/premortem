@@ -1,15 +1,11 @@
 const PRODUCTION_REQUIRED_ENV = [
   'DATABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
-  'STRIPE_WEBHOOK_SECRET',
-  'NEXT_PUBLIC_TURNSTILE_SITE_KEY',
-  'TURNSTILE_SECRET_KEY'
+  'STRIPE_WEBHOOK_SECRET'
 ] as const;
 
 const STRICT_OPTIONAL_ENV = [
   'AUTH_JWT_SECRET',
-  'ENCRYPTION_KEY',
-  'IDENTITY_HMAC_SECRET',
   'SENTRY_DSN'
 ] as const;
 
@@ -23,7 +19,9 @@ function hasSupabaseOAuthEnv(env: NodeJS.ProcessEnv): boolean {
 
 function hasLlmEnv(env: NodeJS.ProcessEnv): boolean {
   return Boolean(
-    env.GEMINI_API_KEY?.trim() ||
+    env.OPENROUTER_API_KEY?.trim() ||
+      env.OPEN_ROUTER_API_KEY?.trim() ||
+      env.GEMINI_API_KEY?.trim() ||
       env.OPENAI_API_KEY?.trim() ||
       env.ANTHROPIC_API_KEY?.trim()
   );
@@ -57,7 +55,7 @@ function collectProductionBootEnvIssues(env: NodeJS.ProcessEnv = process.env): s
   }
 
   if (!hasLlmEnv(env)) {
-    missing.push('GEMINI_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY');
+    missing.push('OPENROUTER_API_KEY or GEMINI_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY');
   }
 
   if (!hasGitLabEnv(env)) {
@@ -91,13 +89,5 @@ export function assertRequiredEnv(options?: { production?: boolean }): void {
   const missing = checkRequiredEnv(options);
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
-  }
-}
-
-export function exitIfMissingRequiredEnv(options?: { production?: boolean }): void {
-  const missing = checkRequiredEnv(options);
-  if (missing.length > 0) {
-    console.error('STRICT_STARTUP: missing env vars:', missing.join(', '));
-    process.exit(1);
   }
 }

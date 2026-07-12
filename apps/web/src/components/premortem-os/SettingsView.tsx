@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from "next/link";
 import { premortemBrand } from "@/lib/premortem-os/branding";
 import { authLinks } from "@/lib/auth-links";
@@ -37,16 +38,21 @@ import {
   MoreVertical,
   RefreshCcw,
   RotateCw,
-  Map,
+  Map as MapIcon,
   PlusCircle,
   LogOut,
+  Sparkles,
+  type LucideIcon,
 } from "lucide-react";
 import { ProviderConnectCards } from "./provider-connect-cards";
 import { ProviderIcon } from "./ProviderIcon";
 import { OsIconButton } from "./os-icon-button";
+import { SkillsTab } from "./settings/skills-tab";
 import type { Project } from "@/lib/premortem-os/types";
+import type { StripeInvoiceSummary, WorkspaceBundle } from "@/hooks/workspace-types";
 import {
   DEFAULT_GEMINI_MODEL,
+  DEFAULT_QWEN_MODEL,
   SMOKE_GEMINI_MODEL,
   DEFAULT_WORK_ITEM_ATTRIBUTE_CONFIG,
   SUPPORTED_WORKSPACE_MODELS,
@@ -56,8 +62,15 @@ import {
   DEFAULT_VENDOR_ROUTING,
   type VendorRoutingTier,
 } from "@/lib/premortem-os/vendor-pool";
+import {
+  ModelSelector,
+  type ModelSelectorGroup,
+  type ModelSelectorOption,
+} from "./model-selector";
+import { resolveSettingsAccess } from "./settings-access";
 import { useWorkspace } from "@/hooks/use-workspace";
-import { useReconciliationEvents } from "@/hooks/use-os-console-data";
+import { buildOsQueryKey, useReconciliationEvents, type OsQueryScope } from "@/hooks/use-os-console-data";
+import { shouldRetryBffQuery } from "@/lib/bff-client";
 
 type NotificationInboxItem = {
   id: string;
@@ -83,6 +96,15 @@ type ProjectAutomationDraft = {
   notificationSettings: string;
 };
 
+type SettingsSubTabId =
+  | "profile"
+  | "organization"
+  | "integrations"
+  | "providers"
+  | "skills"
+  | "billing"
+  | "notifications";
+
 const getIconSlugByName = (name: string) => {
   const lowercase = name.toLowerCase();
   if (lowercase.includes("github")) return "github";
@@ -103,26 +125,132 @@ const getIconSlugByName = (name: string) => {
 function workspaceModelLabel(model: string) {
   switch (model) {
     case DEFAULT_GEMINI_MODEL:
-      return "Gemini 3 Flash Preview";
+      return "Gemini 2.5 Flash";
     case SMOKE_GEMINI_MODEL:
-      return "Gemini 2.5 Flash-Lite (Smoke / Stress Harness)";
+      return "Gemini 2.5 Flash-Lite";
     case "gemini-2.5-flash":
       return "Gemini 2.5 Flash";
     case "gemini-2.5-pro":
       return "Gemini 2.5 Pro (Precision Trace)";
-    case "qwen-plus":
-      return "Qwen Plus (OpenAI-compatible)";
+    case DEFAULT_QWEN_MODEL:
+      return "Qwen Plus";
     case "qwen-max":
-      return "Qwen Max (OpenAI-compatible)";
+      return "Qwen Max";
     case "qwen3-coder-next":
-      return "Qwen3 Coder Next (OpenAI-compatible)";
+      return "Qwen3 Coder Next";
     default:
       return `${model} (Legacy)`;
   }
 }
 
-export function SettingsView({ projects }: { projects?: Project[] }) {
+function workspaceCloudModelDescription(model: string) {
+  switch (model) {
+    case DEFAULT_GEMINI_MODEL:
+      return "Managed cloud model for general audit workloads.";
+    case SMOKE_GEMINI_MODEL:
+      return "Low-cost Gemini variant for lightweight scans.";
+    case "gemini-2.5-flash":
+      return "Fast managed Gemini variant for routine scans.";
+    case "gemini-2.5-pro":
+      return "Higher precision managed Gemini variant.";
+    case DEFAULT_QWEN_MODEL:
+      return "Managed Qwen variant for hybrid routing.";
+    case "qwen-max":
+      return "Higher capability Qwen route.";
+    case "qwen3-coder-next":
+      return "Code-centric Qwen route for technical traces.";
+    default:
+      return "Managed cloud route.";
+  }
+}
+
+function buildManagedRoutingFromState(
+  current: VendorRoutingTier[],
+  providerRef = current.find((tier) => tier.kind === "custom")?.providerRef ?? "",
+) {
+  return DEFAULT_VENDOR_ROUTING.map((tier) => {
+    if (tier.kind === "managed") {
+      return { ...tier, enabled: true };
+    }
+
+    if (tier.kind === "custom") {
+      return { ...tier, enabled: false, providerRef };
+    }
+
+    return { ...tier, enabled: true };
+  });
+}
+
+function buildLocalRoutingFromState(current: VendorRoutingTier[], providerRef: string) {
+  return DEFAULT_VENDOR_ROUTING.map((tier) => {
+    if (tier.kind === "managed") {
+      return { ...tier, enabled: true };
+    }
+
+    if (tier.kind === "custom") {
+      return { ...tier, enabled: true, providerRef };
+    }
+
+    return { ...tier, enabled: true };
+  });
+}
+
+function buildProjectSettingsDraft(project: Project | null): ProjectAutomationDraft {
+  const settings = project?.projectSettings;
+  return {
+    autoRunOnPush: settings?.autoRunOnPush ?? false,
+    autoPublishApprovedIssues: settings?.autoPublishApprovedIssues ?? false,
+    auditDefaultBranchOnly: settings?.auditDefaultBranchOnly ?? true,
+    enabledAgents: Array.isArray(settings?.enabledAgents)
+      ? settings.enabledAgents.join(", ")
+      : "",
+    severityThreshold: settings?.severityThreshold ?? "medium",
+    labelsTemplate: Array.isArray(settings?.labelsTemplate)
+      ? settings.labelsTemplate.join(", ")
+      : "",
+    ignorePaths: Array.isArray(settings?.ignorePaths)
+      ? settings.ignorePaths.join(", ")
+      : "",
+    notificationSettings: JSON.stringify(
+      settings?.notificationSettings ?? {},
+      null,
+      2,
+    ),
+  };
+}
+
+function buildProjectSettingsSyncKey(project: Project | null) {
+  const settings = project?.projectSettings;
+  if (!project || !settings) {
+    return project ? `${project.id}|empty` : '';
+  }
+
+  return [
+    project.id,
+    settings.autoRunOnPush ? '1' : '0',
+    settings.autoPublishApprovedIssues ? '1' : '0',
+    settings.auditDefaultBranchOnly ? '1' : '0',
+    settings.enabledAgents.join(','),
+    settings.severityThreshold,
+    settings.labelsTemplate.join(','),
+    settings.ignorePaths.join(','),
+    JSON.stringify(settings.notificationSettings ?? {})
+  ].join('|');
+}
+
+export function SettingsView({
+  projects,
+  queryScope = null,
+  activeSubTab: activeSubTabProp,
+  onActiveSubTabChange,
+}: {
+  projects?: Project[];
+  queryScope?: OsQueryScope;
+  activeSubTab?: SettingsSubTabId;
+  onActiveSubTabChange?: (subTab: SettingsSubTabId) => void;
+}) {
   const safeProjects = Array.isArray(projects) ? projects : [];
+  const queryClient = useQueryClient();
   const {
     workspace,
     isLoading,
@@ -137,46 +265,56 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
     patchBillingPlan,
     createApiKey,
     revokeApiKey,
+    installSkill,
     startCheckout,
     startBillingPortal,
+    cancelSubscription,
     reconcileIssues,
     syncIntegration,
+    createSlackConnectSession,
+    syncSlackConnection,
   } = useWorkspace();
-  const reconciliationQuery = useReconciliationEvents(Boolean(workspace));
+  const reconciliationQuery = useReconciliationEvents({
+    enabled: Boolean(workspace),
+    organizationId: workspace?.organization.id ?? null
+  });
+  const workspaceRole = (workspace?.profile.role ?? "member").toLowerCase();
+  const {
+    canManageOrganization,
+    canAccessMemberSettings,
+    canManageModelSettings,
+  } = resolveSettingsAccess(workspaceRole);
 
-  const [activeSubTab, setActiveSubTab] = useState<
-    | "profile"
-    | "organization"
-    | "integrations"
-    | "providers"
-    | "billing"
-    | "notifications"
-  >("integrations");
+  const [localActiveSubTab, setLocalActiveSubTab] = useState<SettingsSubTabId>("profile");
   const [successToast, setSuccessToast] = useState<string | null>(null);
-  const [authConfigured, setAuthConfigured] = useState<boolean | null>(null);
 
   const [profileDraft, setProfileDraft] = useState({
-    fullName: "",
-    username: "",
-    timezone: "UTC",
+    fullName: workspace?.profile.fullName ?? "",
+    username: workspace?.profile.username ?? "",
+    timezone: workspace?.profile.timezone ?? "UTC",
   });
   const [organizationDraft, setOrganizationDraft] = useState({
-    name: "",
-    billingEmail: "",
-    websiteUrl: "",
+    name: workspace?.organization.name ?? "",
+    billingEmail: workspace?.organization.billingEmail ?? "",
+    websiteUrl: workspace?.organization.websiteUrl ?? "",
   });
   const [selectedGeminiModel, setSelectedGeminiModel] =
-    useState(DEFAULT_GEMINI_MODEL);
-  const [maxTokens, setMaxTokens] = useState(8192);
-  const [temperature, setTemperature] = useState(0.2);
+    useState(workspace?.llm.selectedGeminiModel ?? DEFAULT_GEMINI_MODEL);
+  const [maxTokens, setMaxTokens] = useState(workspace?.llm.maxTokens ?? 8192);
+  const [temperature, setTemperature] = useState(workspace?.llm.temperature ?? 0.2);
   const [customProviders, setCustomProviders] = useState<
     Array<{ name: string; host: string; model: string; active: boolean }>
-  >([]);
+  >(workspace?.llm.customProviders ?? []);
   const [vendorRouting, setVendorRouting] = useState<VendorRoutingTier[]>(
-    DEFAULT_VENDOR_ROUTING.map((tier) => ({ ...tier })),
+    () =>
+      workspace?.llm.vendorRouting?.length
+        ? workspace.llm.vendorRouting.map((tier) => ({ ...tier }))
+        : DEFAULT_VENDOR_ROUTING.map((tier) => ({ ...tier })),
   );
   const [workItemAttributes, setWorkItemAttributes] =
-    useState<WorkItemAttributeConfig>(DEFAULT_WORK_ITEM_ATTRIBUTE_CONFIG);
+    useState<WorkItemAttributeConfig>(
+      workspace?.workItemAttributes ?? DEFAULT_WORK_ITEM_ATTRIBUTE_CONFIG,
+    );
   const [newProvName, setNewProvName] = useState("");
   const [newProvHost, setNewProvHost] = useState("");
   const [newProvModel, setNewProvModel] = useState("");
@@ -184,24 +322,21 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
   const [createdApiKeySecret, setCreatedApiKeySecret] = useState<string | null>(
     null,
   );
-  const [activeTier, setActiveTier] = useState<
-    "free" | "pro" | "team" | "enterprise"
-  >("free");
   const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">(
     "monthly",
   );
   const [slackWebhook, setSlackWebhook] = useState("");
   const [slackChannel, setSlackChannel] = useState("");
-  const [isSlackConnected, setIsSlackConnected] = useState(false);
-  const [alertEmails, setAlertEmails] = useState("");
-  const [alertSeverity, setAlertSeverity] = useState("HIGH");
-  const [notificationInbox, setNotificationInbox] = useState<
-    NotificationInboxItem[]
-  >([]);
-  const [notificationInboxLoading, setNotificationInboxLoading] =
-    useState(false);
+  const [isSlackConnected, setIsSlackConnected] = useState(
+    workspace?.notifications.isSlackConnected ?? false,
+  );
+  const [alertEmails, setAlertEmails] = useState(workspace?.notifications.alertEmails ?? "");
+  const [alertSeverity, setAlertSeverity] = useState(
+    workspace?.notifications.alertSeverity ?? "HIGH",
+  );
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const projectSettingsSyncKeyRef = useRef("");
   const [projectSettingsDraft, setProjectSettingsDraft] =
     useState<ProjectAutomationDraft>({
       autoRunOnPush: false,
@@ -213,113 +348,102 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
       ignorePaths: "",
       notificationSettings: "{}",
     });
+  const activeSubTabPreview = activeSubTabProp ?? localActiveSubTab;
 
-  useEffect(() => {
-    void fetch("/api/auth/status")
-      .then((response) => response.json())
-      .then((payload) => setAuthConfigured(Boolean(payload.configured)))
-      .catch(() => setAuthConfigured(false));
-  }, []);
+  const effectiveSelectedProjectId =
+    selectedProjectId && safeProjects.some((project) => project.id === selectedProjectId)
+      ? selectedProjectId
+      : safeProjects[0]?.id ?? "";
+  const activeTier = (workspace?.billing.plan ?? "free") as
+    | "free"
+    | "pro"
+    | "team"
+    | "scale"
+    | "enterprise";
+  const tierDisplayLabel =
+    activeTier === "free"
+      ? "Free"
+      : activeTier === "pro"
+        ? "Starter"
+        : activeTier === "team"
+          ? "Growth"
+          : activeTier === "scale"
+            ? "Scale"
+          : "Enterprise";
+  const roleDisplayLabel = workspaceRole
+    ? workspaceRole.charAt(0).toUpperCase() + workspaceRole.slice(1)
+    : "Member";
+  const publishQuota = workspace?.billing.publishQuotaMonthly ?? null;
+  const publishesUsed = workspace?.billing.publishesUsedMonth ?? 0;
+  const publishesRemaining =
+    publishQuota === null ? null : Math.max(publishQuota - publishesUsed, 0);
+  const publishAllowanceLabel =
+    publishQuota === null
+      ? "Unlimited publish"
+      : `${publishesUsed}/${publishQuota} publishes used`;
+  const publishRemainingLabel =
+    publishQuota === null
+      ? "Unlimited remaining this month"
+      : `${publishesRemaining} remaining this month`;
+  const retentionLabel =
+    workspace?.billing.supportLevel === "dedicated"
+      ? "Custom retention"
+      : `${workspace?.billing.historyRetentionDays ?? 0}-day audit history`;
+  const supportLabel =
+    workspace?.billing.supportLevel === "community"
+      ? "community support"
+      : workspace?.billing.supportLevel === "email"
+        ? "email support"
+        : workspace?.billing.supportLevel === "priority"
+          ? "priority support"
+          : "dedicated support";
+  const billingCancellationDate = workspace?.billing.currentPeriodEnd
+    ? new Date(workspace.billing.currentPeriodEnd)
+    : null;
+  const isSubscriptionCanceling = workspace?.billing.billingStatus === "canceling";
+  const isFreeTier = activeTier === "free";
+  const availableSubTabs = useMemo(
+    (): Array<{ id: SettingsSubTabId; name: string; icon: LucideIcon }> => [
+      { id: "profile" as SettingsSubTabId, name: "Profile", icon: User },
+      ...(canAccessMemberSettings
+        ? [
+            { id: "billing" as SettingsSubTabId, name: "Billing", icon: CreditCard },
+            { id: "providers" as SettingsSubTabId, name: "AI Models", icon: Cpu },
+          ]
+        : []),
+      ...(canManageOrganization
+        ? [
+            { id: "organization" as SettingsSubTabId, name: "Organization", icon: Building2 },
+            { id: "integrations" as SettingsSubTabId, name: "Integrations", icon: Sliders },
+            { id: "skills" as SettingsSubTabId, name: "Skills", icon: Sparkles },
+            { id: "notifications" as SettingsSubTabId, name: "Notifications", icon: Bell }
+          ]
+        : [])
+    ],
+    [canAccessMemberSettings, canManageOrganization]
+  );
+  const availableSubTabIds = useMemo(() => availableSubTabs.map((subTab) => subTab.id), [availableSubTabs]);
 
-  useEffect(() => {
-    if (!workspace) return;
-    setProfileDraft({
-      fullName: workspace.profile.fullName ?? "",
-      username: workspace.profile.username ?? "",
-      timezone: workspace.profile.timezone,
-    });
-    setOrganizationDraft({
-      name: workspace.organization.name,
-      billingEmail: workspace.organization.billingEmail ?? "",
-      websiteUrl: workspace.organization.websiteUrl ?? "",
-    });
-    setSelectedGeminiModel(workspace.llm.selectedGeminiModel);
-    setMaxTokens(workspace.llm.maxTokens);
-    setTemperature(workspace.llm.temperature);
-    setCustomProviders(workspace.llm.customProviders);
-    setVendorRouting(
-      workspace.llm.vendorRouting?.length
-        ? workspace.llm.vendorRouting.map((tier) => ({ ...tier }))
-        : DEFAULT_VENDOR_ROUTING.map((tier) => ({ ...tier })),
-    );
-    setWorkItemAttributes(
-      workspace.workItemAttributes ?? DEFAULT_WORK_ITEM_ATTRIBUTE_CONFIG,
-    );
-    setActiveTier(workspace.billing.plan as typeof activeTier);
-    setSlackWebhook(workspace.notifications.slackWebhook);
-    setSlackChannel(workspace.notifications.slackChannel);
-    setIsSlackConnected(workspace.notifications.isSlackConnected);
-    setAlertEmails(workspace.notifications.alertEmails);
-    setAlertSeverity(workspace.notifications.alertSeverity);
-  }, [workspace]);
-
-  useEffect(() => {
-    if (safeProjects.length === 0) {
-      setSelectedProjectId("");
-      return;
-    }
-    setSelectedProjectId((current) => {
-      if (current && safeProjects.some((project) => project.id === current)) {
-        return current;
+  const {
+    data: notificationInbox = [],
+    isLoading: notificationInboxLoading,
+    refetch: reloadNotifications
+  } = useQuery({
+    queryKey: buildOsQueryKey(queryScope, 'notification-inbox', workspace?.organization.id ?? 'none'),
+    enabled: Boolean(workspace) && activeSubTabPreview === 'notifications',
+    staleTime: 30_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    retry: shouldRetryBffQuery,
+    queryFn: async () => {
+      const response = await fetch('/api/workspace/notifications?limit=25');
+      if (!response.ok) {
+        throw new Error('Failed to load notifications.');
       }
-      return safeProjects[0]!.id;
-    });
-  }, [safeProjects]);
-
-  useEffect(() => {
-    if (!selectedProjectId) return;
-    const selectedProject = safeProjects.find(
-      (project) => project.id === selectedProjectId,
-    );
-    if (!selectedProject) return;
-    const settings = selectedProject.projectSettings;
-    setProjectSettingsDraft({
-      autoRunOnPush: settings?.autoRunOnPush ?? false,
-      autoPublishApprovedIssues: settings?.autoPublishApprovedIssues ?? false,
-      auditDefaultBranchOnly: settings?.auditDefaultBranchOnly ?? true,
-      enabledAgents: Array.isArray(settings?.enabledAgents)
-        ? settings.enabledAgents.join(", ")
-        : "",
-      severityThreshold: settings?.severityThreshold ?? "medium",
-      labelsTemplate: Array.isArray(settings?.labelsTemplate)
-        ? settings.labelsTemplate.join(", ")
-        : "",
-      ignorePaths: Array.isArray(settings?.ignorePaths)
-        ? settings.ignorePaths.join(", ")
-        : "",
-      notificationSettings: JSON.stringify(
-        settings?.notificationSettings ?? {},
-        null,
-        2,
-      ),
-    });
-  }, [safeProjects, selectedProjectId]);
-
-  useEffect(() => {
-    if (!workspace || activeSubTab !== "notifications") return;
-    const controller = new AbortController();
-    setNotificationInboxLoading(true);
-    void fetch("/api/workspace/notifications?limit=25", {
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Failed to load notifications.");
-        }
-        return response.json() as Promise<{
-          notifications?: NotificationInboxItem[];
-        }>;
-      })
-      .then((payload) => setNotificationInbox(payload.notifications ?? []))
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError")
-          return;
-        setNotificationInbox([]);
-      })
-      .finally(() => setNotificationInboxLoading(false));
-
-    return () => controller.abort();
-  }, [workspace, activeSubTab]);
+      const payload: { notifications?: NotificationInboxItem[] } = await response.json();
+      return payload.notifications ?? [];
+    }
+  });
 
   const integrations = workspace?.integrations ?? [];
   const policies = workspace?.policies ?? [];
@@ -330,8 +454,88 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
     patches: { used: 0, limit: 0 },
   };
   const invoices = workspace?.billing.invoices ?? [];
+  const slackConnectionId = workspace?.notifications.slackNangoConnectionId ?? "";
+  const slackProviderKey = workspace?.notifications.slackNangoProviderKey ?? "";
+  const slackNangoConnected = Boolean(slackConnectionId && slackProviderKey);
+  const activeLocalProviderName = useMemo(() => {
+    const tier = vendorRouting.find(
+      (entry) =>
+        entry.kind === "custom" &&
+        entry.enabled &&
+        entry.providerRef.trim() &&
+        customProviders.some(
+          (provider) => provider.name === entry.providerRef && provider.active,
+        ),
+    );
+    return tier?.providerRef.trim() ?? "";
+  }, [customProviders, vendorRouting]);
+  const isLocalRouteActive = Boolean(activeLocalProviderName);
+  const modelSelectorGroups = useMemo<ModelSelectorGroup[]>(
+    () => [
+      {
+        id: "managed-cloud",
+        label: "Cloud models",
+        description:
+          "Managed models are always available. Select one when you want cloud execution.",
+        options: Array.from(
+          new Map(
+            [...SUPPORTED_WORKSPACE_MODELS, selectedGeminiModel].map((model) => [
+              model,
+              {
+                kind: "cloud" as const,
+                value: model,
+                label: workspaceModelLabel(model),
+                description: workspaceCloudModelDescription(model),
+                iconSlug: "cloud",
+                badge: model === selectedGeminiModel
+                  ? isLocalRouteActive
+                    ? "Available"
+                    : "Active"
+                  : undefined,
+              } satisfies ModelSelectorOption,
+            ]),
+          ).values(),
+        ),
+      },
+      {
+        id: "local-providers",
+        label: "Local providers",
+        description:
+          "Saved local or hybrid providers can be selected directly and remain available alongside cloud models.",
+        options: customProviders.map(
+          (provider, index) =>
+            ({
+              kind: "local" as const,
+              value: provider.name,
+              label: provider.name,
+              description: provider.active
+                ? `${provider.host} • ${provider.model}`
+                : `${provider.host} • ${provider.model} • inactive`,
+              iconSlug: /github|gitlab|bitbucket|azure|gitea|google|gcp|aws/i.test(provider.name)
+                ? getIconSlugByName(provider.name)
+                : undefined,
+              badge: provider.active
+                ? activeLocalProviderName === provider.name
+                  ? "Active"
+                  : index === 0
+                    ? "Available"
+                    : undefined
+                : "Inactive",
+              disabled: !provider.active,
+            }) satisfies ModelSelectorOption,
+        ),
+      },
+    ],
+    [activeLocalProviderName, customProviders, isLocalRouteActive, selectedGeminiModel],
+  );
+  const selectedModelSelectorKey = activeLocalProviderName
+    ? `local:${activeLocalProviderName}`
+    : `cloud:${selectedGeminiModel}`;
+  const modelSettingsLockMessage = canManageModelSettings
+    ? undefined
+    : 'Members can view the workspace model router but the admin-managed default stays locked.';
 
-  const showToast = (message: string) => {
+  const showToast = useCallback((message: string) => {
     setSuccessToast(message);
     if (toastTimerRef.current) {
       clearTimeout(toastTimerRef.current);
@@ -339,7 +543,30 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
     toastTimerRef.current = setTimeout(() => {
       setSuccessToast(null);
     }, 3050);
-  };
+  }, []);
+
+  const persistLlmSettings = useCallback(
+    async (nextLlm: Partial<WorkspaceBundle['llm']>, successMessage: string) => {
+      await patchLlm({
+        selectedGeminiModel,
+        maxTokens,
+        temperature,
+        customProviders,
+        vendorRouting,
+        ...nextLlm,
+      });
+      showToast(successMessage);
+    },
+    [
+      customProviders,
+      maxTokens,
+      patchLlm,
+      selectedGeminiModel,
+      showToast,
+      temperature,
+      vendorRouting,
+    ],
+  );
 
   useEffect(
     () => () => {
@@ -350,16 +577,86 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
     []
   );
 
-  const alert = (message: string) => {
-    showToast(`Error: ${message}`);
-  };
-
   const selectedProject =
-    projects?.find((project) => project.id === selectedProjectId) ?? null;
+    projects?.find((project) => project.id === effectiveSelectedProjectId) ?? null;
+  const projectSettingsSyncKey = useMemo(
+    () => buildProjectSettingsSyncKey(selectedProject),
+    [selectedProject]
+  );
+
+  // Rehydrate only when the active workspace identity changes.
+  // Refetches for the same org/profile should not clobber in-progress settings edits.
+  const workspaceSyncKey = workspace
+    ? [workspace.profile.id, workspace.organization.id].join('|')
+    : '';
+
+  useEffect(() => {
+    if (!workspace) return;
+
+    setProfileDraft({
+      fullName: workspace.profile.fullName ?? "",
+      username: workspace.profile.username ?? "",
+      timezone: workspace.profile.timezone ?? "UTC",
+    });
+    setOrganizationDraft({
+      name: workspace.organization.name ?? "",
+      billingEmail: workspace.organization.billingEmail ?? "",
+      websiteUrl: workspace.organization.websiteUrl ?? "",
+    });
+    setSelectedGeminiModel(workspace.llm.selectedGeminiModel ?? DEFAULT_GEMINI_MODEL);
+    setMaxTokens(workspace.llm.maxTokens ?? 8192);
+    setTemperature(workspace.llm.temperature ?? 0.2);
+    setCustomProviders(workspace.llm.customProviders ?? []);
+    setVendorRouting(
+      workspace.llm.vendorRouting?.length
+        ? workspace.llm.vendorRouting.map((tier) => ({ ...tier }))
+        : DEFAULT_VENDOR_ROUTING.map((tier) => ({ ...tier })),
+    );
+    setWorkItemAttributes(workspace.workItemAttributes ?? DEFAULT_WORK_ITEM_ATTRIBUTE_CONFIG);
+    setIsSlackConnected(workspace.notifications.isSlackConnected ?? false);
+    setAlertEmails(workspace.notifications.alertEmails ?? "");
+    setAlertSeverity(workspace.notifications.alertSeverity ?? "HIGH");
+  }, [workspaceSyncKey]);
+
+  useEffect(() => {
+    if (projectSettingsSyncKeyRef.current === projectSettingsSyncKey) {
+      return;
+    }
+
+    projectSettingsSyncKeyRef.current = projectSettingsSyncKey;
+    setProjectSettingsDraft(buildProjectSettingsDraft(selectedProject));
+  }, [projectSettingsSyncKey]);
+
+  useEffect(() => {
+    const nextProjectId =
+      selectedProjectId && safeProjects.some((project) => project.id === selectedProjectId)
+        ? selectedProjectId
+        : safeProjects[0]?.id ?? "";
+
+    if (nextProjectId !== selectedProjectId) {
+      setSelectedProjectId(nextProjectId);
+    }
+  }, [safeProjects, selectedProjectId]);
+
+  const activeSubTab = useMemo<SettingsSubTabId>(() => {
+    const candidate = activeSubTabProp ?? localActiveSubTab;
+    return availableSubTabIds.includes(candidate) ? candidate : availableSubTabIds[0] ?? "profile";
+  }, [activeSubTabProp, availableSubTabIds, localActiveSubTab]);
+
+  const setActiveSubTab = useCallback(
+    (subTab: SettingsSubTabId) => {
+      if (onActiveSubTabChange) {
+        onActiveSubTabChange(subTab);
+        return;
+      }
+      setLocalActiveSubTab(subTab);
+    },
+    [onActiveSubTabChange]
+  );
 
   const saveSelectedProjectSettings = async () => {
     if (!selectedProject) {
-      alert("Select a project first.");
+      showToast("Select a project first.");
       return;
     }
 
@@ -373,7 +670,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
             >)
           : {};
     } catch {
-      alert("Notification settings must be valid JSON.");
+      showToast("Notification settings must be valid JSON.");
       return;
     }
 
@@ -390,17 +687,23 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
             auditDefaultBranchOnly: projectSettingsDraft.auditDefaultBranchOnly,
             enabledAgents: projectSettingsDraft.enabledAgents
               .split(",")
-              .map((value) => value.trim())
-              .filter(Boolean),
+              .flatMap((value) => {
+                const trimmed = value.trim();
+                return trimmed ? [trimmed] : [];
+              }),
             severityThreshold: projectSettingsDraft.severityThreshold,
             labelsTemplate: projectSettingsDraft.labelsTemplate
               .split(",")
-              .map((value) => value.trim())
-              .filter(Boolean),
+              .flatMap((value) => {
+                const trimmed = value.trim();
+                return trimmed ? [trimmed] : [];
+              }),
             ignorePaths: projectSettingsDraft.ignorePaths
               .split(",")
-              .map((value) => value.trim())
-              .filter(Boolean),
+              .flatMap((value) => {
+                const trimmed = value.trim();
+                return trimmed ? [trimmed] : [];
+              }),
             notificationSettings: parsedNotificationSettings,
           }),
         },
@@ -410,29 +713,13 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
         throw new Error(await response.text());
       }
 
+      void queryClient.invalidateQueries({ queryKey: buildOsQueryKey(queryScope, 'workspace') });
+      void queryClient.invalidateQueries({ queryKey: buildOsQueryKey(queryScope, 'projects') });
       showToast(`Saved automation settings for ${selectedProject.name}.`);
     } catch (err) {
-      alert(
+      showToast(
         err instanceof Error ? err.message : "Failed to save project settings.",
       );
-    }
-  };
-
-  const reloadNotifications = async () => {
-    setNotificationInboxLoading(true);
-    try {
-      const response = await fetch("/api/workspace/notifications?limit=25");
-      if (!response.ok) {
-        throw new Error("Failed to load notifications.");
-      }
-      const payload = (await response.json()) as {
-        notifications?: NotificationInboxItem[];
-      };
-      setNotificationInbox(payload.notifications ?? []);
-    } catch {
-      setNotificationInbox([]);
-    } finally {
-      setNotificationInboxLoading(false);
     }
   };
 
@@ -449,11 +736,52 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
       await reloadNotifications();
       showToast("Notification inbox updated.");
     } catch (err) {
-      alert(
+      showToast(
         err instanceof Error ? err.message : "Failed to update notifications.",
       );
     }
   };
+
+  const handleModelSelection = useCallback(
+    async (option: ModelSelectorOption) => {
+      if (!canManageModelSettings) {
+        showToast('Workspace model settings are locked for member access.');
+        return;
+      }
+      const nextSelectedGeminiModel =
+        option.kind === 'cloud' ? option.value : selectedGeminiModel;
+      const nextVendorRouting =
+        option.kind === 'cloud'
+          ? buildManagedRoutingFromState(vendorRouting)
+          : buildLocalRoutingFromState(vendorRouting, option.value);
+
+      setSelectedGeminiModel(nextSelectedGeminiModel);
+      setVendorRouting(nextVendorRouting);
+
+      try {
+        await persistLlmSettings(
+          {
+            selectedGeminiModel: nextSelectedGeminiModel,
+            vendorRouting: nextVendorRouting,
+          },
+          option.kind === 'cloud'
+            ? `Saved managed model ${workspaceModelLabel(option.value)}.`
+            : `Saved local provider ${option.label}.`,
+        );
+      } catch (err) {
+        showToast(
+          err instanceof Error ? err.message : 'Failed to save model selection.',
+        );
+      }
+    },
+    [
+      canManageModelSettings,
+      persistLlmSettings,
+      selectedGeminiModel,
+      showToast,
+      vendorRouting,
+    ],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -469,7 +797,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
     params.delete("integration_provider");
     const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`;
     window.history.replaceState({}, "", nextUrl);
-  }, []);
+  }, [showToast]);
 
   const togglePolicy = async (id: string) => {
     const nextPolicies = policies.map((policy) =>
@@ -479,59 +807,86 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
       await patchPolicies(nextPolicies);
       showToast("Continuous enforcement policy thresholds updated.");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to save policy.");
+      showToast(err instanceof Error ? err.message : "Failed to save policy.");
     }
   };
 
-  const handleAddCustomProvider = async (e: React.FormEvent) => {
+  const handleAddCustomProvider = async (e: FormEvent) => {
     e.preventDefault();
-    if (!newProvName || !newProvHost) {
-      alert("Provide a valid provider name and base URL.");
+    if (!canManageModelSettings) {
+      showToast('Workspace model settings are locked for member access.');
+      return;
+    }
+    const providerName = newProvName.trim();
+    const providerHost = newProvHost.trim();
+    const providerModel = newProvModel.trim() || 'custom-model';
+    if (!providerName || !providerHost) {
+      showToast("Provide a valid provider name and base URL.");
       return;
     }
     const nextProviders = [
       ...customProviders,
       {
-        name: newProvName,
-        host: newProvHost,
-        model: newProvModel || "custom-model",
+        name: providerName,
+        host: providerHost,
+        model: providerModel,
         active: true,
       },
     ];
+    const nextVendorRouting = buildLocalRoutingFromState(vendorRouting, providerName);
     try {
       await patchLlm({
         selectedGeminiModel,
         maxTokens,
         temperature,
         customProviders: nextProviders,
+        vendorRouting: nextVendorRouting,
       });
+      setCustomProviders(nextProviders);
+      setVendorRouting(nextVendorRouting);
       setNewProvName("");
       setNewProvHost("");
       setNewProvModel("");
-      showToast(`Registered custom provider "${newProvName}" successfully.`);
+      showToast(`Registered and activated custom provider "${providerName}".`);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to save provider.");
+      showToast(err instanceof Error ? err.message : "Failed to save provider.");
     }
   };
 
   const handleDeleteProvider = async (index: number) => {
+    if (!canManageModelSettings) {
+      showToast('Workspace model settings are locked for member access.');
+      return;
+    }
     const item = customProviders[index];
     const nextProviders = customProviders.filter((_, idx) => idx !== index);
+    const nextVendorRouting =
+      nextProviders.some((provider) => provider.active)
+        ? buildLocalRoutingFromState(
+            vendorRouting,
+            nextProviders.find((provider) => provider.active)?.name ?? '',
+          )
+        : buildManagedRoutingFromState(vendorRouting, '');
     try {
-      await patchLlm({ customProviders: nextProviders });
+      await patchLlm({
+        customProviders: nextProviders,
+        vendorRouting: nextVendorRouting,
+      });
+      setCustomProviders(nextProviders);
+      setVendorRouting(nextVendorRouting);
       showToast(`Removed custom provider "${item.name}".`);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to remove provider.");
+      showToast(err instanceof Error ? err.message : "Failed to remove provider.");
     }
   };
 
   const handleCreateApiKey = async (
-    event: React.FormEvent<HTMLFormElement>,
+    event: FormEvent<HTMLFormElement>,
   ) => {
     event.preventDefault();
     const label = newApiKeyLabel.trim();
     if (!label) {
-      alert("Provide a label for the API key.");
+      showToast("Provide a label for the API key.");
       return;
     }
 
@@ -541,7 +896,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
       setNewApiKeyLabel("");
       showToast(`Created API key ${result.apiKey.key.label}.`);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to create API key.");
+      showToast(err instanceof Error ? err.message : "Failed to create API key.");
     }
   };
 
@@ -550,21 +905,8 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
       await revokeApiKey(keyId);
       showToast(`Revoked API key ${label}.`);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to revoke API key.");
+      showToast(err instanceof Error ? err.message : "Failed to revoke API key.");
     }
-  };
-
-  const triggerInvoiceDownload = (invoice: {
-    id: string;
-    hostedInvoiceUrl?: string | null;
-    invoicePdfUrl?: string | null;
-  }) => {
-    const target = invoice.invoicePdfUrl ?? invoice.hostedInvoiceUrl;
-    if (target) {
-      window.open(target, "_blank", "noopener,noreferrer");
-      return;
-    }
-    showToast(`Stripe billing portal required to download ${invoice.id}.`);
   };
 
   if (isLoading) {
@@ -599,7 +941,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
       {/* Main Settings Title banner */}
       <div className="border-b border-[#EAE6DF] pb-5">
         <span className="text-[9px] uppercase tracking-widest font-mono text-[#8A958F] block font-bold">
-          System Administration Space
+          Workspace Settings
         </span>
         <h2 className="text-xl font-bold tracking-tight text-[#1E2522] font-display mt-0.5">
           Workspace Parameters
@@ -620,14 +962,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
           </div>
 
           <nav className="flex flex-row lg:flex-col overflow-x-auto lg:overflow-x-visible gap-1.5 pb-2 lg:pb-0 scrollbar-none">
-            {[
-              { id: "profile", name: "Profile", icon: User },
-              { id: "organization", name: "Organization", icon: Building2 },
-              { id: "integrations", name: "Providers", icon: Sliders },
-              { id: "providers", name: "AI Model Config", icon: Cpu },
-              { id: "billing", name: "Billing", icon: CreditCard },
-              { id: "notifications", name: "Webhooks", icon: Bell },
-            ].map((subTab) => {
+            {availableSubTabs.map((subTab) => {
               const IconComp = subTab.icon;
               const isSelected = activeSubTab === subTab.id;
               return (
@@ -665,7 +1000,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                     User Profile Account
                   </h3>
                   <p className="text-xs text-[#717A75]">
-                    Configure your administrative profile and private identity
+                    Configure your workspace profile and private identity
                     keys.
                   </p>
                 </div>
@@ -682,7 +1017,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                   </div>
                   <div className="space-y-1">
                     <span className="text-[10px] font-mono uppercase bg-slate-100 border px-1.5 py-0.2 rounded font-bold text-slate-800">
-                      {workspace.profile.role}
+                      Workspace role: {workspace.profile.role}
                     </span>
                     <h4 className="text-md font-bold text-neutral-900 font-display">
                       {workspace.profile.email ??
@@ -690,35 +1025,23 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                         workspace.profile.id}
                     </h4>
                     <p className="text-[11px] text-[#717A75]">
-                      Profile loaded from Supabase session and Premortem
-                      runtime.
+                      Profile loaded from Supabase session and Premortem runtime.
+                      Paid plans can elevate the subscription owner to admin access.
                     </p>
                   </div>
                 </div>
 
-                <form
-                  id="profile-settings-form"
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    try {
-                      await patchProfile(profileDraft);
-                      showToast("Profile settings updated successfully.");
-                    } catch (err) {
-                      alert(
-                        err instanceof Error
-                          ? err.message
-                          : "Failed to save profile.",
-                      );
-                    }
-                  }}
-                  className="space-y-4 text-xs"
-                >
+                <div className="space-y-4 text-xs">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">
+                      <label
+                        htmlFor="profile-full-name"
+                        className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]"
+                      >
                         Full Display Name
                       </label>
                       <input
+                        id="profile-full-name"
                         type="text"
                         value={profileDraft.fullName}
                         onChange={(e) =>
@@ -731,23 +1054,39 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">
+                      <label
+                        htmlFor="profile-email"
+                        className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]"
+                      >
                         Contact Email Address
                       </label>
                       <input
+                        id="profile-email"
                         type="email"
                         value={workspace.profile.email ?? ""}
                         disabled
+                        readOnly
                         className="w-full p-2.5 bg-zinc-50 border border-[#EAE6DF] rounded text-xs text-zinc-450 cursor-not-allowed font-medium font-mono"
                       />
                     </div>
                   </div>
-                </form>
+                </div>
 
                 <div className="pt-2 flex flex-wrap items-center gap-3">
                   <button
-                    type="submit"
-                    form="profile-settings-form"
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await patchProfile(profileDraft);
+                        showToast("Profile settings updated successfully.");
+                      } catch (err) {
+                        showToast(
+                          err instanceof Error
+                            ? err.message
+                            : "Failed to save profile.",
+                        );
+                      }
+                    }}
                     className="py-2 px-4 bg-emerald-950 font-bold text-white rounded hover:bg-emerald-900 transition-all cursor-pointer"
                   >
                     Save Profile Updates
@@ -821,8 +1160,8 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                     <span className="text-[9px] text-[#8A958F] font-bold block uppercase">
                       Subscription Tier
                     </span>
-                    <span className="font-bold text-emerald-800 text-sm font-sans block capitalize">
-                      {workspace.billing.plan}
+                      <span className="font-bold text-emerald-800 text-sm font-sans block">
+                      {tierDisplayLabel}
                     </span>
                   </div>
                   <div className="p-4 bg-white border border-[#EAE6DF] rounded space-y-1">
@@ -837,32 +1176,21 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                   </div>
                 </div>
 
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault();
-                    try {
-                      await patchOrganization(organizationDraft);
-                      showToast("Organization profile saved.");
-                    } catch (err) {
-                      alert(
-                        err instanceof Error
-                          ? err.message
-                          : "Failed to save organization.",
-                      );
-                    }
-                  }}
-                  className="border border-[#EAE6DF] bg-white rounded-lg p-5 space-y-4 text-xs"
-                >
+                <div className="border border-[#EAE6DF] bg-white rounded-lg p-5 space-y-4 text-xs">
                   <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-neutral-900 flex items-center gap-1.5">
                     <Building2 size={14} className="text-emerald-700" />
                     Organization Details
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">
+                      <label
+                        htmlFor="organization-display-name"
+                        className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]"
+                      >
                         Display Name
                       </label>
                       <input
+                        id="organization-display-name"
                         type="text"
                         value={organizationDraft.name}
                         onChange={(e) =>
@@ -875,10 +1203,14 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">
+                      <label
+                        htmlFor="organization-billing-email"
+                        className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]"
+                      >
                         Billing Email
                       </label>
                       <input
+                        id="organization-billing-email"
                         type="email"
                         value={organizationDraft.billingEmail}
                         onChange={(e) =>
@@ -891,10 +1223,14 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       />
                     </div>
                     <div className="space-y-1.5 md:col-span-2">
-                      <label className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">
+                      <label
+                        htmlFor="organization-website-url"
+                        className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]"
+                      >
                         Website URL
                       </label>
                       <input
+                        id="organization-website-url"
                         type="url"
                         value={organizationDraft.websiteUrl}
                         onChange={(e) =>
@@ -907,15 +1243,27 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       />
                     </div>
                   </div>
-                  <div className="flex justify-end">
-                    <button
-                      type="submit"
-                      className="py-2 px-4 bg-emerald-950 font-bold text-white rounded hover:bg-emerald-900 transition-all cursor-pointer"
-                    >
-                      Save Organization
-                    </button>
-                  </div>
-                </form>
+                </div>
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await patchOrganization(organizationDraft);
+                        showToast("Organization profile saved.");
+                      } catch (err) {
+                        showToast(
+                          err instanceof Error
+                            ? err.message
+                            : "Failed to save organization.",
+                        );
+                      }
+                    }}
+                    className="py-2 px-4 bg-emerald-950 font-bold text-white rounded hover:bg-emerald-900 transition-all cursor-pointer"
+                  >
+                    Save Organization Changes
+                  </button>
+                </div>
 
                 <div className="border border-[#EAE6DF] bg-white rounded-lg p-5 space-y-4">
                   <div className="flex flex-col gap-1">
@@ -935,7 +1283,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                         Project
                       </span>
                       <select
-                        value={selectedProjectId}
+                        value={effectiveSelectedProjectId}
                         onChange={(event) =>
                           setSelectedProjectId(event.target.value)
                         }
@@ -1022,7 +1370,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                     ))}
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                  <div className="grid grid-cols-1 gap-4 text-xs lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)]">
                     <label className="space-y-1.5">
                       <span className="block font-mono font-bold text-zinc-500 uppercase tracking-wider text-[9px]">
                         Enabled agents, comma separated
@@ -1195,6 +1543,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       <button
                         type="button"
                         onClick={() => togglePolicy(p.id)}
+                        aria-label={`${p.active ? "Disable" : "Enable"} policy ${p.name}`}
                         className={`w-10 h-6 shrink-0 rounded-full p-0.5 border cursor-pointer transition-all ${
                           p.active
                             ? "bg-emerald-950 border-emerald-950 flex justify-end"
@@ -1245,7 +1594,11 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                   onSubmit={handleCreateApiKey}
                   className="flex flex-col md:flex-row gap-3"
                 >
+                  <label htmlFor="new-api-key-label" className="sr-only">
+                    API key label
+                  </label>
                   <input
+                    id="new-api-key-label"
                     type="text"
                     value={newApiKeyLabel}
                     onChange={(event) => setNewApiKeyLabel(event.target.value)}
@@ -1325,16 +1678,13 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
               </div>
 
               <ProviderConnectCards
-                connectedProviders={integrations.map(
-                  (item) => item.provider ?? item.name,
-                )}
                 integrations={integrations}
               />
 
               <div className="bg-[#FAF8F5] border border-[#EAE6DF] rounded-lg p-6 space-y-4">
                 <div>
                   <h3 className="text-md font-bold text-[#1E2522] font-display mb-1 flex items-center gap-2">
-                    <Map size={16} />
+                    <MapIcon size={16} />
                     Work item attributes automation
                   </h3>
                   <p className="text-xs text-[#717A75]">
@@ -1450,7 +1800,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                         await patchWorkItemAttributes(workItemAttributes);
                         showToast("Work item attribute automation saved.");
                       } catch (err) {
-                        alert(
+                        showToast(
                           err instanceof Error
                             ? err.message
                             : "Failed to save work item attributes.",
@@ -1541,7 +1891,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                                     await syncIntegration(int.id);
                                     showToast(`Synced ${int.name}.`);
                                   } catch (err) {
-                                    alert(
+                                    showToast(
                                       err instanceof Error
                                         ? err.message
                                         : "Sync failed.",
@@ -1582,10 +1932,9 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                           showToast(
                             `Reconciled ${result.reconciledCount ?? 0} issues (${result.driftedCount ?? 0} drifted).`,
                           );
-                          void reconciliationQuery.refetch();
                         },
                         onError: (err) =>
-                          alert(
+                          showToast(
                             err instanceof Error
                               ? err.message
                               : "Reconciliation failed.",
@@ -1653,52 +2002,49 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       Workspace Model Router
                     </h3>
                     <p className="text-xs text-[#717A75]">
-                      Configure the primary workspace model, vendor routing
-                      tiers, and local fallback providers used by Premortem
-                      agents to parse data, construct traces, and prepare issue
-                      bodies.
-                    </p>
-                    <p className="mt-2 text-[10px] font-mono uppercase tracking-wider text-[#717A75]">
-                      Smoke and stress harnesses pin Gemini 2.5 Flash-Lite to
-                      keep verification runs inexpensive and reproducible.
+                      Configure the workspace model, vendor routing tiers, and
+                      local providers used by Premortem agents to parse data,
+                      construct traces, and prepare issue bodies.
                     </p>
                   </div>
 
-                  {/* Primary model select */}
+                  {/* Workspace model select */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                     <div className="space-y-1.5">
-                      <label className="block font-mono font-bold text-zinc-600 uppercase tracking-wider text-[9.5px]">
-                        Primary Workspace Model
-                      </label>
-                      <select
-                        value={selectedGeminiModel}
-                        onChange={(e) => setSelectedGeminiModel(e.target.value)}
-                        className="w-full p-2.5 bg-white border border-[#EAE6DF] rounded text-xs text-zinc-905 text-zinc-900 focus:ring-1 focus:ring-emerald-950 focus:outline-none font-medium font-mono"
-                      >
-                        {Array.from(
-                          new Set([
-                            ...SUPPORTED_WORKSPACE_MODELS,
-                            selectedGeminiModel,
-                          ]),
-                        ).map((model) => (
-                          <option key={model} value={model}>
-                            {workspaceModelLabel(model)}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="block font-mono font-bold text-zinc-600 uppercase tracking-wider text-[9.5px]">
+                        Workspace Model
+                      </div>
+                      <ModelSelector
+                        id="primary-workspace-model"
+                        groups={modelSelectorGroups}
+                        selectedKey={selectedModelSelectorKey}
+                        triggerLabel="Active route"
+                        triggerDescription="Choose a managed model or local provider"
+                        triggerHelper={modelSettingsLockMessage}
+                        onSelect={(option) => {
+                          void handleModelSelection(option);
+                        }}
+                        disabled={!canManageModelSettings}
+                        className="h-full"
+                      />
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="block font-mono font-bold text-zinc-600 uppercase tracking-wider text-[9.5px]">
+                      <label
+                        htmlFor="reasoning-temperature"
+                        className="block font-mono font-bold text-zinc-600 uppercase tracking-wider text-[9.5px]"
+                      >
                         Reasoning Temperature
                       </label>
-                      <div className="flex items-center gap-3 bg-white border border-[#EAE6DF] p-2 rounded">
+                      <div className="flex h-[72px] items-center gap-3 rounded border border-[#EAE6DF] bg-white px-3 py-2.5">
                         <input
+                          id="reasoning-temperature"
                           type="range"
                           min="0.0"
                           max="1.0"
                           step="0.1"
                           value={temperature}
+                          disabled={!canManageModelSettings}
                           onChange={(e) =>
                             setTemperature(parseFloat(e.target.value))
                           }
@@ -1714,7 +2060,10 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                   {/* Slider token depth */}
                   <div className="space-y-2">
                     <div className="flex justify-between items-center text-xs">
-                      <label className="font-mono font-bold text-zinc-605 text-zinc-600 uppercase tracking-wider text-[9px]">
+                      <label
+                        htmlFor="max-context-tokens"
+                        className="font-mono font-bold text-zinc-605 text-zinc-600 uppercase tracking-wider text-[9px]"
+                      >
                         Max Context Token Limit Output
                       </label>
                       <span className="font-mono font-bold text-emerald-900">
@@ -1722,11 +2071,13 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       </span>
                     </div>
                     <input
+                      id="max-context-tokens"
                       type="range"
                       min="1000"
                       max="16384"
                       step="500"
                       value={maxTokens}
+                      disabled={!canManageModelSettings}
                       onChange={(e) => setMaxTokens(parseInt(e.target.value))}
                       className="w-full accent-emerald-950"
                     />
@@ -1736,16 +2087,16 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                     </div>
                   </div>
 
-                  <div className="bg-white border border-[#EAE6DF] rounded p-6 space-y-4">
-                    <div>
-                      <h3 className="text-md font-bold text-[#1E2522] font-display mb-1">
+                  <div className="bg-white border border-[#EAE6DF] rounded p-5 space-y-4">
+                    <div className="space-y-1">
+                      <h3 className="text-md font-bold text-[#1E2522] font-display">
                         Model Vendor Priority Pool
                       </h3>
-                      <p className="text-xs text-[#717A75]">
+                      <p className="text-xs leading-relaxed text-[#717A75]">
                         Audits and synthesis calls try each enabled provider
-                        tier in order. The runtime keeps the first healthy route
-                        and falls through to local providers only when the
-                        managed route is unavailable.
+                        tier in order. The selected managed model and any active
+                        local provider remain available for quota relief or
+                        provider outages.
                       </p>
                     </div>
 
@@ -1753,7 +2104,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       {vendorRouting.map((tier, index) => (
                         <li
                           key={tier.id}
-                          className="border border-[#EAE6DF] rounded p-4 bg-[#FAF8F5] flex flex-col md:flex-row md:items-center gap-4"
+                          className="border border-[#EAE6DF] rounded p-4 bg-[#FAF8F5] flex flex-col gap-4 md:flex-row md:items-start md:justify-between"
                         >
                           <div className="flex items-start gap-3 flex-1 min-w-0">
                             <span className="shrink-0 w-6 h-6 rounded-full bg-emerald-950 text-white text-[10px] font-mono font-bold flex items-center justify-center">
@@ -1768,7 +2119,9 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                               </p>
                               {tier.kind === "custom" ? (
                                 <select
+                                  aria-label={`Select saved provider for ${tier.label}`}
                                   value={tier.providerRef}
+                                  disabled={!canManageModelSettings}
                                   onChange={(e) => {
                                     const next = vendorRouting.map((entry) =>
                                       entry.id === tier.id
@@ -1803,6 +2156,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                           </div>
                           <button
                             type="button"
+                            disabled={!canManageModelSettings}
                             onClick={() => {
                               const next = vendorRouting.map((entry) =>
                                 entry.id === tier.id
@@ -1811,7 +2165,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                               );
                               setVendorRouting(next);
                             }}
-                            className={`shrink-0 px-3 py-1.5 rounded text-[10px] font-mono font-bold uppercase tracking-wide border transition-colors cursor-pointer ${
+                            className={`shrink-0 min-w-[96px] px-3 py-1.5 rounded text-[10px] font-mono font-bold uppercase tracking-wide border transition-colors cursor-pointer md:self-start ${
                               tier.enabled
                                 ? "bg-emerald-50 border-emerald-200 text-emerald-800"
                                 : "bg-zinc-100 border-zinc-200 text-zinc-600"
@@ -1826,14 +2180,15 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                     <div className="flex justify-end border-t border-[#EAE6DF]/60 pt-4">
                       <button
                         type="button"
+                        disabled={!canManageModelSettings}
                         onClick={async () => {
                           try {
-                            await patchLlm({ vendorRouting });
-                            showToast(
-                              "Vendor priority pool saved for this workspace.",
+                            await persistLlmSettings(
+                              { customProviders, vendorRouting },
+                              'Vendor priority pool saved for this workspace.',
                             );
                           } catch (err) {
-                            alert(
+                            showToast(
                               err instanceof Error
                                 ? err.message
                                 : "Failed to save vendor pool.",
@@ -1848,22 +2203,23 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                   </div>
 
                   <div className="flex justify-end border-t border-[#EAE6DF]/60 pt-4">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            await patchLlm({
-                            selectedGeminiModel,
-                            maxTokens,
-                            temperature,
-                            customProviders,
-                            vendorRouting,
-                          });
-                          showToast(
-                            "Model routing settings saved to organization runtime.",
+                    <button
+                      type="button"
+                      disabled={!canManageModelSettings}
+                      onClick={async () => {
+                        try {
+                          await persistLlmSettings(
+                            {
+                              selectedGeminiModel,
+                              maxTokens,
+                              temperature,
+                              customProviders,
+                              vendorRouting,
+                            },
+                            'Model routing settings saved to organization runtime.',
                           );
                         } catch (err) {
-                          alert(
+                          showToast(
                             err instanceof Error
                               ? err.message
                               : "Failed to save LLM settings.",
@@ -1885,8 +2241,8 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                     </h3>
                     <p className="text-xs text-[#717A75]">
                       Register OpenAI-compatible local endpoints or private
-                      model proxies. Active providers become real fallback
-                      routes when the managed vendor cannot respond.
+                      model proxies. Active providers can be selected directly
+                      and stay available beside managed models.
                     </p>
                   </div>
 
@@ -1895,46 +2251,63 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                     className="grid grid-cols-1 md:grid-cols-3 gap-3"
                   >
                     <div className="space-y-1">
-                      <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wide">
+                      <label
+                        htmlFor="custom-provider-name"
+                        className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wide"
+                      >
                         PROVIDER DESIGNATION
-                      </span>
+                      </label>
                       <input
+                        id="custom-provider-name"
                         type="text"
                         required
                         placeholder="e.g. Ollama Dev"
                         value={newProvName}
+                        disabled={!canManageModelSettings}
                         onChange={(e) => setNewProvName(e.target.value)}
                         className="w-full p-2 bg-white border border-[#EAE6DF] rounded font-medium focus:ring-1 focus:ring-emerald-950 focus:outline-none"
                       />
                     </div>
                     <div className="space-y-1">
-                      <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wide">
+                      <label
+                        htmlFor="custom-provider-base-url"
+                        className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wide"
+                      >
                         BASE URL
-                      </span>
+                      </label>
                       <input
+                        id="custom-provider-base-url"
                         type="url"
                         required
                         placeholder="http://127.0.0.1:11434"
                         value={newProvHost}
+                        disabled={!canManageModelSettings}
                         onChange={(e) => setNewProvHost(e.target.value)}
                         className="w-full p-2 bg-white border border-[#EAE6DF] rounded font-medium focus:ring-1 focus:ring-emerald-950 focus:outline-none font-mono"
                       />
                     </div>
                     <div className="space-y-2 relative flex items-end">
                       <div className="space-y-1 flex-1">
-                        <span className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wide">
+                        <label
+                          htmlFor="custom-provider-model"
+                          className="text-[10px] font-mono font-bold text-zinc-500 uppercase tracking-wide"
+                        >
                           MODEL
-                        </span>
+                        </label>
                         <input
+                          id="custom-provider-model"
                           type="text"
                           placeholder="llama3:latest"
                           value={newProvModel}
+                          disabled={!canManageModelSettings}
                           onChange={(e) => setNewProvModel(e.target.value)}
                           className="w-full p-2 bg-white border border-[#EAE6DF] rounded font-medium focus:ring-1 focus:ring-emerald-950 focus:outline-none font-mono"
                         />
                       </div>
                       <button
                         type="submit"
+                        aria-label="Add local provider"
+                        disabled={!canManageModelSettings}
                         className="p-2.5 shrink-0 bg-emerald-950 hover:bg-emerald-900 border border-emerald-950 text-[#FAF8F5] rounded ml-1 transition-all flex items-center justify-center cursor-pointer"
                         title="Add local provider"
                       >
@@ -1977,13 +2350,36 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                           <div className="flex gap-2">
                             <button
                               type="button"
-                              onClick={() => {
+                              disabled={!canManageModelSettings}
+                              onClick={async () => {
                                 const updated = [...customProviders];
                                 updated[pIdx].active = !updated[pIdx].active;
-                                setCustomProviders(updated);
-                                showToast(
-                                  `Custom LLM provider status toggled.`,
-                                );
+                                const nextActiveProvider = updated.find((provider) => provider.active);
+                                const nextVendorRouting = nextActiveProvider
+                                  ? buildLocalRoutingFromState(vendorRouting, nextActiveProvider.name)
+                                  : buildManagedRoutingFromState(vendorRouting, '');
+                                try {
+                                  await persistLlmSettings(
+                                    {
+                                      selectedGeminiModel,
+                                      maxTokens,
+                                      temperature,
+                                      customProviders: updated,
+                                      vendorRouting: nextVendorRouting,
+                                    },
+                                    updated[pIdx].active
+                                      ? `Custom LLM provider re-connected and is available as a local route.`
+                                      : `Custom LLM provider disconnected. Managed cloud route is now active.`,
+                                  );
+                                  setCustomProviders(updated);
+                                  setVendorRouting(nextVendorRouting);
+                              } catch (err) {
+                                  showToast(
+                                    err instanceof Error
+                                      ? err.message
+                                      : "Failed to update provider status.",
+                                  );
+                                }
                               }}
                               className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                                 prov.active
@@ -1995,6 +2391,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                             </button>
                             <OsIconButton
                               label="Delete model entry"
+                              disabled={!canManageModelSettings}
                               onClick={() => handleDeleteProvider(pIdx)}
                               className="hover:text-red-700 text-[#8A958F] rounded"
                             >
@@ -2039,6 +2436,18 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
             </div>
           )}
 
+          {/* ==================== TAB 2.5: SKILLS MARKETPLACE ==================== */}
+          {activeSubTab === "skills" && (
+            <SkillsTab
+              skills={workspace.skills}
+              canManageOrganization={canManageOrganization}
+              onInstallSkill={async (skillId) => {
+                await installSkill.mutateAsync(skillId);
+                showToast("Installed skill draft and refreshed the workspace skill catalog.");
+              }}
+            />
+          )}
+
           {/* ==================== TAB 3: BILLING ==================== */}
           {activeSubTab === "billing" && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fadeIn">
@@ -2053,76 +2462,48 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                         Subscription Allocation
                       </h3>
                       <p className="text-xs text-[#717A75]">
-                        Current plan:{" "}
-                        <span className="font-semibold capitalize">
-                          {workspace.billing.plan}
-                        </span>
-                        {workspace.billing.billingStatus
-                          ? ` (${workspace.billing.billingStatus})`
-                          : ""}
-                        .
-                        {workspace.billing.stripeTestMode
-                          ? " Stripe test mode: plan tiers can be applied in-app without Checkout until you add a test business name in the Stripe dashboard."
-                          : workspace.billing.stripeConfigured
-                            ? " Stripe billing is configured."
-                            : workspace.billing.stripeBillingConfigured
-                              ? " Stripe keys are set; connect a customer to enable Checkout."
-                              : " Stripe is not configured for this workspace."}
+                        Subscription tier: <span className="font-semibold">{tierDisplayLabel}</span>
+                        {workspace.billing.billingStatus ? ` (${workspace.billing.billingStatus})` : ''}. Workspace role:
+                        {' '}
+                        <span className="font-semibold">{roleDisplayLabel}</span>.
                       </p>
-                    </div>
-
-                    <div className="flex flex-col items-end gap-2">
-                      <span className="p-1 px-2.5 bg-emerald-950 text-[#FAF8F5] rounded font-mono font-bold text-[9px] uppercase tracking-wider shadow-sm select-none capitalize">
-                        {activeTier} tier
-                      </span>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            await startBillingPortal();
-                          } catch (err) {
-                            alert(
-                              err instanceof Error
-                                ? err.message
-                                : "Failed to open billing portal.",
-                            );
-                          }
-                        }}
-                        className="px-3 py-1.5 rounded border border-[#EAE6DF] bg-white hover:bg-zinc-50 text-[10px] font-mono font-bold uppercase tracking-wide text-[#1E2522]"
-                      >
-                        Manage Billing Portal
-                      </button>
                     </div>
                   </div>
 
                   {/* Switch cycles buttons */}
-                  <div className="flex gap-2 p-1 bg-[#FAF8F5] border border-[#EAE6DF] rounded w-60 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setBillingCycle("monthly")}
-                      className={`flex-1 py-1.5 rounded font-semibold text-center cursor-pointer transition-all ${
-                        billingCycle === "monthly"
-                          ? "bg-white shadow border border-[#EAE6DF] text-zinc-900 font-bold"
-                          : "text-[#5C6560]"
-                      }`}
-                    >
-                      Monthly Sync
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBillingCycle("yearly")}
-                      className={`flex-1 py-1.5 rounded font-semibold text-center cursor-pointer transition-all ${
-                        billingCycle === "yearly"
-                          ? "bg-white shadow border border-[#EAE6DF] text-zinc-900 font-bold"
-                          : "text-[#5C6560]"
-                      }`}
-                    >
-                      Yearly (Save 20%)
-                    </button>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex gap-2 p-1 bg-[#FAF8F5] border border-[#EAE6DF] rounded w-60 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setBillingCycle("monthly")}
+                        className={`flex-1 py-1.5 rounded font-semibold text-center cursor-pointer transition-all ${
+                          billingCycle === "monthly"
+                            ? "bg-white shadow border border-[#EAE6DF] text-zinc-900 font-bold"
+                            : "text-[#5C6560]"
+                        }`}
+                      >
+                        Monthly Sync
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBillingCycle("yearly")}
+                        className={`flex-1 py-1.5 rounded font-semibold text-center cursor-pointer transition-all ${
+                          billingCycle === "yearly"
+                            ? "bg-white shadow border border-[#EAE6DF] text-zinc-900 font-bold"
+                            : "text-[#5C6560]"
+                        }`}
+                      >
+                        Yearly (Save 20%)
+                      </button>
+                    </div>
+
+                    <span className="p-1 px-2.5 bg-emerald-950 text-[#FAF8F5] rounded font-mono font-bold text-[9px] uppercase tracking-wider shadow-sm select-none capitalize">
+                      {tierDisplayLabel} tier
+                    </span>
                   </div>
 
                   {/* Pricing models list */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     {/* Tier A: Free */}
                     <div
                       className={`p-4 rounded border flex flex-col justify-between space-y-3 bg-white ${
@@ -2133,7 +2514,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                     >
                       <div className="space-y-1">
                         <span className="font-bold text-[#1E2522] block font-display">
-                          Developer Sandbox
+                          Evaluation
                         </span>
                         <span className="text-zinc-600 block font-mono text-[11px]">
                           Free Tier
@@ -2141,6 +2522,9 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                         <div className="text-lg font-bold text-neutral-900 pt-2 font-display">
                           $0/mo
                         </div>
+                        <p className="text-[10px] leading-relaxed text-[#717A75] font-mono">
+                          1 repo, 10 audits, 3 publishes / month, 30-day history.
+                        </p>
                       </div>
                       <button
                         type="button"
@@ -2149,7 +2533,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                             await patchBillingPlan("free");
                             showToast("Plan updated to Free tier.");
                           } catch (err) {
-                            alert(
+                            showToast(
                               err instanceof Error
                                 ? err.message
                                 : "Failed to update plan.",
@@ -2164,7 +2548,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       </button>
                     </div>
 
-                    {/* Tier B: Pro */}
+                    {/* Tier B: Starter */}
                     <div
                       className={`p-4 rounded border flex flex-col justify-between space-y-3 bg-white ${
                         activeTier === "pro"
@@ -2174,14 +2558,17 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                     >
                       <div className="space-y-1">
                         <span className="font-bold text-[#1E2522] block font-display">
-                          Swarm Professional
+                          Starter
                         </span>
                         <span className="text-zinc-600 block font-mono text-[11px]">
-                          Up to 5 agents
+                          Unlimited publish
                         </span>
                         <div className="text-lg font-bold text-neutral-900 pt-2 font-display">
                           {billingCycle === "monthly" ? "$49/mo" : "$39/mo"}
                         </div>
+                        <p className="text-[10px] leading-relaxed text-[#717A75] font-mono">
+                          10 repos, 100 audits, SARIF export, 90-day history.
+                        </p>
                         {billingCycle === "yearly" ? (
                           <span className="text-[10px] text-[#717A75] font-mono">
                             $468 billed yearly
@@ -2192,18 +2579,9 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                         type="button"
                         onClick={async () => {
                           try {
-                            if (workspace?.billing.stripeConfigured) {
-                              await startCheckout("pro", billingCycle);
-                            } else {
-                              await patchBillingPlan("pro");
-                              showToast(
-                                workspace?.billing.stripeTestMode
-                                  ? "Pro tier applied (Stripe test mode, no Checkout)."
-                                  : "Plan updated to Pro tier.",
-                              );
-                            }
+                            await startCheckout("pro", billingCycle);
                           } catch (err) {
-                            alert(
+                            showToast(
                               err instanceof Error
                                 ? err.message
                                 : "Failed to update plan.",
@@ -2218,7 +2596,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       </button>
                     </div>
 
-                    {/* Tier C: Enterprise Swarm */}
+                    {/* Tier C: Growth */}
                     <div
                       className={`p-4 rounded border-2 flex flex-col justify-between space-y-3 bg-white ${
                         activeTier === "enterprise" || activeTier === "team"
@@ -2228,17 +2606,20 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                     >
                       <div className="space-y-1">
                         <span className="font-bold text-[#1E2522] block font-display">
-                          Enterprise Core
+                          Growth
                         </span>
                         <span className="text-emerald-800 block font-mono text-[11px] font-bold">
-                          Unlimited agents
+                          Graphiti memory
                         </span>
                         <div className="text-lg font-bold text-neutral-900 pt-2 font-display">
-                          {billingCycle === "monthly" ? "$249/mo" : "$199/mo"}
+                          {billingCycle === "monthly" ? "$149/mo" : "$119/mo"}
                         </div>
+                        <p className="text-[10px] leading-relaxed text-[#717A75] font-mono">
+                          30 repos, 300 audits, webhooks, memory, 1-year history.
+                        </p>
                         {billingCycle === "yearly" ? (
                           <span className="text-[10px] text-[#717A75] font-mono">
-                            $2,388 billed yearly
+                            $1,428 billed yearly
                           </span>
                         ) : null}
                       </div>
@@ -2246,18 +2627,9 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                         type="button"
                         onClick={async () => {
                           try {
-                            if (workspace?.billing.stripeConfigured) {
-                              await startCheckout("team", billingCycle);
-                            } else {
-                              await patchBillingPlan("team");
-                              showToast(
-                                workspace?.billing.stripeTestMode
-                                  ? "Team tier applied (Stripe test mode, no Checkout)."
-                                  : "Plan updated to Team tier.",
-                              );
-                            }
+                            await startCheckout("team", billingCycle);
                           } catch (err) {
-                            alert(
+                            showToast(
                               err instanceof Error
                                 ? err.message
                                 : "Failed to update plan.",
@@ -2271,8 +2643,142 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                           : "Upgrade"}
                       </button>
                     </div>
+
+                    {/* Tier D: Scale */}
+                    <div
+                      className={`p-4 rounded border-2 flex flex-col justify-between space-y-3 bg-white ${
+                        activeTier === "scale"
+                          ? "border-emerald-950 bg-emerald-50/10 shadow-sm"
+                          : "border-[#EAE6DF]"
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <span className="font-bold text-[#1E2522] block font-display">
+                          Scale
+                        </span>
+                        <span className="text-emerald-800 block font-mono text-[11px] font-bold">
+                          Priority support
+                        </span>
+                        <div className="text-lg font-bold text-neutral-900 pt-2 font-display">
+                          {billingCycle === "monthly" ? "$299/mo" : "$239/mo"}
+                        </div>
+                        <p className="text-[10px] leading-relaxed text-[#717A75] font-mono">
+                          100 repos, 1,000 audits, priority support, skill marketplace.
+                        </p>
+                        {billingCycle === "yearly" ? (
+                          <span className="text-[10px] text-[#717A75] font-mono">
+                            $2,868 billed yearly
+                          </span>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await startCheckout("scale", billingCycle);
+                          } catch (err) {
+                            showToast(
+                              err instanceof Error
+                                ? err.message
+                                : "Failed to update plan.",
+                            );
+                          }
+                        }}
+                        className="w-full py-1.5 bg-emerald-950 text-[#FAF8F5] rounded font-bold uppercase tracking-wide tracking-wider text-[9px] font-mono hover:opacity-90 cursor-pointer"
+                      >
+                        {activeTier === "scale"
+                          ? "Current Active Tier"
+                          : "Upgrade to Scale"}
+                      </button>
+                    </div>
                   </div>
                 </div>
+
+                  <div className="rounded border border-[#EAE6DF] bg-white p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-[#1E2522] font-display">
+                          Subscription cancellation
+                        </h4>
+                        <p className="text-[11px] text-[#717A75] leading-relaxed">
+                          {isFreeTier
+                            ? "No paid subscription is attached to this workspace."
+                            : isSubscriptionCanceling && billingCancellationDate
+                              ? `Cancellation is already scheduled for ${billingCancellationDate.toLocaleString()}.`
+                              : "Choose when the paid subscription should end. Scheduled cancellation keeps access active until the current period closes."}
+                        </p>
+                      </div>
+                      {isSubscriptionCanceling ? (
+                        <span className="rounded bg-amber-50 border border-amber-200 px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-amber-900">
+                          Canceling
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={isFreeTier || cancelSubscription.isPending}
+                        onClick={async () => {
+                          try {
+                            const result = await cancelSubscription.mutateAsync({
+                              mode: "period_end",
+                              reason: "Requested from billing settings"
+                            });
+                            showToast(
+                              result.currentPeriodEnd
+                                ? `Subscription scheduled to cancel on ${new Date(result.currentPeriodEnd).toLocaleDateString()}.`
+                                : "Subscription scheduled to cancel at period end.",
+                            );
+                          } catch (err) {
+                            showToast(
+                              err instanceof Error
+                                ? err.message
+                                : "Failed to schedule subscription cancellation.",
+                            );
+                          }
+                        }}
+                        className="px-3 py-2 rounded border border-zinc-300 bg-white text-[10px] font-mono font-bold uppercase tracking-wide text-[#1E2522] disabled:opacity-50 disabled:cursor-not-allowed hover:bg-zinc-50"
+                      >
+                        Cancel at period end
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isFreeTier || cancelSubscription.isPending}
+                        onClick={async () => {
+                          const confirmCancel = window.confirm(
+                            "Cancel now and refund the unused portion of the latest paid invoice?",
+                          );
+                          if (!confirmCancel) return;
+
+                          try {
+                            const result = await cancelSubscription.mutateAsync({
+                              mode: "immediate",
+                              refund: true,
+                              reason: "Requested from billing settings"
+                            });
+                            showToast(
+                              result.refundStatus === "refunded" && typeof result.refundedAmount === "number"
+                                ? `Subscription canceled and refunded ${(result.refundedAmount / 100).toFixed(2)}.`
+                                : result.refundStatus === "failed"
+                                  ? "Subscription canceled, but the refund needs manual review."
+                                  : "Subscription canceled and moved to Free tier.",
+                            );
+                          } catch (err) {
+                            showToast(
+                              err instanceof Error
+                                ? err.message
+                                : "Failed to cancel subscription.",
+                            );
+                          }
+                        }}
+                        className="px-3 py-2 rounded border border-red-300 bg-red-50 text-[10px] font-mono font-bold uppercase tracking-wide text-red-800 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-100"
+                      >
+                        Cancel now, refund unused time
+                      </button>
+                    </div>
+                  </div>
 
                 {/* Billing History Invoice list */}
                 <div className="bg-[#FAF8F5] border border-[#EAE6DF] rounded p-6 space-y-4">
@@ -2281,26 +2787,22 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       Invoices Ledger History
                     </h3>
                     <span className="text-[10px] text-[#717A75] font-mono">
-                      ALL TRANSACTIONS REGISTERED SUCCESSFULLY
+                      STRIPE LEDGER · {invoices.length} RECENT INVOICE{invoices.length === 1 ? '' : 'S'}
                     </span>
                   </div>
 
                   <div className="divide-y divide-[#EAE6DF]/60">
                     {invoices.length === 0 ? (
-                      <p className="py-3 text-xs text-zinc-500 italic">
-                        No Stripe invoices yet. Billing plan and usage are
-                        synced from the runtime database.
-                      </p>
+                      <div className="py-3 space-y-2">
+                        <p className="text-xs text-zinc-600">
+                          No Stripe invoices have synced for this customer yet. The ledger below is sourced from the live Stripe customer once a checkout, renewal, or invoice event exists.
+                        </p>
+                        <p className="text-[10px] font-mono uppercase tracking-[0.16em] text-[#8A958F]">
+                          Source: Stripe invoice API
+                        </p>
+                      </div>
                     ) : (
-                      (
-                        invoices as Array<{
-                          id: string;
-                          date?: string;
-                          amount?: number;
-                          status?: string;
-                          method?: string;
-                        }>
-                      ).map((inv) => (
+                      (invoices as StripeInvoiceSummary[]).map((inv) => (
                         <div
                           key={inv.id}
                           className="py-3 flex justify-between items-center text-xs"
@@ -2321,13 +2823,25 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                             <span className="px-1.5 py-0.2 bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold rounded font-mono text-[9px] text-center uppercase tracking-wide">
                               {inv.status}
                             </span>
-                            <OsIconButton
-                              label="Download PDF Invoice"
-                              onClick={() => triggerInvoiceDownload(inv)}
-                              className="text-[#8A958F] hover:text-[#1E2522] hover:bg-white rounded transition-all"
-                            >
-                              <Download size={14} />
-                            </OsIconButton>
+                            {inv.hostedInvoiceUrl ? (
+                              <a
+                                href={inv.hostedInvoiceUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[10px] font-mono text-emerald-900 underline"
+                              >
+                                Open invoice
+                              </a>
+                            ) : inv.invoicePdfUrl ? (
+                              <a
+                                href={inv.invoicePdfUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[10px] font-mono text-emerald-900 underline"
+                              >
+                                Open PDF
+                              </a>
+                            ) : null}
                           </div>
                         </div>
                       ))
@@ -2348,6 +2862,41 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       Resource limits allocation registered under the active
                       Swarm billing cycle. Logs reset monthly.
                     </p>
+                  </div>
+
+                  <div className="grid gap-3 rounded border border-[#EAE6DF] bg-white p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-mono text-[9px] font-bold uppercase tracking-[0.18em] text-[#8A958F]">
+                        Current publish allowance
+                      </span>
+                      <span className="text-[11px] font-semibold text-[#1E2522]">
+                        {publishAllowanceLabel}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-mono text-[9px] font-bold uppercase tracking-[0.18em] text-[#8A958F]">
+                        Remaining this month
+                      </span>
+                      <span className="text-[11px] font-semibold text-[#1E2522]">
+                        {publishRemainingLabel}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-mono text-[9px] font-bold uppercase tracking-[0.18em] text-[#8A958F]">
+                        Retention status
+                      </span>
+                      <span className="text-[11px] font-semibold text-[#1E2522]">
+                        {retentionLabel}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-mono text-[9px] font-bold uppercase tracking-[0.18em] text-[#8A958F]">
+                        Support level
+                      </span>
+                      <span className="text-[11px] font-semibold text-[#1E2522]">
+                        {supportLabel}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Meter Scans */}
@@ -2428,6 +2977,34 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                       .
                     </p>
                   </div>
+                </div>
+
+                <div className="rounded border border-[#EAE6DF] bg-white p-4 space-y-3">
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-bold text-[#1E2522] font-display">
+                      Billing portal
+                    </h4>
+                    <p className="text-[11px] text-[#717A75] leading-relaxed">
+                      Open the customer billing portal to manage invoices, payment method, and subscription changes.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await startBillingPortal();
+                      } catch (err) {
+                        showToast(
+                          err instanceof Error
+                            ? err.message
+                            : "Failed to open billing portal.",
+                        );
+                      }
+                    }}
+                    className="w-full px-3 py-2 rounded border border-[#EAE6DF] bg-[#FAF8F5] hover:bg-zinc-50 text-[10px] font-mono font-bold uppercase tracking-wide text-[#1E2522]"
+                  >
+                    Open Billing Portal
+                  </button>
                 </div>
               </div>
             </div>
@@ -2550,9 +3127,10 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                         type="button"
                         onClick={() =>
                           void markNotificationsRead(
-                            notificationInbox
-                              .filter((notification) => !notification.readAt)
-                              .map((notification) => notification.id),
+                            notificationInbox.reduce<string[]>((ids, notification) => {
+                              if (!notification.readAt) ids.push(notification.id);
+                              return ids;
+                            }, [])
                           )
                         }
                         disabled={notificationInbox.every(
@@ -2573,43 +3151,103 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                           Slack App Dispatch Gateway
                         </span>
                         <span
-                          className={`w-2 h-2 rounded-full ${isSlackConnected ? "bg-emerald-500" : "bg-red-500"}`}
+                          className={`w-2 h-2 rounded-full ${slackNangoConnected && isSlackConnected ? "bg-emerald-500" : isSlackConnected ? "bg-amber-500" : "bg-red-500"}`}
                         />
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const next = !isSlackConnected;
-                          setIsSlackConnected(next);
-                          try {
-                            await patchNotifications({
-                              slackWebhook,
-                              slackChannel,
-                              isSlackConnected: next,
-                              alertEmails,
-                              alertSeverity,
-                            });
-                            showToast(
-                              `Slack notifications ${next ? "enabled" : "disabled"}.`,
-                            );
-                          } catch (err) {
-                            setIsSlackConnected(!next);
-                            alert(
-                              err instanceof Error
-                                ? err.message
-                                : "Failed to update Slack status.",
-                            );
-                          }
-                        }}
-                        className={`px-2 py-0.5 border rounded uppercase font-bold text-[9px] font-mono cursor-pointer ${
-                          isSlackConnected
-                            ? "bg-emerald-50 text-emerald-800"
-                            : "bg-rose-50 text-rose-800"
-                        }`}
-                      >
-                        {isSlackConnected ? "ACTIVE" : "MUTED"}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const session = await createSlackConnectSession();
+                              if (session.connectLink) {
+                                window.open(session.connectLink, '_blank', 'noopener,noreferrer');
+                              }
+                              showToast(
+                                'Complete Slack authorization in the Nango tab, then sync the connection.'
+                              );
+                            } catch (err) {
+                              showToast(
+                                err instanceof Error
+                                  ? err.message
+                                  : 'Failed to create Slack connect session.'
+                              );
+                            }
+                          }}
+                          className="px-2 py-0.5 border rounded uppercase font-bold text-[9px] font-mono cursor-pointer bg-slate-50 text-slate-800"
+                        >
+                          {slackNangoConnected ? 'Reconnect via Nango' : 'Connect via Nango'}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await syncSlackConnection();
+                              showToast('Slack Nango connection synced.');
+                            } catch (err) {
+                              showToast(
+                                err instanceof Error
+                                  ? err.message
+                                  : 'Failed to sync Slack connection.'
+                              );
+                            }
+                          }}
+                          className="px-2 py-0.5 border rounded uppercase font-bold text-[9px] font-mono cursor-pointer bg-emerald-50 text-emerald-800"
+                        >
+                          Sync Nango
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const next = !isSlackConnected;
+                            setIsSlackConnected(next);
+                            try {
+                              await patchNotifications({
+                                slackWebhook,
+                                slackChannel,
+                                isSlackConnected: next,
+                                alertEmails,
+                                alertSeverity,
+                              });
+                              showToast(
+                                `Slack notifications ${next ? "enabled" : "disabled"}.`,
+                              );
+                            } catch (err) {
+                              setIsSlackConnected(!next);
+                              showToast(
+                                err instanceof Error
+                                  ? err.message
+                                  : "Failed to update Slack status.",
+                              );
+                            }
+                          }}
+                          className={`px-2 py-0.5 border rounded uppercase font-bold text-[9px] font-mono cursor-pointer ${
+                            isSlackConnected
+                              ? "bg-emerald-50 text-emerald-800"
+                              : "bg-rose-50 text-rose-800"
+                          }`}
+                        >
+                          {isSlackConnected ? "ACTIVE" : "MUTED"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono text-zinc-600">
+                      <span>
+                        Nango: {slackNangoConnected ? 'linked' : 'not linked'}
+                      </span>
+                      {slackConnectionId ? (
+                        <span className="px-2 py-0.5 rounded bg-[#FAF8F5] border border-[#EAE6DF]">
+                          {slackProviderKey || 'slack'} • {slackConnectionId.slice(0, 8)}
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded bg-[#FAF8F5] border border-[#EAE6DF]">
+                          Slack sandbox: sandbox-premortem.enterprise.slack.com
+                        </span>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2664,7 +3302,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                             });
                             showToast("Slack notification settings saved.");
                           } catch (err) {
-                            alert(
+                            showToast(
                               err instanceof Error
                                 ? err.message
                                 : "Failed to save notifications.",
@@ -2746,7 +3384,7 @@ export function SettingsView({ projects }: { projects?: Project[] }) {
                             });
                             showToast("Alert email thresholds saved.");
                           } catch (err) {
-                            alert(
+                            showToast(
                               err instanceof Error
                                 ? err.message
                                 : "Failed to save alert settings.",

@@ -20,6 +20,7 @@ enum OrgPlan {
   free
   pro
   team
+  scale
   enterprise
 }
 
@@ -250,6 +251,7 @@ model OrganizationInvitation {
   invitedBy      Profile          @relation("InvitationInvitedBy", fields: [invitedById], references: [id])
   acceptedBy     Profile?         @relation("InvitationAcceptedBy", fields: [acceptedById], references: [id])
 
+  @@index([organizationId, email, status, createdAt(sort: Desc)])
   @@map("organization_invitations")
 }
 
@@ -271,6 +273,14 @@ model OrganizationBillingAccount {
   organization        Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@map("organization_billing_accounts")
+}
+
+model StripeWebhookEvent {
+  id         String   @id
+  eventType  String
+  receivedAt DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("stripe_webhook_events")
 }
 
 model ProviderConnection {
@@ -300,6 +310,7 @@ model ProviderConnection {
   @@unique([organizationId, provider, externalAccountId])
   @@index([organizationId])
   @@index([organizationId, updatedAt(sort: Desc)])
+  @@index([organizationId, provider, status, updatedAt(sort: Desc)])
   @@index([nangoConnectionId])
   @@map("provider_connections")
 }
@@ -361,6 +372,7 @@ model Project {
   @@unique([organizationId, slug])
   @@index([organizationId])
   @@index([organizationId, createdAt(sort: Desc)])
+  @@index([organizationId, updatedAt(sort: Desc)])
   @@index([connectionId])
   @@map("projects")
 }
@@ -432,6 +444,7 @@ model AuditRun {
 
   @@index([organizationId])
   @@index([organizationId, createdAt(sort: Desc)])
+  @@index([organizationId, projectId, branch, runStatus, createdAt(sort: Desc)])
   @@index([projectId])
   @@index([runStatus])
   @@index([createdAt(sort: Desc)])
@@ -482,6 +495,18 @@ model GraphSnapshot {
   auditRun       AuditRun     @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
 
   @@map("graph_snapshots")
+}
+
+model VulnerabilityAdvisoryCache {
+  id        String   @id
+  payload   Json
+  epss      Float?
+  kev       Boolean  @default(false)
+  fetchedAt DateTime @default(now()) @db.Timestamptz(6)
+  expiresAt DateTime @db.Timestamptz(6)
+
+  @@index([expiresAt])
+  @@map("vulnerability_advisory_cache")
 }
 
 model Finding {
@@ -632,6 +657,7 @@ model IssueCandidate {
 
   @@index([projectId])
   @@index([auditRunId])
+  @@index([auditRunId, reviewerStatus])
   @@index([validationStatus])
   @@index([reviewerStatus])
   @@map("issue_candidates")
@@ -735,7 +761,10 @@ model PublishedIssue {
   reconciliationEvents ReconciliationEvent[]
 
   @@index([organizationId])
+  @@index([organizationId, updatedAt(sort: Desc)])
   @@index([projectId])
+  @@index([projectId, externalIssueIid])
+  @@index([organizationId, projectId, outcomeType])
   @@index([syncStatus])
   @@map("published_issues")
 }
@@ -834,6 +863,8 @@ model Notification {
   project        Project?         @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([userId, organizationId, createdAt(sort: Desc)])
+  @@index([userId, organizationId, readAt])
   @@index([readAt])
   @@map("notifications")
 }
@@ -875,6 +906,7 @@ model OrganizationApiKey {
   createdBy      Profile       @relation(fields: [createdById], references: [id])
 
   @@index([organizationId, createdAt(sort: Desc)])
+  @@index([keyPrefix])
   @@map("organization_api_keys")
 }
 
@@ -894,5 +926,6 @@ model UsageEvent {
   auditRun       AuditRun?     @relation(fields: [auditRunId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, createdAt(sort: Desc)])
+  @@index([organizationId, eventType, createdAt(sort: Desc)])
   @@map("usage_events")
 }

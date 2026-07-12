@@ -1,4 +1,4 @@
-import { getPostHogClient, resolvePostHogProjectKey } from './posthog';
+import { getPostHogClient } from './posthog';
 
 /** Canonical feature flags: create matching flags in PostHog. */
 export const CanonicalFeatureFlags = {
@@ -13,15 +13,7 @@ export async function isFeatureEnabled(
   flag: string,
   defaultValue = false
 ): Promise<boolean> {
-  if (!resolvePostHogProjectKey()) return defaultValue;
-
   const posthog = getPostHogClient();
-  if (!posthog) return defaultValue;
-
-  try {
-    const enabled = await posthog.isFeatureEnabled(flag, distinctId);
-    return enabled ?? defaultValue;
-  } catch {
-    return defaultValue;
-  }
+  const enabled = await posthog.isFeatureEnabled(flag, distinctId);
+  return enabled ?? defaultValue;
 }

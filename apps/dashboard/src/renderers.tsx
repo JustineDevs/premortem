@@ -1,6 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { AuditRunSnapshot } from '@premortem/orchestrator';
-import type { AuditRunListItem } from '@premortem/orchestrator';
+import type { AuditRunSnapshot, AuditRunListItem } from '@premortem/orchestrator/read-model';
 import { AuditDetailPage } from './components/audit-detail-page';
 import { DashboardHomePage } from './components/dashboard-home-page';
 import { LandingPage } from './components/landing-page';

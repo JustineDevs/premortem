@@ -140,6 +140,14 @@
 .landing .framer-twzyhj { flex: none; height: 48px; left: 1657px; overflow: hidden; position: absolute; top: 0px; width: 160px; }
 .landing .framer-bwi5md { -webkit-user-select: none; flex: none; height: auto; left: 50%; pointer-events: auto; position: absolute; top: 52%; user-select: none; white-space: pre; width: auto; }
 
+.landing-site-navbar__menu-toggle {
+  display: none;
+}
+
+.landing-site-navbar__mobile-menu {
+  display: none;
+}
+
 /* Remove bottom viewport dead space on landing */
 html:has(.landing-root),
 body:has(.landing-root) {
@@ -245,6 +253,12 @@ body:has(.landing-root) {
 
 .landing .landing-nav-link.framer-16j3yss {
   min-width: 134px;
+}
+
+.landing-site-navbar__menu-toggle,
+.landing-site-navbar__mobile-link,
+.landing-site-navbar__mobile-action {
+  font-family: var(--font-inter), Inter, sans-serif;
 }
 
 /* Navbar links + logo */
@@ -461,21 +475,6 @@ body:has(.landing-root) {
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-.landing-auth-captcha {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.landing-auth-captcha .cf-turnstile {
-  min-height: 65px;
 }
 
 /* Ecosystem cards: desktop uses original absolute positions (no flex padding) */
@@ -1063,15 +1062,15 @@ body:has(.landing-root) {
 
 .landing-auth-shell {
   width: 100%;
-  max-width: 400px;
+  max-width: 456px;
   margin-inline: auto;
 }
 
 .landing-auth-card {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 28px 32px 24px;
+  gap: 18px;
+  padding: 30px 32px 26px;
   background: rgb(251, 251, 248);
 }
 
@@ -1119,6 +1118,84 @@ body:has(.landing-root) {
   border-color: rgb(74, 222, 128);
 }
 
+.landing-auth-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.landing-auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: rgb(138, 138, 138);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.landing-auth-divider::before,
+.landing-auth-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid rgb(228, 227, 222);
+}
+
+.landing-auth-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.landing-auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.landing-auth-field__label {
+  color: rgb(54, 54, 54);
+}
+
+.landing-auth-input {
+  appearance: none;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid rgb(216, 215, 210);
+  border-radius: 5px;
+  background: rgb(255, 255, 255);
+  color: rgb(17, 17, 17);
+  font: inherit;
+  line-height: 1.2;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    background-color 150ms ease;
+}
+
+.landing-auth-input::placeholder {
+  color: rgb(145, 145, 145);
+}
+
+.landing-auth-input:hover {
+  border-color: rgb(195, 194, 189);
+}
+
+.landing-auth-input:focus-visible {
+  outline: none;
+  border-color: rgb(40, 37, 232);
+  box-shadow: 0 0 0 3px rgba(40, 37, 232, 0.12);
+}
+
+.landing-auth-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
 .landing-auth-card__providers {
   display: flex;
   flex-direction: column;
@@ -1135,10 +1212,21 @@ body:has(.landing-root) {
   padding: 0 16px;
   margin: 0;
   border-radius: 5px;
+  border: 1px solid transparent;
   text-decoration: none;
   cursor: pointer;
   box-sizing: border-box;
   font-family: var(--font-inter), Inter, sans-serif;
+  transition:
+    transform 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease;
+}
+
+.landing-auth-provider:hover,
+.landing-auth-submit:hover {
+  transform: translateY(-1px);
 }
 
 .landing-auth-provider--gitlab {
@@ -1159,7 +1247,25 @@ body:has(.landing-root) {
   background: rgb(82, 82, 82);
   color: rgb(255, 255, 255);
   opacity: 0.92;
+  border-color: rgb(82, 82, 82);
+}
+
+.landing-auth-provider--github:hover {
+  background: rgb(68, 68, 68);
+  opacity: 1;
+}
+
+.landing-auth-provider--github:disabled,
+.landing-auth-provider--github:disabled:hover {
+  background: rgb(82, 82, 82);
+  border-color: rgb(82, 82, 82);
+  opacity: 0.92;
   cursor: not-allowed;
+}
+
+.landing-auth-provider--github:focus-visible {
+  outline: 2px solid rgb(40, 37, 232);
+  outline-offset: 2px;
 }
 
 .landing-auth-provider__soon {
@@ -1189,10 +1295,61 @@ body:has(.landing-root) {
   border-top: 1px solid rgb(228, 227, 222);
 }
 
+.landing-auth-card__footer-links {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+
 .landing-auth-card__footer .landing-route-link {
   font-family: var(--font-inter), Inter, sans-serif;
   font-size: 14px;
   letter-spacing: -0.28px;
+}
+
+.landing-auth-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: 5px;
+  border: 1px solid rgb(0, 0, 0);
+  background: rgb(0, 0, 0);
+  color: rgb(255, 255, 255);
+  cursor: pointer;
+  box-sizing: border-box;
+  font-family: var(--font-inter), Inter, sans-serif;
+  transition:
+    transform 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease;
+}
+
+.landing-auth-submit--secondary {
+  background: rgb(251, 251, 248);
+  color: rgb(17, 17, 17);
+  border-color: rgb(216, 215, 210);
+}
+
+.landing-auth-submit--secondary:hover {
+  background: rgb(244, 242, 236);
+  border-color: rgb(195, 194, 189);
+}
+
+.landing-auth-submit:disabled,
+.landing-auth-provider:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.landing-auth-submit:focus-visible {
+  outline: 2px solid rgb(40, 37, 232);
+  outline-offset: 2px;
 }
 
 .landing-not-found-shell {

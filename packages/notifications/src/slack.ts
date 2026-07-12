@@ -55,6 +55,9 @@ function escapeSlackMarkup(value: string) {
 
 function normalizeSeverity(value: string | null | undefined): SlackAlertSeverity {
   const upper = value?.trim().toUpperCase();
+  if (upper === 'ALL') {
+    return 'LOW';
+  }
   if (upper === 'LOW' || upper === 'MEDIUM' || upper === 'HIGH' || upper === 'CRITICAL') {
     return upper;
   }
@@ -139,14 +142,25 @@ function shouldDeliverSlackNotification(
   const severity = normalizeSeverity(input.severity ?? EVENT_SEVERITY[input.kind]);
   if (SEVERITY_RANK[severity] < SEVERITY_RANK[threshold]) return false;
 
-  return Boolean(delivery.webhookUrl?.trim() || (delivery.nangoConnectionId && delivery.nangoProviderKey));
+  return Boolean(delivery.nangoConnectionId && delivery.nangoProviderKey);
 }
 
 export async function sendSlackNotification(
   input: SlackNotificationInput,
   delivery: SlackDeliveryConfig
-): Promise<{ delivered: boolean; transport: 'webhook' | 'nango' | 'skipped' }> {
+): Promise<{ delivered: boolean; transport: 'nango' | 'skipped' }> {
   if (!shouldDeliverSlackNotification(input, delivery)) {
+    if (delivery.isSlackConnected) {
+      captureServerException(
+        new Error('Slack notifications require a synced Nango connection'),
+        {
+          organizationId: input.organizationId,
+          kind: input.kind,
+          transport: 'nango'
+        }
+      );
+      throw new Error('Slack notifications require a synced Nango connection');
+    }
     return { delivered: false, transport: 'skipped' };
   }
 
@@ -193,21 +207,5 @@ export async function sendSlackNotification(
     return { delivered: true, transport: 'nango' };
   }
 
-  const webhookUrl = delivery.webhookUrl?.trim();
-  if (!webhookUrl) {
-    return { delivered: false, transport: 'skipped' };
-  }
-
-  const response = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text, blocks })
-  });
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`Slack webhook failed: ${response.status} ${body}`);
-  }
-
-  return { delivered: true, transport: 'webhook' };
+  throw new Error('Slack notifications require a synced Nango connection');
 }

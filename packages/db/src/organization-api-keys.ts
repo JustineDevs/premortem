@@ -1,6 +1,6 @@
 import { randomBytes, scryptSync } from 'node:crypto';
 
-import type { OrganizationApiKey } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 
 import { prisma } from './client';
 
@@ -32,7 +32,20 @@ function buildOrganizationApiKeyToken() {
   return { keyPrefix, token, keyHash: hashOrganizationApiKey(token) };
 }
 
-function summarizeOrganizationApiKey(key: OrganizationApiKey): OrganizationApiKeySummary {
+const ORGANIZATION_API_KEY_SUMMARY_SELECT = {
+  id: true,
+  label: true,
+  keyPrefix: true,
+  lastUsedAt: true,
+  revokedAt: true,
+  createdAt: true
+} as const;
+
+type OrganizationApiKeySummaryRow = Prisma.OrganizationApiKeyGetPayload<{
+  select: typeof ORGANIZATION_API_KEY_SUMMARY_SELECT;
+}>;
+
+function summarizeOrganizationApiKey(key: OrganizationApiKeySummaryRow): OrganizationApiKeySummary {
   return {
     id: key.id,
     label: key.label,
@@ -48,7 +61,8 @@ export async function listOrganizationApiKeys(
 ): Promise<OrganizationApiKeySummary[]> {
   const keys = await prisma.organizationApiKey.findMany({
     where: { organizationId },
-    orderBy: { createdAt: 'desc' }
+    orderBy: { createdAt: 'desc' },
+    select: ORGANIZATION_API_KEY_SUMMARY_SELECT
   });
   return keys.map(summarizeOrganizationApiKey);
 }
@@ -104,9 +118,12 @@ export async function verifyOrganizationApiKey(token: string): Promise<Organizat
       ...(keyPrefix ? { keyPrefix } : {}),
       revokedAt: null
     },
-    include: {
-      organization: true,
-      createdBy: true
+    select: {
+      id: true,
+      organizationId: true,
+      createdById: true,
+      label: true,
+      keyHash: true
     }
   });
 

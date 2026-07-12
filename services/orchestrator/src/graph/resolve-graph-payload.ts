@@ -1,5 +1,6 @@
 import type { GraphSnapshotPayload } from '@premortem/graph-model';
 import { isProductionMode } from '@premortem/domain';
+import { captureServerException } from '@premortem/observability/server';
 import type { GitHistorySnapshot, SourceFileSnapshot, OwnershipHint } from '../ingestion/ingest-project';
 
 import { readGraphSnapshotFromNeo4j } from '@premortem/integrations';
@@ -52,6 +53,17 @@ export function rebuildGraphFromSnapshotMetadata(input: {
       ci_config: {},
       has_ci: Boolean(metadata.hasCi),
       package_manifests: [],
+      lockfile_packages: [],
+      vulnerability_context: {
+        hits: [],
+        scannedPackageCount: 0,
+        kevCount: 0,
+        highEpssCount: 0,
+        source: 'unavailable'
+      },
+      source_code_samples: {},
+      auth_patterns: [],
+      prior_findings: [],
       pipeline_files: [],
       source_files: [] as SourceFileSnapshot[],
       ownership_hints: [] as OwnershipHint[],
@@ -82,7 +94,13 @@ export async function resolveGraphSnapshotPayload(input: {
       if (isGraphPayload(fromNeo4j)) {
         return fromNeo4j;
       }
-    } catch {
+    } catch (error) {
+      captureServerException(error, {
+        auditRunId: input.auditRunId,
+        projectId: input.projectId,
+        storageRef: input.storageRef,
+        stage: 'resolve_graph_payload.neo4j'
+      });
       // fall through to metadata rebuild
     }
   }

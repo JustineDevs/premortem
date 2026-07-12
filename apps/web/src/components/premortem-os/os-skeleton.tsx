@@ -15,7 +15,7 @@ export function OsTableSkeleton({ rows = 5 }: { rows?: number }) {
   return (
     <div className="space-y-2" aria-busy="true" aria-label="Loading">
       {Array.from({ length: rows }).map((_, i) => (
-        <OsSkeleton key={i} className="h-10 w-full" />
+        <OsSkeleton key={`row-${i}`} className="h-10 w-full" />
       ))}
     </div>
   );

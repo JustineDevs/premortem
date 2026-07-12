@@ -13,27 +13,6 @@
         "./scripts/mcp/run-toolbox-postgres.sh"
       ]
     },
-    "Cloudflare API": {
-      "url": "https://mcp.cloudflare.com/mcp"
-    },
-    "Cloudflare Docs": {
-      "url": "https://docs.mcp.cloudflare.com/mcp"
-    },
-    "Cloudflare Observability": {
-      "url": "https://observability.mcp.cloudflare.com/mcp"
-    },
-    "Cloudflare DNS Analytics": {
-      "url": "https://dns-analytics.mcp.cloudflare.com/mcp"
-    },
-    "Cloudflare GraphQL Analytics": {
-      "url": "https://graphql.mcp.cloudflare.com/mcp"
-    },
-    "Cloudflare Agents Docs": {
-      "url": "https://agents.cloudflare.com/mcp"
-    },
-    "Cloudflare MCP Portal": {
-      "url": "https://mcp.cloudflare.com/mcp?codemode=search_and_execute"
-    },
     "react-bits-mcp-docs": {
       "url": "https://gitmcp.io/DavidHDev/react-bits"
     },

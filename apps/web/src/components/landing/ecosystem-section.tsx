@@ -128,7 +128,7 @@ export function EcosystemSection() {
           style={{ objectFit: 'contain' }}
         />
         <p className="framer-1whxnzw landing-ecosystem-body" style={body14}>
-          GitHub sign-in and publishing are available when configured.
+          GitHub repository integration is roadmap, and the logo stays visible as part of the ecosystem roster.
         </p>
         <a
           className="framer-uxkj40 landing-ecosystem-link"

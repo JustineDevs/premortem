@@ -1,7 +1,7 @@
 import { fetchGitLabProfile } from '@/lib/gitlab-oauth';
-import { CanonicalEvents } from '@/lib/canonical/events';
 import { getApiBaseUrl } from '@/lib/runtime-config';
 import { trackServerEvent } from '@/lib/server/track-server-event';
+import { CanonicalEvents } from '@premortem/observability/events';
 
 import { actorHeaders, type RequestActorContext } from './request-context';
 

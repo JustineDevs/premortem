@@ -20,7 +20,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "postbuild": "node ../../scripts/fix-esm-imports.mjs dist",
+    "postbuild": "tsx --tsconfig ../../tsconfig.base.json ../../scripts/fix-esm-imports.ts dist",
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -28,11 +28,15 @@
     "@premortem/domain": "workspace:*",
     "@premortem/agent-kit": "workspace:*",
     "@premortem/db": "workspace:*",
+    "@premortem/ingestion": "workspace:*",
     "@premortem/integrations": "workspace:*",
     "@premortem/graph-model": "workspace:*",
     "@premortem/llm": "workspace:*",
+    "@premortem/skills": "workspace:*",
+    "@premortem/storage": "workspace:*",
     "@premortem/workflow": "workspace:*",
-    "@premortem/observability": "workspace:*"
+    "@premortem/observability": "workspace:*",
+    "@datastructures-js/disjoint-set": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

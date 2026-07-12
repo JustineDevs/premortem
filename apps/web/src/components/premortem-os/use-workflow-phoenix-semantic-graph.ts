@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 import type { WorkflowGraphEdge, WorkflowGraphNode } from './workflow-graph.types';
+import { buildOsQueryKey, type OsQueryScope } from '@/hooks/use-os-console-data';
+import { shouldRetryBffQuery } from '@/lib/bff-client';
 
 interface PhoenixSemanticGraphResponse {
   configured?: boolean;
@@ -63,7 +65,7 @@ function mapPhoenixToGraph(payload: PhoenixSemanticGraphResponse): {
 
 export function useWorkflowPhoenixSemanticGraph(
   auditRunId: string | undefined,
-  options?: { enabled?: boolean }
+  options?: { enabled?: boolean; queryScope?: OsQueryScope }
 ) {
   const enabled = Boolean(auditRunId) && (options?.enabled ?? true);
 
@@ -72,21 +74,21 @@ export function useWorkflowPhoenixSemanticGraph(
     isLoading,
     isFetching
   } = useQuery({
-    queryKey: ['os', 'audit-semantic-graph', auditRunId],
+    queryKey: buildOsQueryKey(options?.queryScope, 'audit-semantic-graph', auditRunId),
     enabled,
     staleTime: 60_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    retry: shouldRetryBffQuery,
     queryFn: async () => {
       const response = await fetch(`/api/audits/${auditRunId}/semantic-graph`);
       if (!response.ok) {
-        return {
-          nodes: [] as WorkflowGraphNode[],
-          edges: [] as WorkflowGraphEdge[],
-          configured: false,
-          included: false,
-          traceIds: [] as string[]
-        };
+        const message = await response.text();
+        throw new Error(
+          `Phoenix semantic graph request failed: ${response.status} ${message || response.statusText}`
+        );
       }
-      const data = (await response.json()) as PhoenixSemanticGraphResponse;
+      const data = await response.json();
       return mapPhoenixToGraph(data);
     }
   });

@@ -1,12 +1,19 @@
 'use client';
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, ExternalLink, Network, Sparkles, X } from 'lucide-react';
 
 import { buildGraphNodeInspectContext, formatGraphPropValue } from './build-graph-node-inspect';
+import { buildWorkflowGraphDiff, type WorkflowDiffState } from './workflow-diff-model';
 import { WorkflowD3Graph } from './workflow-d3-graph';
+import {
+  matchGraphEdgeIdsForNodeIds,
+  matchGraphNodeIdsForFinding,
+  resolveGraphNodePath
+} from './workflow-topology';
 
 import type { WorkflowAuditSnapshot } from './workflow-canvas.types';
+import type { Finding } from '@/lib/premortem-os/types';
 import type { WorkflowGraphEdge, WorkflowGraphNode } from './workflow-graph.types';
 
 export type { WorkflowGraphEdge, WorkflowGraphNode } from './workflow-graph.types';
@@ -24,8 +31,14 @@ interface WorkflowGraphPanelProps {
   emptyMessage?: string;
   semanticIncluded?: boolean;
   phoenixConfigured?: boolean;
+  selectedFinding?: Finding | null;
+  diffMode?: boolean;
+  baselineNodes?: WorkflowGraphNode[];
+  baselineEdges?: WorkflowGraphEdge[];
   onSelectGraphNode?: (id: string | null) => void;
   onNavigateTab?: (tab: string) => void;
+  onSelectFindingPath?: (path: string | null) => void;
+  onRunTargetedAudit?: (path: string | null, node: WorkflowGraphNode | null) => void;
 }
 
 function colorForType(type: string, index: number, lane?: WorkflowGraphNode['lane']): string {
@@ -59,10 +72,21 @@ export function WorkflowGraphPanel({
   emptyMessage,
   semanticIncluded = false,
   phoenixConfigured = false,
+  selectedFinding = null,
+  diffMode = false,
+  baselineNodes = [],
+  baselineEdges = [],
   onSelectGraphNode,
-  onNavigateTab
+  onNavigateTab,
+  onSelectFindingPath,
+  onRunTargetedAudit
 }: WorkflowGraphPanelProps) {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    node: WorkflowGraphNode;
+    x: number;
+    y: number;
+  } | null>(null);
 
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedGraphNodeId) ?? null,
@@ -78,6 +102,42 @@ export function WorkflowGraphPanel({
     () => edges.find((edge) => edge.id === selectedEdgeId) ?? null,
     [edges, selectedEdgeId]
   );
+
+  const highlightedNodeIds = useMemo(() => {
+    if (!selectedFinding) return [];
+    return matchGraphNodeIdsForFinding(selectedFinding, nodes);
+  }, [nodes, selectedFinding]);
+
+  const highlightedEdgeIds = useMemo(
+    () => matchGraphEdgeIdsForNodeIds(edges, highlightedNodeIds),
+    [edges, highlightedNodeIds]
+  );
+
+  const graphForDisplay = useMemo(() => {
+    if (!diffMode) {
+      return {
+        nodes,
+        edges,
+        nodeStates: {} as Record<string, WorkflowDiffState>,
+        edgeStates: {} as Record<string, WorkflowDiffState>
+      };
+    }
+
+    return buildWorkflowGraphDiff({
+      current: { nodes, edges },
+      baseline: { nodes: baselineNodes, edges: baselineEdges }
+    });
+  }, [baselineEdges, baselineNodes, diffMode, edges, nodes]);
+
+  useEffect(() => {
+    if (!selectedEdgeId) return;
+    if (edges.some((edge) => edge.id === selectedEdgeId)) return;
+    setSelectedEdgeId(null);
+  }, [edges, selectedEdgeId]);
+
+  useEffect(() => {
+    setSelectedEdgeId((current) => (current === null ? current : null));
+  }, [selectedGraphNodeId]);
 
   const legendItems = useMemo(() => {
     const counts = new Map<string, { count: number; color: string }>();
@@ -107,8 +167,36 @@ export function WorkflowGraphPanel({
 
   const clearSelection = useCallback(() => {
     setSelectedEdgeId(null);
+    setContextMenu(null);
     onSelectGraphNode?.(null);
   }, [onSelectGraphNode]);
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  const handleCopyPath = useCallback(async () => {
+    if (!contextMenu) return;
+    const path = resolveGraphNodePath(contextMenu.node);
+    if (!path) return;
+    await navigator.clipboard.writeText(path);
+    closeContextMenu();
+  }, [closeContextMenu, contextMenu]);
+
+  const handleViewFindingsForPath = useCallback(() => {
+    if (!contextMenu) return;
+    const path = resolveGraphNodePath(contextMenu.node);
+    if (!path) return;
+    onSelectFindingPath?.(path);
+    closeContextMenu();
+  }, [closeContextMenu, contextMenu, onNavigateTab, onSelectFindingPath]);
+
+  const handleRunTargetedAudit = useCallback(() => {
+    if (!contextMenu) return;
+    const path = resolveGraphNodePath(contextMenu.node);
+    onRunTargetedAudit?.(path, contextMenu.node);
+    closeContextMenu();
+  }, [closeContextMenu, contextMenu, onRunTargetedAudit]);
 
   const renderDetailPanel = () => {
     if (selectedNode && selectedNodeContext) {
@@ -142,7 +230,7 @@ export function WorkflowGraphPanel({
               type="button"
               onClick={clearSelection}
               aria-label="Clear graph selection"
-              className="shrink-0 rounded-full border border-white/10 bg-white/5 p-2 text-[#B4C1B8] transition-colors hover:bg-white/10 hover:text-white"
+              className="shrink-0 rounded-full border border-transparent bg-white/5 p-2 text-[#B4C1B8] transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-0"
             >
               <X size={14} />
             </button>
@@ -214,7 +302,7 @@ export function WorkflowGraphPanel({
                       type="button"
                       onClick={() => from && openNodeDetails(from.id)}
                       disabled={!from}
-                      className="flex w-full items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-2.5 py-2 text-left transition-colors hover:border-emerald-400/30 hover:bg-emerald-500/10 disabled:cursor-default disabled:opacity-60"
+                      className="flex w-full items-center gap-2 rounded-xl border border-transparent bg-white/5 px-2.5 py-2 text-left transition-colors hover:bg-emerald-500/10 disabled:cursor-default disabled:opacity-60"
                     >
                       <span className="font-mono text-[9px] text-[#9BABA0]">in</span>
                       <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-[#F4FAF5]">
@@ -233,7 +321,7 @@ export function WorkflowGraphPanel({
                       type="button"
                       onClick={() => to && openNodeDetails(to.id)}
                       disabled={!to}
-                      className="flex w-full items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-2.5 py-2 text-left transition-colors hover:border-emerald-400/30 hover:bg-emerald-500/10 disabled:cursor-default disabled:opacity-60"
+                      className="flex w-full items-center gap-2 rounded-xl border border-transparent bg-white/5 px-2.5 py-2 text-left transition-colors hover:bg-emerald-500/10 disabled:cursor-default disabled:opacity-60"
                     >
                       <span className="font-mono text-[9px] text-[#9BABA0]">out</span>
                       <ArrowRight size={10} className="text-[#9BABA0]" />
@@ -294,14 +382,14 @@ export function WorkflowGraphPanel({
                 {selectedEdge.label ?? 'RELATED'}
               </h4>
             </div>
-            <button
-              type="button"
-              onClick={() => setSelectedEdgeId(null)}
-              aria-label="Clear edge selection"
-              className="shrink-0 rounded-full border border-white/10 bg-white/5 p-2 text-[#B4C1B8] transition-colors hover:bg-white/10 hover:text-white"
-            >
-              <X size={14} />
-            </button>
+              <button
+                type="button"
+                onClick={() => setSelectedEdgeId(null)}
+                aria-label="Clear edge selection"
+                className="shrink-0 rounded-full border border-transparent bg-white/5 p-2 text-[#B4C1B8] transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-0"
+              >
+                <X size={14} />
+              </button>
           </div>
 
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-3 text-xs [scrollbar-gutter:stable]">
@@ -361,10 +449,14 @@ export function WorkflowGraphPanel({
     <div className="relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden bg-[#050706]">
       <WorkflowD3Graph
         key={layoutKey ?? 'workflow-graph'}
-        graphNodes={nodes}
-        graphEdges={edges}
+        graphNodes={graphForDisplay.nodes}
+        graphEdges={graphForDisplay.edges}
         selectedGraphNodeId={selectedGraphNodeId}
         selectedEdgeId={selectedEdgeId}
+        highlightedNodeIds={highlightedNodeIds}
+        highlightedEdgeIds={highlightedEdgeIds}
+        nodeStates={graphForDisplay.nodeStates}
+        edgeStates={graphForDisplay.edgeStates}
         memoryUpdating={memoryUpdating}
         showEdgeLabels
         emptyMessage={
@@ -390,7 +482,53 @@ export function WorkflowGraphPanel({
             onSelectGraphNode?.(null);
           }
         }}
+        onNodeContextMenu={(node, position) => {
+          setSelectedEdgeId(null);
+          setContextMenu({ node, x: position.x, y: position.y });
+        }}
       />
+
+      {contextMenu ? (
+        <div
+          className="fixed z-[60] w-[17rem] rounded-2xl border border-[#EAE6DF] bg-white p-2.5 shadow-2xl shadow-black/20"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onMouseLeave={closeContextMenu}
+        >
+          <div className="mb-2 rounded-xl bg-[#FAF8F5] px-3 py-2">
+            <p className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-[#8A958F]">
+              Canvas controls
+            </p>
+            <p className="mt-1 truncate text-sm font-semibold text-[#1E2522]">{contextMenu.node.label}</p>
+            <p className="mt-1 truncate font-mono text-[10px] text-[#5C6560]">{resolveGraphNodePath(contextMenu.node) ?? 'No file path available'}</p>
+          </div>
+          <div className="space-y-1">
+            <button
+              type="button"
+              onClick={handleRunTargetedAudit}
+              className="flex w-full items-center justify-between rounded-xl border border-transparent bg-white px-3 py-2 text-left text-[11px] font-semibold text-[#1E2522] transition-colors hover:bg-[#FAF8F5] focus-visible:outline-none focus-visible:ring-0"
+            >
+              <span>Run targeted audit</span>
+              <span className="font-mono text-[9px] text-[#8A958F]">live</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleViewFindingsForPath}
+              className="flex w-full items-center justify-between rounded-xl border border-transparent bg-white px-3 py-2 text-left text-[11px] font-semibold text-[#1E2522] transition-colors hover:bg-[#FAF8F5] focus-visible:outline-none focus-visible:ring-0"
+            >
+              <span>View findings for this file</span>
+              <span className="font-mono text-[9px] text-[#8A958F]">filter</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleCopyPath}
+              className="flex w-full items-center justify-between rounded-xl border border-transparent bg-white px-3 py-2 text-left text-[11px] font-semibold text-[#1E2522] transition-colors hover:bg-[#FAF8F5] focus-visible:outline-none focus-visible:ring-0"
+            >
+              <span>Copy path</span>
+              <span className="font-mono text-[9px] text-[#8A958F]">clipboard</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="pointer-events-none absolute bottom-3 left-3 z-20 rounded-2xl border border-white/10 bg-black/55 px-4 py-3 shadow-xl shadow-black/20 backdrop-blur-md">
         <div className="mb-2 font-mono text-[8px] font-bold uppercase tracking-[0.24em] text-emerald-200/70">

@@ -1,6 +1,5 @@
 'use client';
 
-import React from 'react';
 import type { WorkflowCanvasViewMode } from '@premortem/domain';
 
 interface WorkflowViewModeToggleProps {
@@ -30,7 +29,7 @@ export function WorkflowViewModeToggle({ mode, onChange }: WorkflowViewModeToggl
             role="tab"
             aria-selected={active}
             onClick={() => onChange(entry.id)}
-            className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wide rounded-md transition-colors cursor-pointer ${
+            className={`cursor-pointer rounded-md border border-transparent px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-0 ${
               active
                 ? 'bg-emerald-950 text-white shadow-sm'
                 : 'text-[#717A75] hover:text-[#1E2522] hover:bg-white/70'

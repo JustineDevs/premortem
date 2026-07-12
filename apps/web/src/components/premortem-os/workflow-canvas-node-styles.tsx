@@ -1,4 +1,3 @@
-import React from 'react';
 import { Activity, CloudLightning, Database, Layers, ThumbsUp } from 'lucide-react';
 
 import type { CanvasNodeStatus, CanvasNodeType } from './workflow-canvas.types';

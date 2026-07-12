@@ -26,7 +26,6 @@ function safeNextPath(value: string | null, discover: boolean) {
 
 export async function GET(request: NextRequest) {
   const clientId = process.env.GITLAB_CLIENT_ID;
-  const clientSecret = process.env.GITLAB_CLIENT_SECRET;
   const origin = getPublicAppOrigin(getRequestOrigin(request));
   const canonicalOrigin = getCanonicalLoopbackOrigin(getRequestOrigin(request));
 
@@ -35,7 +34,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(canonicalUrl, 303);
   }
 
-  if (!clientId || !clientSecret) {
+  if (!clientId) {
     const redirectUrl = new URL('/app', origin);
     redirectUrl.searchParams.set('tab', 'settings');
     redirectUrl.searchParams.set('integration_notice', 'config');

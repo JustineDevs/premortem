@@ -6,10 +6,11 @@ const GITHUB = 'https://github.com/JustineDevs/premortem/blob/main';
 
 export const deployProductionGuideDoc: StructuredDoc = {
   title: 'Deploy to production',
-  lead: 'Deploy Premortem on Cloudflare Pages and Worker with Supabase, Neo4j, and Stripe using the production env wrapper.',
+  lead: 'Deploy Premortem with a Vercel frontend, an Alibaba Cloud ECS backend, Supabase, Neo4j, and Stripe using the production env wrapper.',
   audience: 'Platform engineers preparing a production cutover.',
   prerequisites: [
-    'Cloudflare account with Workers, Pages, and Queues enabled.',
+    'Vercel project connected to the repo.',
+    'Alibaba Cloud ECS backend host or public URL configured.',
     'Supabase project with migrations applied.',
     'Stripe products and webhook endpoint configured.'
   ],
@@ -18,8 +19,8 @@ export const deployProductionGuideDoc: StructuredDoc = {
   toc: [
     { id: 'topology', label: 'Runtime topology' },
     { id: 'ci', label: 'CI pipeline' },
-    { id: 'api-worker', label: 'API Worker' },
-    { id: 'pages', label: 'Cloudflare Pages' },
+    { id: 'api-backend', label: 'API backend' },
+    { id: 'frontend', label: 'Frontend' },
     { id: 'stripe', label: 'Stripe webhooks' },
     { id: 'verify', label: 'Pre-flight checks' }
   ],
@@ -34,8 +35,8 @@ export const deployProductionGuideDoc: StructuredDoc = {
       id: 'topology',
       heading: 'Runtime topology',
       bullets: [
-        'Web (Next.js BFF, marketing, /app): Cloudflare Pages at premortem.jstn.site.',
-        'API (audit orchestration): Cloudflare Worker at api.jstn.site.',
+        'Web (Next.js BFF, marketing, /app): Vercel at premortem.jstn.site.',
+        'API (audit orchestration): Alibaba Cloud ECS at api.jstn.site.',
         'Database + Auth: Supabase Postgres pooler and Auth.',
         'Graph: Neo4j Aura or self-hosted Bolt URI.',
         'Billing: Stripe Checkout + webhooks.'
@@ -54,28 +55,27 @@ export const deployProductionGuideDoc: StructuredDoc = {
       ]
     },
     {
-      id: 'api-worker',
-      heading: 'API Worker',
+      id: 'api-backend',
+      heading: 'API backend',
       bullets: [
-        'Requires CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in GitHub secrets.',
-        'The deploy wrapper loads repo-root .env.production and sets CLOUDFLARE_ENV=production before wrangler runs.',
-        'Queue bootstrap creates premortem-audit-jobs and premortem-audit-jobs-dlq during deploy when Cloudflare credentials are present.',
-        'Set Worker secrets via wrangler (DATABASE_URL, GEMINI_API_KEY, GitLab OAuth, Neo4j, Supabase service role).'
+        'The deploy helper reads Alibaba Cloud ECS metadata when available and falls back to configured host and public URL values.',
+        'Set backend secrets in the ECS runtime environment or deployment system, not in git.',
+        'Keep DATABASE_URL, GEMINI_API_KEY, GitLab OAuth, Neo4j, and Supabase service role keys server-side only.'
       ],
       codeBlocks: [
         {
-          title: 'Manual Worker deploy',
-          code: 'pnpm --filter @premortem/api build\ncd apps/api && pnpm run deploy'
+          title: 'Manual backend deploy',
+          code: 'pnpm --filter @premortem/api build\nnode scripts/deploy/alibaba-cloud-ecs.ts'
         }
       ]
     },
     {
-      id: 'pages',
-      heading: 'Cloudflare Pages',
+      id: 'frontend',
+      heading: 'Frontend',
       bullets: [
-        'Connect GitHub repo; production branch main.',
+        'Connect GitHub repo in Vercel; production branch main.',
         'Build: pnpm install --frozen-lockfile && pnpm run build:pages.',
-        'The build wrapper loads repo-root .env.production and sets CLOUDFLARE_ENV=production before the Pages build starts.',
+        'The build wrapper loads repo-root .env.production before the Vercel build starts.',
         'Set NEXT_PUBLIC_APP_URL=https://premortem.jstn.site and PREMORTEM_API_BASE_URL=https://api.jstn.site.',
         'Include Supabase public keys, Stripe secrets, Sentry/PostHog public keys on Pages.'
       ],
@@ -91,7 +91,7 @@ export const deployProductionGuideDoc: StructuredDoc = {
       heading: 'Stripe webhooks',
       bullets: [
         'Webhook endpoint: https://premortem.jstn.site/api/stripe/webhook.',
-        'Map Starter and Growth price IDs to STRIPE_PRICE_PRO, STRIPE_PRICE_TEAM, and annual variants.',
+        'Map Starter, Growth, and Scale price IDs to STRIPE_PRICE_PRO, STRIPE_PRICE_TEAM, STRIPE_PRICE_SCALE, and annual variants.',
         'Test mode uses sk_test_*; live mode drives entitlements via webhook events.'
       ]
     },
@@ -303,9 +303,9 @@ export const aiPlaygroundGuideDoc: StructuredDoc = {
 export const workspaceSettingsGuideDoc: StructuredDoc = {
   title: 'Workspace settings',
   lead: 'Configure profile, organization, integrations, LLM routing, billing, and notifications from Integrations & Scope.',
-  audience: 'Workspace admins and platform owners.',
+  audience: 'Workspace members, admins, and owners.',
   prerequisites: ['Signed-in Supabase user with org membership.'],
-  expectedResult: 'Provider connected, LLM and work item attributes saved, billing tier reflects usage.',
+  expectedResult: 'Your role sees the right settings sections, provider state is saved, and billing tier reflects usage.',
   screenshot: {
     src: '/landing/demo/11.png',
     alt: 'Premortem Connected Providers settings',
@@ -324,8 +324,8 @@ export const workspaceSettingsGuideDoc: StructuredDoc = {
       id: 'profile',
       heading: 'Profile & organization',
       bullets: [
-        'Profile: display name, username, timezone.',
-        'Organization: legal name, billing email, website URL.',
+        'Profile: display name, username, timezone. Members can edit personal details.',
+        'Organization: legal name, billing email, website URL. Owners and admins can edit organization data.',
         'Changes persist via PATCH /api/workspace/profile and /organization.'
       ]
     },
@@ -333,8 +333,8 @@ export const workspaceSettingsGuideDoc: StructuredDoc = {
       id: 'integrations',
       heading: 'Integrations & providers',
       bullets: [
-        'GitLab: OAuth connect, reconnect, sync work item attributes.',
-        'GitHub, Bitbucket, Azure DevOps, and Gitea are not available in this release.',
+        'GitLab: OAuth connect, reconnect, sync work item attributes. Owners and admins manage organization connections.',
+        'GitHub, Bitbucket, Azure DevOps, and Gitea remain roadmap surfaces for repository integration.',
         'Sync integration refreshes metadata tags from provider APIs.'
       ]
     },
@@ -342,7 +342,7 @@ export const workspaceSettingsGuideDoc: StructuredDoc = {
       id: 'llm',
       heading: 'LLM configuration',
       bullets: [
-        'Default Gemini model, max tokens, temperature.',
+        'Default Gemini model, max tokens, temperature. Members can tune AI model routing.',
         'Vendor routing tiers for fallback providers.',
         'Custom provider hosts for self-hosted endpoints.',
         'PATCH /api/workspace/llm persists configuration.'
@@ -361,7 +361,7 @@ export const workspaceSettingsGuideDoc: StructuredDoc = {
       id: 'billing',
       heading: 'Billing',
       bullets: [
-        'View plan tier, usage (scans, tokens), and upgrade via Stripe Checkout.',
+        'View plan tier, usage (scans, tokens), invoices, and upgrade via Stripe Checkout or Stripe Billing Portal.',
         'Free tier: local plan patch works without Checkout in local development.',
         'See Billing & plan limits reference for quotas.'
       ]
@@ -370,7 +370,7 @@ export const workspaceSettingsGuideDoc: StructuredDoc = {
       id: 'notifications',
       heading: 'Notifications',
       bullets: [
-        'Slack webhook and channel for audit completion alerts.',
+        'Slack webhook and channel for audit completion alerts. Owners and admins manage workspace notifications.',
         'Email alert list with minimum severity threshold.',
         'PATCH /api/workspace/notifications.'
       ]
@@ -385,7 +385,7 @@ export const workspaceSettingsGuideDoc: StructuredDoc = {
 
 export const authSessionsGuideDoc: StructuredDoc = {
   title: 'Auth & sessions',
-  lead: 'Supabase Auth gates /app; GitLab OAuth is separate and used for repository and publish access.',
+  lead: 'Supabase Auth gates /app; email/password and magic-link flows handle sign-in, while GitLab OAuth is separate and used for repository and publish access.',
   audience: 'Developers configuring local auth or debugging login loops.',
   prerequisites: ['NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY set.'],
   expectedResult: 'Users sign in at /login; /app loads workspace data under their Supabase user id.',
@@ -402,7 +402,8 @@ export const authSessionsGuideDoc: StructuredDoc = {
       heading: 'Supabase Auth',
       bullets: [
         '/login and /signup use Supabase SSR cookies via apps/web middleware.',
-        'When Cloudflare Turnstile is enabled, the widget appears before the OAuth redirect and must succeed before the GitLab handoff continues.',
+        'Supported login flows include email/password and magic link.',
+        'Vercel BotID protects the OAuth handoff and must validate before the GitLab redirect continues.',
         'BFF routes read session and map to organization membership.',
         'GET /api/auth/status reports whether auth is configured.'
       ]
@@ -450,8 +451,8 @@ export const authSessionsGuideDoc: StructuredDoc = {
         'ERR_TOO_MANY_REDIRECTS on /login: canonical host redirect; align APP URL and OAuth callback host.',
         '401 on /api/workspace: session expired or auth disabled without local verification credentials.',
         'Callback failure on /login or /signup: Supabase could not exchange the external code for a session, or the callback host did not match NEXT_PUBLIC_APP_URL.',
-        'Captcha-config notice on /login or /signup: Turnstile is enabled but NEXT_PUBLIC_TURNSTILE_SITE_KEY or TURNSTILE_SECRET_KEY is missing in the deployment environment.',
-        'Empty /app after login: workspace exists but no projects registered yet (not an auth failure).'
+        'BotID-config notice on /login or /signup: browser protection is enabled but the deployment environment is missing the required BotID setup.',
+        'Empty /app after login: workspace exists but no projects registered yet, or the current role only exposes profile, billing, and model settings.'
       ]
     }
   ],
@@ -463,7 +464,7 @@ export const authSessionsGuideDoc: StructuredDoc = {
 
 export const billingPlansReferenceDoc: StructuredDoc = {
   title: 'Billing & plan limits',
-  lead: 'Entitlements enforced by @premortem/db PLAN_LIMITS: repos, monthly audits, and publish capability.',
+  lead: 'Entitlements enforced by @premortem/db PLAN_LIMITS: repos, monthly audits, publish allowance, and retention tiers.',
   audience: 'Admins choosing a tier or debugging 402/403 quota errors.',
   expectedResult: 'You know which features unlock per plan and how usage is counted.',
   toc: [
@@ -477,16 +478,17 @@ export const billingPlansReferenceDoc: StructuredDoc = {
       id: 'tiers',
       heading: 'Plan tiers',
       bullets: [
-        'Free: 1 repo, 10 audits/month, reviewer console, no GitLab publish.',
-        'Starter (pro): 10 repos, 100 audits/month, GitLab publish + reconcile.',
-        'Growth (team): 50 repos, 500 audits/month, priority reconciliation.',
-        'Enterprise: contract quotas, SSO tracked on the roadmap, custom deployment.'
+        'Free: 1 repo, 10 audits/month, 3 publishes/month, reviewer console, 30-day history.',
+        'Starter (pro): 10 repos, 100 audits/month, GitLab publish + reconcile, SARIF export, 90-day history.',
+        'Growth (team): 30 repos, 300 audits/month, webhooks, Graphiti memory, dashboards, 1-year history.',
+        'Scale (scale): 100 repos, 1,000 audits/month, priority support, skill marketplace.',
+        'Enterprise: contract quotas, custom deployment, dedicated support, and compliance workstreams.'
       ],
       codeBlocks: [
         {
           title: 'Canonical limits (packages/db/src/entitlements.ts)',
           language: 'text',
-          code: 'free:       1 repo,   10 audits/mo,  publish: false\npro:       10 repos, 100 audits/mo, publish: true\nteam:      50 repos, 500 audits/mo, publish: true\nenterprise: contract quotas,           publish: true'
+          code: 'free:       1 repo,   10 audits/mo,  3 publishes/mo, 30-day history\npro:       10 repos, 100 audits/mo, unlimited publish, 90-day history\nteam:      30 repos, 300 audits/mo, unlimited publish, 1-year history\nscale:    100 repos, 1,000 audits/mo, unlimited publish, priority support\nenterprise: contract quotas,           unlimited publish, custom retention'
         }
       ]
     },
@@ -496,7 +498,7 @@ export const billingPlansReferenceDoc: StructuredDoc = {
       bullets: [
         'assertCanRegisterProject: 403 repo_limit when at maxRepos.',
         'assertCanRunAudit: 402 quota_exceeded when auditsUsed >= auditLimit.',
-        'assertCanPublish: 403 feature_locked on Free tier.',
+        'assertCanPublish: 403 feature_locked after free publish allowance is exhausted.',
         'Usage visible in Settings → Billing and GET /api/workspace.'
       ]
     },
@@ -505,9 +507,10 @@ export const billingPlansReferenceDoc: StructuredDoc = {
       heading: 'Stripe integration',
       bullets: [
         'Checkout: POST /api/billing/checkout with plan and billing cycle.',
+        'Billing Portal: POST /api/billing/portal for cards, invoices, and cancellation handling.',
         'Webhook: POST /api/stripe/webhook updates OrganizationBillingAccount.',
         'Env: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_* for each tier.',
-        'Test mode: plan PATCH in Settings works without Checkout when Stripe is not configured.'
+        'Test mode: Checkout works with test keys when price IDs are configured; local verification can still use plan PATCH when Stripe is unavailable.'
       ],
       callouts: [
         {
@@ -562,7 +565,7 @@ export const neo4jGraphReferenceDoc: StructuredDoc = {
       callouts: [
         {
           variant: 'local',
-          text: 'Set NEO4J_DISABLED=1 to skip graph writes when Neo4j is unavailable (audits still run).'
+          text: 'Set NEO4J_DISABLED=1 only for temporary local troubleshooting when Neo4j is unavailable. Audits still run, but graph context is reduced.'
         }
       ]
     },
@@ -572,7 +575,7 @@ export const neo4jGraphReferenceDoc: StructuredDoc = {
       bullets: [
         'NEO4J_URI: Bolt connection string (Aura or local).',
         'NEO4J_USERNAME, NEO4J_PASSWORD: credentials.',
-        'NEO4J_DISABLED=1: skip graph persistence (local development fallback).'
+        'NEO4J_DISABLED=1: skip graph persistence during local development troubleshooting.'
       ]
     },
     {
@@ -588,9 +591,9 @@ export const neo4jGraphReferenceDoc: StructuredDoc = {
       id: 'disable',
       heading: 'Disable graph',
       bullets: [
-        'When Neo4j is down, set NEO4J_DISABLED=1 to avoid connection errors.',
+        'When Neo4j is down, set NEO4J_DISABLED=1 to avoid connection errors during local development.',
         'Audits complete without graph artifact; canvas graph panel shows awaiting state.',
-        'Production: use Neo4j Aura or managed Bolt with secrets in Worker/Pages env.'
+        'Production: keep Neo4j configured and treat graph persistence as part of the core audit path.'
       ]
     }
   ],
@@ -645,7 +648,7 @@ export const observabilityReferenceDoc: StructuredDoc = {
       codeBlocks: [
         {
           title: 'Canonical SDK readiness',
-          code: 'node scripts/canonical/verify-stack.mjs'
+          code: 'node scripts/canonical/verify-stack.ts'
         }
       ]
     }
@@ -693,7 +696,7 @@ export const securityConceptDoc: StructuredDoc = {
       id: 'tokens',
       heading: 'Provider tokens',
       bullets: [
-        'GitLab OAuth tokens stored encrypted at rest in Postgres.',
+        'GitLab OAuth tokens stay server-side and are handled through backend storage, not browser bundles.',
         'GITLAB_TOKEN (PAT) for ingest/publish in server env, never exposed to client.',
         'Stripe secrets only on server routes and webhooks.'
       ]
@@ -800,7 +803,7 @@ export const enterpriseReadinessDoc: StructuredDoc = {
       heading: 'Provider support matrix',
       bullets: [
         'GitLab: supported for connect, ingest, publish, and reconciliation.',
-        'GitHub: sign-in and auth primitives exist; repository integration is roadmap.',
+        'GitHub: repository integration is roadmap and not a supported production login dependency.',
         'Bitbucket: roadmap.',
         'Azure DevOps: roadmap.',
         'Gitea: roadmap.'
@@ -856,7 +859,7 @@ export const publishGitlabTutorialDoc: StructuredDoc = {
   lead: 'Take one approved issue candidate from review to a live GitLab issue with labels and reconciliation.',
   audience: 'Reviewers completing their first publish workflow.',
   prerequisites: [
-    'Starter plan or above (publish enabled).',
+    'Free includes 3 publishes/month; Starter or above removes the cap.',
     'Completed audit with open issue candidates.',
     'GitLab integration connected with issue create permission.'
   ],
@@ -902,7 +905,7 @@ export const publishGitlabTutorialDoc: StructuredDoc = {
       callouts: [
         {
           variant: 'production',
-          text: 'Free tier returns feature_locked until upgraded to Starter.'
+          text: 'Free tier allows 3 publishes per month before feature_locked; Starter removes the limit.'
         }
       ]
     },

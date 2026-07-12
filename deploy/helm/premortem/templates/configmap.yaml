@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: premortem-runtime-config
+  namespace: {{ .Values.global.namespace | quote }}
+  labels:
+{{ include "premortem.labels" . | indent 4 }}
+data:
+  NODE_ENV: production
+  PREMORTEM_RUNTIME_MODE: {{ .Values.global.runtimeMode | quote }}
+  PREMORTEM_WEB_URL: {{ .Values.global.webUrl | quote }}
+  PREMORTEM_API_URL: {{ .Values.global.apiUrl | quote }}
+  PREMORTEM_API_PORT: "18787"
+  PORT: "8080"
+  PHOENIX_OTEL_ENABLED: "1"
+  LANGFUSE_ENABLED: "1"
+  POSTHOG_ENABLED: "1"

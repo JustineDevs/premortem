@@ -27,6 +27,10 @@ export function getApiBaseUrl() {
     return configured.replace(/\/$/, '');
   }
 
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('PREMORTEM_API_BASE_URL is required in production');
+  }
+
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
   if (appUrl) {
     try {

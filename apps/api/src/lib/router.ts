@@ -1,3 +1,5 @@
+import { Hono } from 'hono';
+
 import { captureServerException } from '@premortem/observability/server';
 
 import {
@@ -8,10 +10,16 @@ import {
   handleAuditPause,
   handleAuditRead,
   handleAuditResume,
-  handleAuditSemanticGraphRead
+  handleAuditSemanticGraphRead,
+  handleAuditSarifRead
 } from '../routes/audits';
+import { handleSandboxAuditCreate } from '../routes/audits-sandbox';
+import { handleBillingSubscriptionPost } from '../routes/billing-subscription';
+import { handleBillingCheckoutPost, handleBillingPortalPost } from '../routes/billing';
+import { handleStripeWebhookPost } from '../routes/stripe-webhook';
 import {
   handleIssueApprove,
+  handleIssueAction,
   handleIssueEdit,
   handleIssueMerge,
   handleIssueOutcome,
@@ -29,6 +37,7 @@ import {
   handleWorkspaceMembersInvitePost,
   handleWorkspaceNangoConnectSessionPost,
   handleWorkspaceIntegrationSync,
+  handleWorkspaceSlackNotificationSyncPost,
   handleWorkspaceIntegrationsPost,
   handleWorkspaceLlmPatch,
   handleWorkspaceNotificationsPatch,
@@ -41,7 +50,8 @@ import {
   handleWorkspaceRuntimeStopAll,
   handleWorkspaceWorkItemAttributesPatch
 } from '../routes/workspace';
-import { handleSlackPremortemCommandPost } from '../routes/slack';
+import { handleWorkspaceSkillsInstall as handleWorkspaceSkillsInstallRoute } from '../routes/skills';
+import { handleSlackEventsPost, handleSlackPremortemCommandPost } from '../routes/slack';
 import {
   handleProjectCreate,
   handleProjectAccuracy,
@@ -60,8 +70,8 @@ import {
   handleInvitationRead
 } from '../routes/invitations';
 import { handleGitLabIssueWebhookPost } from '../routes/webhooks';
+import { handleMcpRequest } from '../routes/mcp';
 import type { AppEnv, ExecutionContextLike } from './types';
-import { withCorsRouter } from './cors';
 import { ApiForbiddenError } from './authorization';
 import { ApiUnauthorizedError } from './request-context';
 import {
@@ -70,6 +80,139 @@ import {
   rateLimitKey,
   resolveRequestId
 } from './request-guard';
+
+const app = new Hono<{ Bindings: AppEnv; Variables: { requestId: string } }>();
+
+app.use('*', async (c, next) => {
+  const requestId = resolveRequestId(c.req.raw);
+  c.set('requestId', requestId);
+  c.header('x-request-id', requestId);
+
+  const pathname = new URL(c.req.url).pathname;
+  if (pathname !== '/health' && !(await checkRateLimit(rateLimitKey(c.req.raw, pathname), c.env))) {
+    return attachRequestId(
+      Response.json({ error: 'Rate limit exceeded. Retry shortly.', code: 'rate_limited', requestId }, { status: 429 }),
+      requestId
+    );
+  }
+
+  await next();
+});
+
+app.onError((error, c) => {
+  const requestId = c.get('requestId');
+  const pathname = new URL(c.req.url).pathname;
+
+  if (error instanceof ApiUnauthorizedError) {
+    return attachRequestId(
+      Response.json({ error: 'Unauthorized', requestId }, { status: 401 }),
+      requestId
+    );
+  }
+  if (error instanceof ApiForbiddenError) {
+    return attachRequestId(
+      Response.json({ error: 'Forbidden', requestId }, { status: 403 }),
+      requestId
+    );
+  }
+
+  captureServerException(error, {
+    route: pathname,
+    method: c.req.method,
+    requestId
+  });
+  return attachRequestId(
+    Response.json({ error: 'Internal Server Error', requestId }, { status: 500 }),
+    requestId
+  );
+});
+
+app.get('/api/workspace', (c) => handleWorkspaceGet(c.req.raw));
+app.patch('/api/workspace/profile', (c) => handleWorkspaceProfilePatch(c.req.raw));
+app.patch('/api/workspace/organization', (c) => handleWorkspaceOrganizationPatch(c.req.raw));
+app.patch('/api/workspace/policies', (c) => handleWorkspacePoliciesPatch(c.req.raw));
+app.patch('/api/workspace/runtime', (c) => handleWorkspaceRuntimePatch(c.req.raw));
+app.post('/api/workspace/runtime/stop-all', (c) => handleWorkspaceRuntimeStopAll(c.req.raw));
+app.patch('/api/workspace/work-item-attributes', (c) => handleWorkspaceWorkItemAttributesPatch(c.req.raw));
+app.patch('/api/workspace/notifications', (c) => handleWorkspaceNotificationsPatch(c.req.raw));
+app.get('/api/workspace/notifications', (c) => handleWorkspaceNotificationsGet(c.req.raw));
+app.post('/api/workspace/notifications/read', (c) => handleWorkspaceNotificationsRead(c.req.raw));
+app.patch('/api/workspace/llm', (c) => handleWorkspaceLlmPatch(c.req.raw));
+app.post('/api/workspace/integrations', (c) => handleWorkspaceIntegrationsPost(c.req.raw));
+app.post('/api/workspace/members/invite', (c) => handleWorkspaceMembersInvitePost(c.req.raw));
+app.post('/api/workspace/integrations/nango-session', (c) => handleWorkspaceNangoConnectSessionPost(c.req.raw));
+app.post('/api/workspace/notifications/slack/sync', (c) =>
+  handleWorkspaceSlackNotificationSyncPost(c.req.raw)
+);
+app.post('/api/workspace/skills/install', (c) => handleWorkspaceSkillsInstallRoute(c.req.raw));
+app.post('/api/workspace/integrations/:integrationId/sync', (c) =>
+  handleWorkspaceIntegrationSync(c.req.raw, c.req.param('integrationId'))
+);
+app.get('/api/workspace/integrations/:integrationId/repositories', (c) =>
+  handleIntegrationRepositoriesList(c.req.raw, c.req.param('integrationId'))
+);
+app.post('/api/workspace/integrations/:integrationId/repositories/enable', (c) =>
+  handleIntegrationRepositoriesEnable(c.req.raw, c.req.param('integrationId'))
+);
+app.post('/api/workspace/integrations/:integrationId/repositories/disable', (c) =>
+  handleIntegrationRepositoriesDisable(c.req.raw, c.req.param('integrationId'))
+);
+app.post('/api/projects/public', (c) => handlePublicProjectCreate(c.req.raw));
+app.patch('/api/workspace/billing', (c) => handleWorkspaceBillingPatch(c.req.raw));
+app.post('/api/workspace/api-keys', (c) => handleWorkspaceApiKeysPost(c.req.raw));
+app.delete('/api/workspace/api-keys/:apiKeyId', (c) =>
+  handleWorkspaceApiKeyDelete(c.req.raw, c.req.param('apiKeyId'))
+);
+app.get('/api/workspace/activity/export', (c) => handleWorkspaceActivityExport(c.req.raw));
+app.get('/api/projects', (c) => handleProjectList(c.req.raw));
+app.post('/api/projects', (c) => handleProjectCreate(c.req.raw));
+app.patch('/api/projects/:projectId/settings', (c) =>
+  handleProjectSettingsPatch(c.req.raw, c.req.param('projectId'))
+);
+app.post('/api/audits', (c) => handleAuditCreate(c.req.raw, c.env));
+app.post('/api/audits/sandbox', (c) => handleSandboxAuditCreate(c.req.raw));
+app.post('/api/billing/checkout', (c) => handleBillingCheckoutPost(c.req.raw));
+app.post('/api/billing/portal', (c) => handleBillingPortalPost(c.req.raw));
+app.post('/api/billing/subscription', (c) => handleBillingSubscriptionPost(c.req.raw));
+app.post('/api/stripe/webhook', (c) => handleStripeWebhookPost(c.req.raw));
+app.get('/api/audits', (c) => handleAuditList(c.req.raw));
+app.get('/api/invitations/:invitationId', (c) => handleInvitationRead(c.req.raw, c.req.param('invitationId')));
+app.post('/api/invitations/:invitationId/accept', (c) =>
+  handleInvitationAccept(c.req.raw, c.req.param('invitationId'))
+);
+app.get('/api/audits/:auditRunId', (c) => handleAuditRead(c.req.raw, c.req.param('auditRunId')));
+app.get('/api/audits/:auditRunId/graph', (c) =>
+  handleAuditGraphRead(c.req.raw, c.req.param('auditRunId'))
+);
+app.get('/api/audits/:auditRunId/semantic-graph', (c) =>
+  handleAuditSemanticGraphRead(c.req.raw, c.req.param('auditRunId'))
+);
+app.get('/api/audits/:auditRunId/sarif', (c) =>
+  handleAuditSarifRead(c.req.raw, c.req.param('auditRunId'))
+);
+app.post('/api/audits/:auditRunId/cancel', (c) => handleAuditCancel(c.req.raw, c.req.param('auditRunId')));
+app.post('/api/audits/:auditRunId/pause', (c) => handleAuditPause(c.req.raw, c.req.param('auditRunId')));
+app.post('/api/audits/:auditRunId/resume', (c) =>
+  handleAuditResume(c.req.raw, c.req.param('auditRunId'), c.env)
+);
+app.get('/api/reconciliation', (c) => handleReconciliationList(c.req.raw));
+app.post('/api/issues/:issueId/approve', (c) => handleIssueApprove(c.req.raw, c.req.param('issueId')));
+app.post('/api/issues/:issueId/reject', (c) => handleIssueReject(c.req.raw, c.req.param('issueId')));
+app.post('/api/issues/:issueId/edit', (c) => handleIssueEdit(c.req.raw, c.req.param('issueId')));
+app.post('/api/issues/:issueId/merge', (c) => handleIssueMerge(c.req.raw, c.req.param('issueId')));
+app.post('/api/issues/:issueId/split', (c) => handleIssueSplit(c.req.raw, c.req.param('issueId')));
+app.post('/api/issues/:issueId/publish', (c) => handleIssuePublish(c.req.raw, c.req.param('issueId')));
+app.post('/api/issues/:issueId/outcome', (c) => handleIssueOutcome(c.req.raw, c.req.param('issueId')));
+app.post('/api/issues/reconcile', (c) => handleIssueReconcile(c.req.raw));
+app.get('/api/projects/:projectId/accuracy', (c) => handleProjectAccuracy(c.req.raw, c.req.param('projectId')));
+app.post('/api/webhooks/gitlab', (c) => handleGitLabIssueWebhookPost(c.req.raw, c.env));
+app.post('/api/slack/premortem', (c) => handleSlackPremortemCommandPost(c.req.raw, c.env));
+app.post('/api/slack/events', (c) =>
+  handleSlackEventsPost(c.req.raw, c.env, c.executionCtx as unknown as ExecutionContextLike)
+);
+app.all('/api/mcp', (c) => handleMcpRequest(c.req.raw, c.env));
+app.get('/health', () => Response.json({ ok: true, service: 'premortem-api' }));
+app.notFound(() => Response.json({ error: 'Not found' }, { status: 404 }));
 
 async function routeRequest(request: Request, env: AppEnv = {}, _ctx?: ExecutionContextLike) {
   const requestId = resolveRequestId(request);
@@ -170,6 +313,10 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
     return handleWorkspaceNangoConnectSessionPost(request);
   }
 
+  if (url.pathname === '/api/workspace/notifications/slack/sync' && request.method === 'POST') {
+    return handleWorkspaceSlackNotificationSyncPost(request);
+  }
+
   const integrationSyncMatch = url.pathname.match(/^\/api\/workspace\/integrations\/([^/]+)\/sync$/);
   if (integrationSyncMatch && request.method === 'POST') {
     return handleWorkspaceIntegrationSync(request, integrationSyncMatch[1]!);
@@ -234,6 +381,14 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
     return handleAuditCreate(request, env);
   }
 
+  if (url.pathname === '/api/audits/sandbox' && request.method === 'POST') {
+    return handleSandboxAuditCreate(request);
+  }
+
+  if (url.pathname === '/api/billing/subscription' && request.method === 'POST') {
+    return handleBillingSubscriptionPost(request);
+  }
+
   if (url.pathname === '/api/audits' && request.method === 'GET') {
     return handleAuditList(request);
   }
@@ -263,6 +418,11 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
     return handleAuditSemanticGraphRead(request, auditSemanticGraphMatch[1]!);
   }
 
+  const auditSarifMatch = url.pathname.match(/^\/api\/audits\/([^/]+)\/sarif$/);
+  if (auditSarifMatch && request.method === 'GET') {
+    return handleAuditSarifRead(request, auditSarifMatch[1]!);
+  }
+
   const auditCancelMatch = url.pathname.match(/^\/api\/audits\/([^/]+)\/cancel$/);
   if (auditCancelMatch && request.method === 'POST') {
     return handleAuditCancel(request, auditCancelMatch[1]!);
@@ -276,6 +436,16 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
   const auditResumeMatch = url.pathname.match(/^\/api\/audits\/([^/]+)\/resume$/);
   if (auditResumeMatch && request.method === 'POST') {
     return handleAuditResume(request, auditResumeMatch[1]!, env);
+  }
+
+  const nestedAuditIssueActionMatch = url.pathname.match(/^\/api\/audits\/([^/]+)\/issues\/([^/]+)\/action$/);
+  if (nestedAuditIssueActionMatch && request.method === 'POST') {
+    return handleIssueAction(request, nestedAuditIssueActionMatch[2]!);
+  }
+
+  const nestedAuditIssueEditMatch = url.pathname.match(/^\/api\/audits\/([^/]+)\/issues\/([^/]+)\/edit$/);
+  if (nestedAuditIssueEditMatch && request.method === 'POST') {
+    return handleIssueEdit(request, nestedAuditIssueEditMatch[2]!);
   }
 
   if (url.pathname === '/api/reconciliation' && request.method === 'GET') {
@@ -334,6 +504,10 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
     return handleSlackPremortemCommandPost(request, env);
   }
 
+  if (url.pathname === '/api/slack/events' && request.method === 'POST') {
+    return handleSlackEventsPost(request, env, _ctx);
+  }
+
   if (url.pathname === '/health') {
     return Response.json({ ok: true, service: 'premortem-api' });
   }
@@ -342,5 +516,5 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
 }
 
 export async function appRouter(request: Request, env: AppEnv = {}, ctx?: ExecutionContextLike) {
-  return withCorsRouter(request, (req) => routeRequest(req, env, ctx));
+  return app.fetch(request, env, ctx as any);
 }

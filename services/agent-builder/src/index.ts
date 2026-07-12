@@ -145,7 +145,7 @@ function buildGitLabMcpConnection(input: {
     transportOptions: {
       requestInit: {
         headers: {
-          'PRIVATE-TOKEN': input.gitlabToken,
+          Authorization: `Bearer ${input.gitlabToken}`,
           'X-Gitlab-Mcp-Server-Tool-Name-Prefix': 'premortem'
         }
       }

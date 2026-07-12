@@ -4,7 +4,7 @@ import {
   getDatasetInfo
 } from '@arizeai/phoenix-client/datasets';
 
-import { createPremortemPhoenixClient, isPhoenixClientConfigured } from './phoenix-client-config';
+import { createPremortemPhoenixClient } from './phoenix-client-config';
 
 export const PREMORTEM_PHOENIX_AUDIT_DATASET_NAME = 'premortem-audit-missions';
 
@@ -31,7 +31,7 @@ export interface AppendAuditMissionDatasetExampleInput {
 }
 
 export function isPhoenixDatasetSyncEnabled() {
-  return process.env.PHOENIX_SYNC_DATASETS === '1' && isPhoenixClientConfigured();
+  return process.env.PHOENIX_SYNC_DATASETS !== '0';
 }
 
 export async function ensurePremortemAuditDataset() {

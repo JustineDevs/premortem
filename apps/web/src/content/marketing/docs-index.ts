@@ -90,17 +90,17 @@ export const docsNavSections: readonly DocSection[] = [
       {
         href: marketingLinks.docsGuidesWorkspaceSettings,
         label: 'Workspace settings',
-        description: 'Profile, LLM, billing, notifications, work item attributes.'
+        description: 'Profile, billing, and AI models for members; organization, integrations, and notifications for owners and admins.'
       },
       {
         href: marketingLinks.docsGuidesAuthSessions,
         label: 'Auth & sessions',
-        description: 'Supabase login, local auth modes, and GitLab OAuth redirects.'
+        description: 'Supabase login, email/password, magic link, local auth modes, and GitLab OAuth redirects.'
       },
       {
         href: marketingLinks.docsGuidesDeployProduction,
         label: 'Deploy to production',
-        description: 'Cloudflare Pages and Worker, Supabase, Neo4j, and Stripe.'
+        description: 'Vercel frontend, Alibaba Cloud ECS backend, Supabase, Neo4j, and Stripe.'
       },
       {
         href: marketingLinks.docsIntegrationsGitlab,
@@ -130,7 +130,7 @@ export const docsNavSections: readonly DocSection[] = [
       {
         href: marketingLinks.docsReferenceNeo4j,
         label: 'Neo4j & graph store',
-        description: 'Local Docker, Aura, graph API, and local fallback controls.'
+        description: 'Local Docker, Aura, graph API, and dev-only troubleshooting flags.'
       },
       {
         href: marketingLinks.docsReferenceObservability,
@@ -263,7 +263,7 @@ export const docsHubCards = [
   {
     href: marketingLinks.docsGuidesDeployProduction,
     title: 'Deploy to production',
-    description: 'Cloudflare Pages, Worker, Supabase, Neo4j, Stripe webhooks.',
+    description: 'Vercel frontend, Alibaba Cloud ECS backend, Supabase, Neo4j, Stripe webhooks.',
     tag: 'Guide'
   },
   {
@@ -644,7 +644,7 @@ export const apiReferenceDoc = {
       heading: 'Error codes',
       bullets: [
         '402 quota_exceeded: monthly audit limit reached for plan.',
-        '403 feature_locked: GitLab publish on Free tier.',
+        '403 feature_locked: GitLab publish allowance exceeded on Free tier.',
         '403 repo_limit: max connected repositories for plan.',
         '502 upstream: API worker unreachable from BFF or provider timeout.'
       ]
@@ -671,7 +671,7 @@ export const environmentReferenceDoc = {
     { id: 'neo4j', label: 'Neo4j' },
     { id: 'observability', label: 'Observability' },
     { id: 'billing', label: 'Stripe billing' },
-    { id: 'cloudflare', label: 'Cloudflare' },
+    { id: 'alibaba-cloud', label: 'Alibaba Cloud' },
     { id: 'runtime-flags', label: 'Runtime flags' },
     { id: 'safe-ops', label: 'Safe operation' }
   ],
@@ -749,14 +749,14 @@ export const environmentReferenceDoc = {
       heading: 'Stripe billing',
       bullets: [
         'STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET.',
-        'STRIPE_PRICE_PRO, STRIPE_PRICE_TEAM, STRIPE_PRICE_PRO_ANNUAL, STRIPE_PRICE_TEAM_ANNUAL.'
+        'STRIPE_PRICE_PRO, STRIPE_PRICE_TEAM, STRIPE_PRICE_SCALE, STRIPE_PRICE_PRO_ANNUAL, STRIPE_PRICE_TEAM_ANNUAL, STRIPE_PRICE_SCALE_ANNUAL.'
       ]
     },
     {
-      id: 'cloudflare',
-      heading: 'Cloudflare',
+      id: 'alibaba-cloud',
+      heading: 'Alibaba Cloud',
       bullets: [
-        'CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ZONE_ID for deploy automation.'
+        'ALIBABA_CLOUD_REGION_ID, ALIBABA_CLOUD_ECS_INSTANCE_ID, ALIBABA_CLOUD_ECS_HOST, and ALIBABA_CLOUD_ECS_PUBLIC_URL for backend deployment automation.'
       ]
     },
     {
@@ -905,7 +905,7 @@ export const troubleshootingDoc = {
       bullets: [
         'ERR_TOO_MANY_REDIRECTS on /login: middleware canonical host redirect. Use one host (127.0.0.1 vs localhost) in NEXT_PUBLIC_APP_URL and GitLab OAuth app.',
         '401 in /app: set PREMORTEM_AUTH_DISABLED=1 only for local verification, or complete Supabase login.',
-        'Captcha-config notice on /login or /signup: Turnstile is enabled but NEXT_PUBLIC_TURNSTILE_SITE_KEY or TURNSTILE_SECRET_KEY is missing in the deployment environment.',
+        'BotID-config notice on /login or /signup: browser protection is enabled but the deployment environment is missing the required BotID setup.',
         'Callback failure on /login or /signup: the external code exchange failed or the callback host did not match NEXT_PUBLIC_APP_URL.',
         'OAuth state mismatch: clear cookies and reconnect GitLab from Settings.'
       ],
@@ -945,7 +945,7 @@ export const troubleshootingDoc = {
       heading: 'Publish & sync',
       bullets: [
         'Publish 502: verify GitLab token scopes and project access.',
-        '403 feature_locked: upgrade from Free to Starter for GitLab publish.',
+        '403 feature_locked: Free tier exhausted its 3 publish/month allowance; upgrade to Starter for unlimited publish.',
         'Missing labels: enable work item attributes in Settings.',
         'Reconciliation drift: compare driftFields; re-publish or edit GitLab issue manually.',
         'Stripe checkout requires configured price IDs; local development can still use Settings plan patch.'
@@ -976,7 +976,7 @@ export const productFlowsDoc = {
       id: 'onboarding',
       heading: 'Onboarding',
       bullets: [
-        'Sign up via Supabase Auth → personal org created automatically.',
+        'Sign up via Supabase Auth using email/password or magic link, then a personal org is created automatically.',
         'Connect GitLab in Integrations & Scope → register first repository.',
         'Run first audit from Dashboard or tutorial path.'
       ],
@@ -991,7 +991,7 @@ export const productFlowsDoc = {
       heading: 'Org & collaboration',
       bullets: [
         'Org switching when user belongs to multiple organizations.',
-        'Invitations and role-based access; enterprise SSO is tracked on the roadmap.',
+        'Invitations and role-based access keep member, admin, and owner settings separate.',
         'Provider re-auth when OAuth tokens expire (WARNING on project cards).'
       ]
     },
@@ -1045,15 +1045,16 @@ export const architectureDoc = {
   coreStack: [
     'Supabase / Postgres for product data, auth-adjacent storage, and RLS-oriented multi-tenant ownership.',
     'Prisma for application data access and typed repositories.',
-    'Cloudflare Workers via Wrangler for API edge entrypoints.',
+    'Alibaba Cloud ECS for backend runtime hosting and deployment automation.',
     'GitLab as the primary issue publishing and repository provider.',
     'MCP Toolbox for Databases for safe SQL-oriented agent database access.',
-    'Gemini as the default LLM path for audits and agent flows.',
-    'Neo4j as the graph persistence layer for repository structure and risk context.'
+    'Qwen Cloud and Gemini as the default LLM paths for audits and agent flows.',
+    'Neo4j as the graph persistence layer for repository structure and risk context.',
+    'Devin AI as an auxiliary workflow automation and review assistant.'
   ],
   supportingNext: [
-    'Cloudflare Queues for async audit fan-out.',
-    'Cloudflare R2 for graph snapshot exports and evidence bundles.',
+    'Alibaba Cloud ECS autoscaling and deployment helpers for backend runtime operations.',
+    'Object storage for graph snapshot exports and evidence bundles.',
     'Upstash Redis or Valkey for idempotency and short-lived orchestration state.',
     'OpenTelemetry + Grafana/Tempo/Loki for traces, logs, and metrics.',
     'Microsoft Entra ID if enterprise SSO becomes required.'
@@ -1217,9 +1218,9 @@ export const faqDoc = {
       id: 'accounts',
       heading: 'Accounts',
       bullets: [
-        'Sign in with GitLab today. GitHub repository integration, Bitbucket, Azure DevOps, and Gitea are roadmap surfaces and are labeled coming soon in Settings.',
+        'Sign in with email/password, magic link, or GitLab OAuth. GitHub repository integration, Bitbucket, Azure DevOps, and Gitea remain roadmap surfaces.',
         'Forgot password flows use Supabase email recovery and the existing auth callback route.',
-        'Cloudflare Turnstile protects /login and /signup when NEXT_PUBLIC_TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY are configured.',
+        'Vercel BotID protects /login and /signup when the browser protection layer is configured.',
         'If auth is unavailable in local development, check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.',
         'Use PREMORTEM_AUTH_DISABLED=1 only in local verification mode, never in production.'
       ]
@@ -1251,7 +1252,7 @@ export const faqDoc = {
       bullets: [
         'Premortem uses Supabase for auth and persistence while the rest of the stack keeps domain data in the configured services.',
         'Organization-scoped access controls and RLS are used to separate tenant data.',
-        'The product documents privacy and terms publicly, and the auth pages link to both before GitLab sign-in.',
+        'The product documents privacy and terms publicly, and the auth pages link to both before login.',
         'If your deployment requires a zero data retention or no-training LLM contract, choose a provider plan that explicitly offers it.'
       ]
     }

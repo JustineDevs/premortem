@@ -1,20 +1,30 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Finding, type TraceStep } from '@/lib/premortem-os/types';
+import { useCallback, useMemo, useState } from 'react';
+import { Finding, type Project, type TraceStep } from '@/lib/premortem-os/types';
 import { 
   Terminal, 
   Play, 
   Sparkles, 
   Wrench, 
-  ShieldCheck, 
-  HelpCircle,
-  Clock,
-  Sparkle,
   Radio,
   FileCode
 } from 'lucide-react';
-import { OsStepper, type OsStep } from './os-stepper';
+import { cn } from '@/lib/utils';
+import { selectRealProject } from '@/lib/premortem-os/project-selection';
+import {
+  AiArtifactCard,
+  AiCheckpointCard,
+  AiConversationCard,
+  AiReasoningCard,
+  AiSchemaDisplayCard,
+  AiSourceItem,
+  AiSourcesCard,
+  AiSuggestionRow,
+  AiTaskList,
+  AiTerminalCard,
+  AiToolTimeline
+} from './ai-elements';
 
 const SANDBOX_EDITOR_ID = 'adhoc-sandbox-source-code';
 const SANDBOX_TEMPLATES = [
@@ -81,10 +91,43 @@ function traceStepKey(step: TraceStep) {
 }
 
 interface AdHocSandboxViewProps {
-  onAnalyzeSnippet: (code: string) => Promise<any>;
+  projects: Project[];
+  onAnalyzeSnippet: (code: string, projectId?: string) => Promise<{
+    success: boolean;
+    audit?: {
+      score: number;
+      findings: Finding[];
+    };
+    error?: string;
+  }>;
 }
 
-export function AdHocSandboxView({ onAnalyzeSnippet }: AdHocSandboxViewProps) {
+function buildSchemaExample(projectId: string, projectBranch: string) {
+  return {
+    method: 'POST',
+    endpoint: '/api/audits',
+    request: JSON.stringify(
+      {
+        projectId,
+        branch: projectBranch,
+        codeSnippet: '<pasted source snippet>'
+      },
+      null,
+      2
+    ),
+    response: JSON.stringify(
+      {
+        auditRunId: 'audit_123',
+        status: 'queued',
+        next: 'orchestrator will analyze the snippet'
+      },
+      null,
+      2
+    )
+  };
+}
+
+export function AdHocSandboxView({ projects, onAnalyzeSnippet }: AdHocSandboxViewProps) {
   const [code, setCode] = useState(`// Paste or select a custom backend code block here
 import mysql from 'mysql2/promise';
 
@@ -104,273 +147,493 @@ export async function processLogin(req, res) {
 }`);
 
   const [isLoading, setIsLoading] = useState(false);
-  const [scanResult, setScanResult] = useState<any | null>(null);
+  const [scanResult, setScanResult] = useState<{
+    score: number;
+    findings: Finding[];
+  } | null>(null);
   const [errorWord, setErrorWord] = useState<string | null>(null);
+  const selectedProject = useMemo(() => selectRealProject(projects), [projects]);
+  const schemaExample = useMemo(
+    () =>
+      buildSchemaExample(
+        selectedProject?.id ?? 'connected-project',
+        selectedProject?.branch ?? 'main'
+      ),
+    [selectedProject]
+  );
+
+  const resetScanState = useCallback((nextCode: string) => {
+    setCode(nextCode);
+    setScanResult(null);
+    setErrorWord(null);
+  }, []);
+
+  const sampleSuggestions = useMemo(
+    () =>
+      SANDBOX_TEMPLATES.map((template) => ({
+        label: template.name,
+        detail: 'Load sample',
+        onClick: () => resetScanState(template.code)
+      })),
+    [resetScanState]
+  );
+
+  const conversationItems = useMemo(
+    () => [
+      {
+        role: 'user' as const,
+        title: 'Prompt input',
+        body: (
+          <span>
+            Analyze the pasted snippet for exploitable patterns, secret exposure,
+            and transport risk.
+          </span>
+        ),
+        meta: 'PromptInput'
+      },
+      {
+        role: 'assistant' as const,
+        title: scanResult ? `Audit completed with ${scanResult.score}% compliance` : 'Waiting for analysis',
+        body: scanResult ? (
+          <span>
+            {scanResult.findings.length} findings extracted from the runtime audit
+            pipeline.
+          </span>
+        ) : (
+          <span>Run analysis to stream a real audit response.</span>
+        ),
+        meta: scanResult ? 'Conversation / Message' : 'Conversation'
+      },
+      ...(errorWord
+        ? [
+            {
+              role: 'tool' as const,
+              title: 'Execution error',
+              body: <span>{errorWord}</span>,
+              meta: 'Tool'
+            }
+          ]
+        : [])
+    ],
+    [errorWord, scanResult]
+  );
+
+  const sourceItems = useMemo<AiSourceItem[]>(
+    () =>
+      scanResult
+        ? scanResult.findings.flatMap((finding) => {
+            const traceSteps = Array.isArray(finding.trace) ? finding.trace : [];
+            if (traceSteps.length === 0) {
+              return [
+                {
+                  label: `${finding.title}`,
+                  detail: `${finding.filepath}:${finding.line} · ${finding.evidence}`,
+                  href: undefined
+                }
+              ];
+            }
+
+            return traceSteps.slice(0, 3).map((step) => ({
+              label: `${finding.title} · step ${step.step}`,
+              detail: `${step.location} · ${step.description}`,
+              href: undefined
+            }));
+          })
+        : [
+            {
+              label: 'Sample snippet templates',
+              detail: 'Use the built-in prompt suggestions to load realistic audit inputs.',
+              href: undefined
+            }
+          ],
+    [scanResult]
+  );
+
+  const terminalLines = useMemo(() => {
+    if (isLoading) {
+      return ['Submitting audit job to the orchestrator', 'Waiting for audit response...'];
+    }
+
+    if (errorWord) {
+      return [`Audit failed: ${errorWord}`];
+    }
+
+    if (!scanResult) {
+      return ['Idle inspection lab ready', 'Select a sample or paste code, then run analysis.'];
+    }
+
+    return [
+      `Audit score ${scanResult.score}%`,
+      ...scanResult.findings.slice(0, 5).map((finding) => `${finding.severity} ${finding.title}`),
+      `Findings total: ${scanResult.findings.length}`
+    ];
+  }, [errorWord, isLoading, scanResult]);
+
+  const taskItems = useMemo(
+    () => [
+      {
+        label: 'Prompt',
+        detail: 'Collect code and route it through the real audit pipeline.',
+        state: code.trim() ? ('completed' as const) : ('pending' as const)
+      },
+      {
+        label: 'Analysis',
+        detail: isLoading
+          ? 'The orchestrator is scanning the snippet.'
+          : scanResult
+            ? `Returned ${scanResult.findings.length} findings.`
+            : 'Waiting for a run.',
+        state: isLoading ? ('running' as const) : scanResult ? ('completed' as const) : ('pending' as const)
+      },
+      {
+        label: 'Review',
+        detail: scanResult ? 'Inspect sources, reasoning, and suggested patches.' : 'No findings to review yet.',
+        state: scanResult ? ('completed' as const) : ('pending' as const)
+      }
+    ],
+    [code, isLoading, scanResult]
+  );
+
+  const checkpointItem = useMemo(
+    () => ({
+      phase: isLoading ? 'queued / running' : errorWord ? 'failed' : scanResult ? 'finished' : 'idle',
+      savedAt: scanResult ? 'now' : 'n/a',
+      summary: scanResult
+        ? 'The inspection lab submitted a real audit job and rendered orchestrator output.'
+        : errorWord
+          ? 'The inspection lab surfaced a real execution error instead of masking the failure.'
+          : 'The inspection lab is ready for a real audit run.'
+    }),
+    [errorWord, isLoading, scanResult]
+  );
 
   const handleScan = async () => {
+    if (!selectedProject) {
+      setErrorWord('Register a real project before running a sandbox audit.');
+      setScanResult(null);
+      return;
+    }
+
     setIsLoading(true);
     setErrorWord(null);
     setScanResult(null);
 
     try {
-      const data = await onAnalyzeSnippet(code);
+      const data = await onAnalyzeSnippet(code, selectedProject?.id);
       if (data && data.success) {
-        setScanResult(data.audit);
+        setScanResult(data.audit ?? null);
       } else {
         setErrorWord(data?.error || "Scanning pipeline returned an invalid state.");
       }
-    } catch (e: any) {
-      setErrorWord(e.message || "Execution exception triggered inside code sandbox.");
+    } catch (error: unknown) {
+      setErrorWord(
+        error instanceof Error ? error.message : 'Execution exception triggered inside the inspection lab.'
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
-  const scanSteps: OsStep[] = [
-    {
-      id: 'edit',
-      label: 'Edit snippet',
-      status: code.trim()
-        ? isLoading || scanResult || errorWord
-          ? 'done'
-          : 'active'
-        : 'pending'
-    },
-    {
-      id: 'scan',
-      label: 'Run analysis',
-      status: errorWord
-        ? 'error'
-        : isLoading
-          ? 'active'
-          : scanResult
-            ? 'done'
-            : 'pending'
-    },
-    {
-      id: 'review',
-      label: 'Review findings',
-      status: scanResult ? 'active' : 'pending'
-    }
-  ];
-
   return (
-    <div className="flex-1 overflow-y-auto p-8 font-sans max-w-7xl mx-auto w-full space-y-8 animate-fadeIn">
-      {/* Title Header */}
-      <div className="border-b border-[#EAE6DF] pb-6">
-        <span className="text-[10px] uppercase tracking-widest font-mono text-[#8A958F] block">
-          Code Inspection Lab
-        </span>
-        <h2 className="text-2xl font-semibold tracking-tight text-[#1E2522] font-display mt-1">
-          Code Analyzer
-        </h2>
-        <p className="text-xs text-[#5C6560] mt-1 mb-3">
-          Paste server-side TypeScript or JSON snippets to run the local analyzer. Repository audits run from Projects or Audits.
-        </p>
-
-        {/* Explain the API config key environment */}
-        <div className="p-3 bg-emerald-50 border border-emerald-200/60 rounded text-[11px] text-emerald-900 leading-relaxed max-w-2xl">
-          <span className="font-bold">Local code analyzer:</span> This panel runs the Premortem analyzer against pasted code. It is not repository-aware. Full repository audits run from Projects or Audits.
-        </div>
-        <div className="mt-4">
-          <OsStepper steps={scanSteps} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        {/* Left Side: Code Editor pasting console */}
-        <div className="space-y-4">
-          <div className="flex justify-between items-center text-xs">
-            <label
-              htmlFor={SANDBOX_EDITOR_ID}
-              className="block font-mono font-bold uppercase tracking-wider text-[#717A75]"
-            >
-              Source Script Input Console
-            </label>
-            
-            {/* Quick Templates picker */}
-            <div className="flex items-center gap-1">
-              <span className="text-[10px] text-[#8A958F]">Samples:</span>
-              <div className="flex gap-1.5">
-                {SANDBOX_TEMPLATES.map((temp, idx) => (
-                  <button
-                    key={temp.name}
-                    type="button"
-                    onClick={() => setCode(temp.code)}
-                    className="p-1 px-2 border border-[#EAE6DF] rounded bg-[#FAF8F5] text-[10px] text-neutral-700 hover:border-emerald-950 hover:bg-white transition-all cursor-pointer font-semibold"
-                  >
-                    Sample {idx + 1}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-neutral-900 rounded overflow-hidden shadow-sm border border-neutral-800">
-            <div className="p-2 border-b border-neutral-800 bg-neutral-950/80 flex justify-between items-center font-mono text-[10px] text-zinc-500">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse"/>
-                <span className="font-bold text-[#A6BCB4]">sample_input.ts</span>
-              </div>
-              <span>UTF-8 TS Code</span>
-            </div>
-            
-            <textarea
-              id={SANDBOX_EDITOR_ID}
-              rows={16}
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              className="w-full p-4 font-mono text-xs bg-neutral-950 text-[#F5F4F0] focus:outline-none focus:border-indigo-600 border-none leading-relaxed resize-none h-[380px]"
-              placeholder="// Write or paste server files, controllers, or database models here..."
-            />
-          </div>
-
-          <button
-            type="button"
-            onClick={handleScan}
-            disabled={isLoading || !code.trim()}
-            className="w-full py-3 bg-emerald-950 text-white rounded font-semibold text-xs hover:bg-emerald-900 transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-50"
-          >
-            {isLoading ? (
-              <>
-                <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                <span>Running analysis…</span>
-              </>
-            ) : (
-              <>
-                <Play size={13} className="fill-current" />
-                <span>Run analysis</span>
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* Right Side: analysis results */}
-        <div className="space-y-4">
-          <div className="block font-mono font-bold uppercase tracking-wider text-[#717A75] text-xs">
-            Analysis results
-          </div>
-
-          {isLoading ? (
-            <div className="border border-[#EAE6DF] rounded bg-[#FAF8F5] p-12 text-center flex flex-col items-center justify-center h-[420px] gap-3">
-              <Sparkles size={24} className="text-emerald-800 animate-pulse" />
-              <div className="space-y-1">
-                <p className="text-xs font-bold text-zinc-800">Applying local security rules…</p>
-                <p className="text-[10px] text-[#5C6560] max-w-xs">
-                  This panel does not call the repository orchestrator. Register a project for full audit findings.
+    <div className="flex-1 overflow-y-auto bg-[#FBFBFA] px-4 py-5 font-sans text-[#1E2522] sm:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-[1760px] flex-col gap-4 animate-fadeIn">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[236px_minmax(0,1.55fr)_348px] 2xl:grid-cols-[252px_minmax(0,1.65fr)_388px] items-start">
+          <aside className="space-y-4 self-stretch min-h-0 xl:sticky xl:top-5 xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto">
+            <div className="rounded-[20px] border border-[#EAE6DF] bg-[#FAF8F5] p-3.5 shadow-sm">
+              <div className="space-y-1.5">
+                <p className="font-mono text-[10px] font-bold uppercase tracking-[0.24em] text-[#717A75]">
+                  Prompt input
+                </p>
+                <h3 className="text-lg font-bold text-[#1E2522]">Ad hoc inspection audit</h3>
+                <p className="text-xs leading-relaxed text-[#5C6560]">
+                  Paste a snippet, load a sample, then submit a real audit job against the connected project inventory.
                 </p>
               </div>
-            </div>
-          ) : errorWord ? (
-            <div className="border border-red-200 bg-red-50 p-6 rounded text-xs text-red-800 space-y-2 font-sans h-[420px] overflow-y-auto">
-              <span className="font-bold flex items-center gap-1.5 uppercase text-[10px]">
-                <Radio className="text-red-600 animate-pulse" size={12} />
-                Analysis failed
-              </span>
-              <p className="leading-relaxed">
-                {errorWord}
-              </p>
-            </div>
-          ) : scanResult ? (
-            <div className="border border-[#EAE6DF] bg-white rounded overflow-hidden flex flex-col h-[420px]">
-              
-              {/* Score header badge */}
-              <div className="p-4 border-b border-[#EAE6DF] bg-[#FAF8F5] flex justify-between items-center text-xs">
-                <div>
-                <span className="block text-[8px] uppercase tracking-wider text-neutral-400">COMPLIANCE INDEX</span>
-                <span className="text-base font-bold font-display text-zinc-900">{scanResult.score}% Compliant</span>
+              <div className="mt-3 rounded-2xl border border-[#D9E5DD] bg-white px-3 py-2 text-[11px] leading-relaxed text-[#3C4A45]">
+                <span className="font-mono font-bold uppercase tracking-[0.2em] text-[#7C8781]">
+                  Target project
+                </span>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-900">
+                    {selectedProject?.name ?? 'Connected project'}
+                  </span>
+                  <span className="font-mono text-[10px] text-[#717A75]">
+                    {selectedProject?.branch ? `branch ${selectedProject.branch}` : 'branch main'}
+                  </span>
+                </div>
               </div>
 
-                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                  scanResult.score >= 85 
-                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
-                    : 'bg-rose-50 text-rose-800 border border-rose-200'
-                }`}>
-                  {scanResult.score >= 85 ? 'PASSED' : 'VULNERABILITY WARNING'}
+              <div className="mt-3 space-y-2.5">
+                <p className="font-mono text-[10px] font-bold uppercase tracking-[0.24em] text-[#717A75]">
+                  Sample snippets
+                </p>
+                <div className="max-h-[220px] overflow-y-auto pr-1">
+                  <AiSuggestionRow items={sampleSuggestions} className="flex-col" />
+                </div>
+                </div>
+              </div>
+            <AiTaskList items={taskItems} />
+          </aside>
+
+          <section className="space-y-4 min-w-0 min-h-0">
+            <div className="rounded-[20px] border border-[#EAE6DF] bg-[#FAF8F5] p-4 shadow-sm">
+              <div className="flex flex-col gap-3 border-b border-[#EAE6DF] pb-3 lg:flex-row lg:items-end lg:justify-between">
+                <div className="min-w-0">
+                  <p className="font-mono text-[10px] font-bold uppercase tracking-[0.24em] text-[#717A75]">
+                    Main workspace
+                  </p>
+                  <h3 className="mt-1 text-lg font-bold text-[#1E2522]">Source snippet</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-[#5C6560]">
+                    Paste code in the center rail. The right panel updates with evidence, reasoning, and the
+                    returned findings once the orchestrator completes.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleScan}
+                  disabled={isLoading || !code.trim()}
+                  aria-label="Run snippet analysis"
+                  className="inline-flex items-center justify-center gap-2 rounded border border-emerald-950 bg-emerald-950 px-4 py-2 text-[10px] font-mono font-bold uppercase tracking-[0.22em] text-white transition-colors hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isLoading ? (
+                    <>
+                      <svg className="h-4 w-4 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      <span>Running audit…</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play size={13} className="fill-current" />
+                      <span>Run analysis</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="mt-3 space-y-2.5">
+                <label
+                  htmlFor={SANDBOX_EDITOR_ID}
+                  className="block font-mono text-[10px] font-bold uppercase tracking-[0.24em] text-[#717A75]"
+                >
+                  Sandbox source snippet
+                </label>
+                <div className="overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 shadow-sm">
+                  <div className="flex items-center justify-between border-b border-neutral-800 bg-neutral-950/80 px-3 py-2 font-mono text-[10px] text-zinc-500">
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded-full bg-indigo-500 animate-pulse" />
+                      <span className="font-bold text-[#A6BCB4]">
+                        {selectedProject?.name ? `${selectedProject.name}.snippet.ts` : 'sample_input.ts'}
+                      </span>
+                    </div>
+                    <span>UTF-8 TS Code</span>
+                  </div>
+                  <textarea
+                    id={SANDBOX_EDITOR_ID}
+                    rows={16}
+                    value={code}
+                    onChange={(e) => resetScanState(e.target.value)}
+                    className="h-[420px] w-full resize-none border-none bg-neutral-950 p-4 font-mono text-xs leading-relaxed text-[#F5F4F0] focus:outline-none"
+                    placeholder="// Write or paste server files, controllers, or database models here..."
+                  />
+                </div>
+              </div>
+            </div>
+
+            <AiSchemaDisplayCard item={schemaExample} />
+          </section>
+
+          <aside className="space-y-4 self-stretch min-h-0 xl:sticky xl:top-5 xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto">
+            <div className="rounded-[20px] border border-[#EAE6DF] bg-[#FAF8F5] p-4 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-mono text-[10px] font-bold uppercase tracking-[0.24em] text-[#717A75]">
+                    Connected audit
+                  </p>
+                  <p className="mt-1 text-sm font-bold text-[#1E2522]">Real orchestrator run</p>
+                </div>
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-900">
+                  live
                 </span>
               </div>
+              <p className="mt-2 text-xs leading-relaxed text-[#5C6560]">
+                This panel creates a real audit job for the pasted snippet and shows the orchestrator findings when the run completes.
+              </p>
+              <div className="mt-3">
+                <AiCheckpointCard item={checkpointItem} />
+              </div>
+            </div>
+            {isLoading ? (
+            <div className="rounded-[20px] border border-[#EAE6DF] bg-[#FAF8F5] p-4 text-center shadow-sm">
+              <Sparkles size={24} className="mx-auto text-emerald-800 animate-pulse" />
+              <p className="mt-3 text-sm font-bold text-zinc-800">Submitting real audit job…</p>
+              <p className="mx-auto mt-1 max-w-xs text-[10px] text-[#5C6560]">
+                The snippet is being submitted to the orchestrator. Results stream back as AI Elements-style
+                findings.
+              </p>
+            </div>
+          ) : errorWord ? (
+            <div className="rounded-[20px] border border-red-200 bg-red-50 p-4 text-xs text-red-800 shadow-sm">
+              <div className="flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-[0.22em]">
+                <Radio className="text-red-600 animate-pulse" size={12} />
+                Analysis failed
+              </div>
+              <p className="mt-3 leading-relaxed">{errorWord}</p>
+            </div>
+          ) : scanResult ? (
+            <div className="space-y-4">
+              <div className="rounded-[20px] border border-[#EAE6DF] bg-white p-3.5 shadow-sm">
+                <div className="flex items-center justify-between gap-3 border-b border-[#EAE6DF] pb-3">
+                  <div>
+                    <p className="font-mono text-[9px] font-bold uppercase tracking-[0.24em] text-neutral-400">
+                      Compliance index
+                    </p>
+                    <p className="mt-1 text-lg font-bold text-[#1E2522]">{scanResult.score}% compliant</p>
+                  </div>
+                  <span
+                    className={cn(
+                      'rounded border px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-[0.18em]',
+                      scanResult.score >= 85
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                        : 'border-rose-200 bg-rose-50 text-rose-800'
+                    )}
+                  >
+                    {scanResult.score >= 85 ? 'passed' : 'vulnerability warning'}
+                  </span>
+                </div>
 
-              {/* Finding items list overflow select to read */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {scanResult.findings.map((finding: Finding) => {
-                  const traceSteps = Array.isArray(finding.trace) ? finding.trace : [];
+                <AiConversationCard items={conversationItems} />
+              </div>
 
-                  return (
-                    <div
-                      key={`${finding.title}-${finding.filepath}-${finding.line}-${finding.category}`}
-                      className="border border-[#EAE6DF] bg-[#FAF8F5]/50 rounded p-4 space-y-3 shrink-0"
-                    >
-                      <div className="flex justify-between items-center text-[10px] font-mono">
-                        <span className="p-1 px-2 rounded-sm bg-rose-50 border border-rose-200 font-bold text-rose-800">
-                          {finding.severity}
+              <AiReasoningCard
+                title="Reasoning"
+                summary={`The audit surfaced ${scanResult.findings.length} finding(s) through the real orchestrator path, not a local heuristic scanner.`}
+                steps={[
+                  'The pasted code is sent to the audit pipeline and parsed into structured findings.',
+                  'The output is rendered as a conversation-like thread so users can read the result like an AI assistant response.',
+                  'The result area stays aligned with the rest of Premortem: evidence, reasoning, and action guidance.'
+                ]}
+              />
+
+              <AiSourcesCard items={sourceItems} />
+
+              <AiToolTimeline
+                items={[
+                  { title: 'submit audit job', detail: 'POST /api/audits with the connected project and pasted code', state: 'completed' },
+                  { title: 'orchestrator analysis', detail: 'Security agents inspect the snippet and generate findings', state: isLoading ? 'running' : 'completed' },
+                  { title: 'render evidence', detail: 'The UI converts findings into cards, code blocks, and source refs', state: scanResult ? 'completed' : 'pending' }
+                ]}
+              />
+
+              <AiArtifactCard
+                title="Finding artifact"
+                description="The first finding becomes a reusable AI artifact with patch guidance."
+                content={
+                  scanResult.findings[0] ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-[0.18em] text-rose-800">
+                          {scanResult.findings[0].severity}
                         </span>
-                        <span>Line :{finding.line} | Category: {finding.category}</span>
+                        <span className="text-[10px] font-mono text-[#8A958F]">
+                          {scanResult.findings[0].filepath}:{scanResult.findings[0].line}
+                        </span>
                       </div>
-
-                      <h4 className="font-bold text-neutral-900 font-display text-sm mt-1">
-                        {finding.title}
-                      </h4>
-
-                      <p className="text-xs text-[#5C6560] leading-relaxed select-text">
-                        {finding.description}
-                      </p>
-
-                      {/* Trace step node in card */}
-                      {traceSteps.length > 0 && (
-                        <div className="pt-2 border-t border-[#EAE6DF] space-y-1">
-                          <span className="block text-[9px] font-mono tracking-wider font-bold text-[#8A958F] uppercase">
-                            Execution Path Node Traced
-                          </span>
-                          <div className="text-[11px] text-zinc-800 space-y-1 pl-2 border-l border-emerald-800 border-dashed">
-                            {traceSteps.map((step) => (
-                              <div key={traceStepKey(step)} className="flex gap-1.5 items-baseline">
-                                <span className="font-bold font-mono text-emerald-900">{step.step}.</span>
-                                <span className="leading-snug select-text">
-                                  <span className="font-bold underline uppercase text-[9px]">{step.location}</span>: {step.description}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Recommendation */}
-                      <div className="p-3 bg-white border border-[#EAE6DF] rounded text-[11px] space-y-1 font-sans">
-                        <span className="block font-bold text-[#1E2522]">Resolution Guideline:</span>
-                        <p className="text-[#5C6560] select-text">{finding.recommendation}</p>
-                      </div>
-
-                      {/* Code Suggested patch Diff */}
-                      {finding.suggestedPatchCode && (
-                        <div className="space-y-1.5 pt-2 border-t border-[#EAE6DF]">
-                          <span className="block text-[9px] font-mono tracking-wider font-bold text-indigo-800 uppercase flex items-center gap-1">
-                            <Wrench size={10} />
-                            Suggested patch:
-                          </span>
-                          <pre className="p-2.5 bg-neutral-950 text-neutral-300 rounded font-mono text-[10px] overflow-x-auto max-h-[140px] leading-relaxed">
-                            {finding.suggestedPatchCode}
-                          </pre>
-                        </div>
-                      )}
+                      <p className="text-sm font-bold text-[#1E2522]">{scanResult.findings[0].title}</p>
+                      <p className="text-xs leading-relaxed text-[#5C6560]">{scanResult.findings[0].recommendation}</p>
+                      {scanResult.findings[0].suggestedPatchCode ? (
+                        <pre className="overflow-x-auto rounded bg-neutral-950 p-3 font-mono text-[10px] leading-relaxed text-neutral-200">
+                          {scanResult.findings[0].suggestedPatchCode}
+                        </pre>
+                      ) : null}
                     </div>
-                  );
-                })}
+                  ) : (
+                    <span>No findings returned.</span>
+                  )
+                }
+              />
+
+              <AiTerminalCard title="Terminal output" lines={terminalLines} />
+
+              <div className="rounded-[20px] border border-[#EAE6DF] bg-white p-4 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <FileCode className="h-4 w-4 text-[#8A958F]" />
+                  <h3 className="text-sm font-bold text-[#1E2522]">Finding list</h3>
+                </div>
+                <div className="mt-4 space-y-4">
+                  {scanResult.findings.map((finding: Finding) => {
+                    const traceSteps = Array.isArray(finding.trace) ? finding.trace : [];
+                    return (
+                      <div
+                        key={`${finding.title}-${finding.filepath}-${finding.line}-${finding.category}`}
+                        className="rounded border border-[#EAE6DF] bg-[#FAF8F5]/60 p-4"
+                      >
+                        <div className="flex items-start justify-between gap-3 text-[10px] font-mono">
+                          <span className="rounded-sm border border-rose-200 bg-rose-50 px-2 py-0.5 font-bold text-rose-800">
+                            {finding.severity}
+                          </span>
+                          <span className="text-[#5C6560]">
+                            Line {finding.line} · {finding.category}
+                          </span>
+                        </div>
+
+                        <h4 className="mt-2 text-sm font-bold text-neutral-900">{finding.title}</h4>
+
+                        <p className="mt-2 text-xs leading-relaxed text-[#5C6560]">{finding.description}</p>
+
+                        {traceSteps.length > 0 ? (
+                          <div className="mt-3 space-y-2 border-t border-[#EAE6DF] pt-3">
+                            <p className="text-[9px] font-mono font-bold uppercase tracking-[0.22em] text-[#8A958F]">
+                              Execution trace
+                            </p>
+                            <div className="space-y-2 border-l border-dashed border-emerald-800 pl-3">
+                              {traceSteps.map((step) => (
+                                <div key={traceStepKey(step)} className="text-[11px] text-zinc-800">
+                                  <span className="font-mono font-bold text-emerald-900">{step.step}.</span>{' '}
+                                  <span className="font-bold uppercase tracking-wide">{step.location}</span>: {step.description}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <div className="mt-3 rounded border border-[#EAE6DF] bg-white p-3">
+                          <p className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-[#717A75]">
+                            Resolution guideline
+                          </p>
+                          <p className="mt-1 text-[11px] leading-relaxed text-[#5C6560]">{finding.recommendation}</p>
+                        </div>
+
+                        {finding.suggestedPatchCode ? (
+                          <div className="mt-3 space-y-1.5 border-t border-[#EAE6DF] pt-3">
+                            <div className="flex items-center gap-1 text-[9px] font-mono font-bold uppercase tracking-[0.22em] text-indigo-800">
+                              <Wrench size={10} />
+                              Suggested patch
+                            </div>
+                            <pre className="max-h-[140px] overflow-x-auto rounded bg-neutral-950 p-3 font-mono text-[10px] leading-relaxed text-neutral-300">
+                              {finding.suggestedPatchCode}
+                            </pre>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           ) : (
-            <div className="border border-[#EAE6DF] border-dashed rounded p-12 text-center flex flex-col items-center justify-center text-xs text-[#5C6560] h-[420px] gap-3">
-              <Terminal size={24} className="text-[#8A958F] animate-pulse" />
-              <div className="space-y-1 max-w-xs">
+            <div className="rounded-[20px] border border-dashed border-[#EAE6DF] bg-[#FAF8F5] p-8 text-center shadow-sm">
+              <Terminal size={24} className="mx-auto text-[#8A958F] animate-pulse" />
+              <div className="mx-auto mt-3 max-w-xs space-y-1">
                 <p className="font-bold text-zinc-800">No analysis results yet</p>
                 <p className="text-[10px] text-zinc-400">
                   Select an example or paste code and run analysis to generate findings.
                 </p>
               </div>
             </div>
-          )}
+            )}
+          </aside>
         </div>
       </div>
     </div>

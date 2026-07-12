@@ -20,10 +20,20 @@ export function readSupabaseRuntimeConfig(env: Record<string, unknown> | undefin
   };
 }
 
-export function resolveSupabaseRuntimeConfig(): SupabaseRuntimeConfig | null {
-  return readSupabaseRuntimeConfig(process.env as Record<string, unknown>);
+export function requireSupabaseRuntimeConfig(env: Record<string, unknown> | undefined): SupabaseRuntimeConfig {
+  const config = readSupabaseRuntimeConfig(env);
+  if (!config) {
+    throw new Error(
+      'Supabase auth is required. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY, or SUPABASE_URL and SUPABASE_ANON_KEY.'
+    );
+  }
+  return config;
+}
+
+export function resolveSupabaseRuntimeConfig(): SupabaseRuntimeConfig {
+  return requireSupabaseRuntimeConfig(process.env as Record<string, unknown>);
 }
 
 export function isSupabaseAuthConfigured() {
-  return Boolean(resolveSupabaseRuntimeConfig());
+  return Boolean(readSupabaseRuntimeConfig(process.env as Record<string, unknown>));
 }

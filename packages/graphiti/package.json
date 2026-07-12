@@ -1,0 +1,17 @@
+{
+  "name": "@premortem/graphiti",
+  "private": true,
+  "type": "module",
+  "main": "./dist/graphiti/index.js",
+  "types": "./dist/graphiti/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/graphiti/index.d.ts",
+      "default": "./dist/graphiti/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

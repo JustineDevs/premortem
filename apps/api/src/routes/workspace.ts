@@ -5,6 +5,7 @@ import {
   EntitlementError,
   getWorkspaceBundle,
   getOrganizationActivityEvents,
+  prisma,
   recordActivityEvent,
   revokeOrganizationApiKey,
   stopAllAuditRuntime,
@@ -24,12 +25,19 @@ import {
   listUserNotifications,
   markUserNotificationsRead
 } from '@premortem/db/notifications';
-import { createNangoConnectSession } from '@premortem/integrations';
+import { createNangoConnectSession, listNangoConnections } from '@premortem/integrations';
+import { discoverLocalLlmProviders } from '@premortem/llm';
 import { normalizeWorkItemAttributeConfig } from '@premortem/domain';
 
 import { apiErrorResponse } from '../lib/error-response';
 import { resolveApiActorContext } from '../lib/request-context';
-import { BILLING_ROLES, ORG_ADMIN_ROLES, ORG_WRITE_ROLES, requireApiRole } from '../lib/authorization';
+import {
+  BILLING_ROLES,
+  ORG_ADMIN_ROLES,
+  ORG_WRITE_ROLES,
+  PROFILE_EDIT_ROLES,
+  requireApiRole
+} from '../lib/authorization';
 import {
   readJsonRecord,
   readOptionalBoolean,
@@ -47,13 +55,39 @@ export async function handleWorkspaceGet(request: Request) {
     organizationId: actor.organizationId,
     profileId: actor.profileId
   });
+  const discoveredLocalProviders = await discoverLocalLlmProviders();
+  if (discoveredLocalProviders.length > 0) {
+    const existingProviders = workspace.llm.customProviders ?? [];
+    const mergedProviders = [...existingProviders];
+
+    for (const discovered of discoveredLocalProviders) {
+      const existingIndex = mergedProviders.findIndex(
+        (provider) => provider.name === discovered.name || provider.host === discovered.host
+      );
+      if (existingIndex >= 0) {
+        mergedProviders[existingIndex] = {
+          ...mergedProviders[existingIndex]!,
+          host: discovered.host,
+          model: discovered.model,
+          active: true
+        };
+      } else {
+        mergedProviders.push(discovered);
+      }
+    }
+
+    workspace.llm = {
+      ...workspace.llm,
+      customProviders: mergedProviders
+    };
+  }
   return Response.json({ workspace });
 }
 
 export async function handleWorkspaceProfilePatch(request: Request) {
   const body = (await readJsonRecord(request)) ?? {};
   const actor = await resolveApiActorContext(request);
-  requireApiRole(actor, ORG_WRITE_ROLES);
+  requireApiRole(actor, PROFILE_EDIT_ROLES);
   const profile = await updateWorkspaceProfile({
     profileId: actor.profileId,
     fullName: readOptionalString(body, 'fullName'),
@@ -75,7 +109,7 @@ export async function handleWorkspaceProfilePatch(request: Request) {
 export async function handleWorkspaceOrganizationPatch(request: Request) {
   const body = (await readJsonRecord(request)) ?? {};
   const actor = await resolveApiActorContext(request);
-  requireApiRole(actor, ORG_ADMIN_ROLES);
+  requireApiRole(actor, ORG_WRITE_ROLES);
   const organization = await updateWorkspaceOrganization({
     organizationId: actor.organizationId,
     name: readOptionalString(body, 'name'),
@@ -151,6 +185,7 @@ export async function handleWorkspaceRuntimePatch(request: Request) {
 
 export async function handleWorkspaceRuntimeStopAll(request: Request) {
   const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_ADMIN_ROLES);
   const result = await stopAllAuditRuntime(actor.organizationId);
   await recordActivityEvent({
     organizationId: actor.organizationId,
@@ -197,12 +232,7 @@ export async function handleWorkspaceNotificationsPatch(request: Request) {
     slackChannel: readOptionalString(notifications, 'slackChannel'),
     isSlackConnected: readOptionalBoolean(notifications, 'isSlackConnected'),
     alertEmails: readOptionalString(notifications, 'alertEmails'),
-    alertSeverity: readOptionalStringLiteral(notifications, 'alertSeverity', [
-      'LOW',
-      'MEDIUM',
-      'HIGH',
-      'CRITICAL'
-    ]),
+    alertSeverity: readOptionalString(notifications, 'alertSeverity'),
     slackNangoConnectionId: readOptionalString(notifications, 'slackNangoConnectionId'),
     slackNangoProviderKey: readOptionalString(notifications, 'slackNangoProviderKey')
   };
@@ -255,7 +285,23 @@ export async function handleWorkspaceLlmPatch(request: Request) {
     return Response.json({ error: 'llm is required' }, { status: 400 });
   }
   const actor = await resolveApiActorContext(request);
-  requireApiRole(actor, ORG_ADMIN_ROLES);
+  requireApiRole(actor, PROFILE_EDIT_ROLES);
+  const canManageModelSettings = actor.role === 'owner' || actor.role === 'admin';
+
+  if (
+    !canManageModelSettings &&
+    (Object.prototype.hasOwnProperty.call(llm, 'selectedGeminiModel') ||
+      Object.prototype.hasOwnProperty.call(llm, 'maxTokens') ||
+      Object.prototype.hasOwnProperty.call(llm, 'temperature') ||
+      Object.prototype.hasOwnProperty.call(llm, 'customProviders') ||
+      Object.prototype.hasOwnProperty.call(llm, 'vendorRouting'))
+  ) {
+    return Response.json(
+      { error: 'Workspace model settings are locked for member access.' },
+      { status: 403 }
+    );
+  }
+
   const customProviders = Array.isArray(llm.customProviders)
     ? llm.customProviders
         .filter((provider) => provider && typeof provider === 'object')
@@ -394,6 +440,9 @@ export async function handleWorkspaceNangoConnectSessionPost(request: Request) {
     tags: {
       organization_id: actor.organizationId,
       end_user_id: actor.profileId,
+      ...(process.env.SLACK_SANDBOX?.trim()
+        ? { slack_workspace: process.env.SLACK_SANDBOX.trim() }
+        : {}),
       ...(actor.email ? { end_user_email: actor.email } : {}),
       ...(stringTags ?? {})
     },
@@ -409,16 +458,103 @@ export async function handleWorkspaceNangoConnectSessionPost(request: Request) {
   return Response.json({ ok: true, ...session });
 }
 
+export async function handleWorkspaceSlackNotificationSyncPost(request: Request) {
+  const actor = await resolveApiActorContext(request);
+  requireApiRole(actor, ORG_ADMIN_ROLES);
+
+  const body = (await readJsonRecord(request)) ?? {};
+  const requestedProviderKey = readOptionalString(body, 'providerConfigKey')?.trim() || 'slack';
+  const targetSlackWorkspace = process.env.SLACK_SANDBOX?.trim();
+  const connections = await listNangoConnections(requestedProviderKey);
+  const sortedConnections = connections
+    .filter((connection) => connection.providerConfigKey === requestedProviderKey || connection.integrationId === requestedProviderKey)
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.createdAt ?? left.updatedAt ?? '') || 0;
+      const rightTime = Date.parse(right.createdAt ?? right.updatedAt ?? '') || 0;
+      return rightTime - leftTime;
+    });
+  const exactMatches = sortedConnections.filter((connection) => {
+    const tags = connection.tags ?? {};
+    return (
+      tags.organization_id === actor.organizationId &&
+      (!targetSlackWorkspace || tags.slack_workspace === targetSlackWorkspace)
+    );
+  });
+  const orgMatches = sortedConnections.filter((connection) => {
+    const tags = connection.tags ?? {};
+    return tags.organization_id === actor.organizationId;
+  });
+  const identityMatches = sortedConnections.filter((connection) => {
+    const tags = connection.tags ?? {};
+    return (
+      (actor.profileId && tags.end_user_id === actor.profileId) ||
+      (actor.email ? tags.end_user_email === actor.email : false)
+    );
+  });
+  const matchingConnections = exactMatches.length
+    ? exactMatches
+    : orgMatches.length
+      ? orgMatches
+      : identityMatches.length
+        ? identityMatches
+        : sortedConnections;
+
+  const connection = matchingConnections[0];
+  if (!connection?.id) {
+    return Response.json(
+      {
+        error:
+          'No Slack Nango connection was found for this workspace. Complete the Nango connect flow first.'
+      },
+      { status: 404 }
+    );
+  }
+
+  await updateWorkspaceNotifications({
+    organizationId: actor.organizationId,
+    notifications: {
+      isSlackConnected: true,
+      slackNangoConnectionId: connection.id,
+      slackNangoProviderKey: connection.providerConfigKey || 'slack'
+    }
+  });
+
+  await recordActivityEvent({
+    organizationId: actor.organizationId,
+    actorId: actor.profileId,
+    eventType: 'integration.connected',
+    objectType: 'provider_connection',
+    objectId: connection.id,
+    summary: `Synced Slack Nango connection ${connection.id}`
+  });
+
+  return Response.json({
+    ok: true,
+    connection: {
+      id: connection.id,
+      providerConfigKey: connection.providerConfigKey,
+      integrationId: connection.integrationId
+    }
+  });
+}
+
 export async function handleWorkspaceIntegrationSync(request: Request, connectionId: string) {
   const actor = await resolveApiActorContext(request);
   requireApiRole(actor, ORG_ADMIN_ROLES);
+  const connectionRecord = await prisma.providerConnection.findUnique({
+    where: { id: connectionId },
+    select: { organizationId: true }
+  });
+  if (!connectionRecord || connectionRecord.organizationId !== actor.organizationId) {
+    return Response.json({ error: 'Integration connection not found' }, { status: 404 });
+  }
   const connection = await syncProviderConnection(connectionId);
   return Response.json({ ok: true, connection });
 }
 
 export async function handleWorkspaceBillingPatch(request: Request) {
   const body = (await readJsonRecord(request)) ?? {};
-  const plan = readOptionalStringLiteral(body, 'plan', ['free', 'pro', 'team', 'enterprise']);
+  const plan = readOptionalStringLiteral(body, 'plan', ['free', 'pro', 'team', 'scale', 'enterprise']);
   if (!plan) {
     return Response.json({ error: 'plan is required' }, { status: 400 });
   }
@@ -427,7 +563,8 @@ export async function handleWorkspaceBillingPatch(request: Request) {
   try {
     const billing = await updateBillingPlan({
       organizationId: actor.organizationId,
-      plan
+      plan,
+      actorProfileId: actor.profileId
     });
     await recordActivityEvent({
       organizationId: actor.organizationId,

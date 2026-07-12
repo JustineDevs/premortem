@@ -33,7 +33,8 @@ export async function listGitLabLabels(baseUrl: string, token: string, projectId
     { headers: gitLabAuthHeaders(token) }
   );
   if (!response.ok) throw new Error(`GitLab label list failed: ${response.status} ${await response.text()}`);
-  return response.json() as Promise<Array<{ name: string }>>;
+  const rows: Array<{ name: string }> = await response.json();
+  return rows;
 }
 
 /** Ensures project labels exist via GitLab Labels API (POST /projects/:id/labels). */

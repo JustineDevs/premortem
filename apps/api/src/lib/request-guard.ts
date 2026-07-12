@@ -1,80 +1,54 @@
 import crypto from 'node:crypto';
 
-import { verifyUserIdSignature } from '@premortem/security';
-
-const buckets = new Map<string, { count: number; resetAt: number }>();
-
 const RATE_LIMIT = Number.parseInt(process.env.PREMORTEM_API_RATE_LIMIT ?? '180', 10);
 const RATE_WINDOW_MS = Number.parseInt(process.env.PREMORTEM_API_RATE_WINDOW_MS ?? '60000', 10);
+const localRateLimitState = new Map<string, { count: number; resetAt: number }>();
 
 export function resolveRequestId(request: Request): string {
   return request.headers.get('x-request-id')?.trim() || crypto.randomUUID();
 }
 
-async function checkRateLimitWithDurableObject(
-  env: { RATE_LIMITER?: { idFromName(name: string): unknown; get(id: unknown): { fetch(request: Request): Promise<Response> } } },
-  key: string
-): Promise<boolean | null> {
-  if (!env.RATE_LIMITER) return null;
-
-  const limiterId = env.RATE_LIMITER.idFromName(key);
-  const response = await env.RATE_LIMITER.get(limiterId).fetch(
-    new Request('https://premortem.internal/rate-limit/check', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        key,
-        limit: RATE_LIMIT,
-        windowMs: RATE_WINDOW_MS
-      })
-    })
-  );
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const payload = (await response.json().catch(() => null)) as { allowed?: boolean } | null;
-  if (typeof payload?.allowed === 'boolean') {
-    return payload.allowed;
-  }
-
-  return null;
-}
-
 export async function checkRateLimit(
   key: string,
-  env?: { RATE_LIMITER?: { idFromName(name: string): unknown; get(id: unknown): { fetch(request: Request): Promise<Response> } } }
+  env?: { RATE_LIMITER?: { limit(input: { key: string; limit?: number; windowMs?: number }): Promise<{ allowed?: boolean; success?: boolean }> } }
 ): Promise<boolean> {
-  const durableObjectDecision = await checkRateLimitWithDurableObject(env ?? {}, key);
-  if (typeof durableObjectDecision === 'boolean') {
-    return durableObjectDecision;
+  if (env?.RATE_LIMITER) {
+    const result = await env.RATE_LIMITER.limit({
+      key,
+      limit: RATE_LIMIT,
+      windowMs: RATE_WINDOW_MS
+    });
+
+    if (typeof result.allowed === 'boolean') {
+      return result.allowed;
+    }
+    if (typeof result.success === 'boolean') {
+      return result.success;
+    }
   }
 
   const now = Date.now();
-  const entry = buckets.get(key);
-  if (!entry || now > entry.resetAt) {
-    buckets.set(key, { count: 1, resetAt: now + RATE_WINDOW_MS });
+  const current = localRateLimitState.get(key);
+  if (!current || now > current.resetAt) {
+    localRateLimitState.set(key, { count: 1, resetAt: now + RATE_WINDOW_MS });
     return true;
   }
-  if (entry.count >= RATE_LIMIT) return false;
-  entry.count += 1;
-  return true;
+
+  const nextCount = current.count + 1;
+  const allowed = nextCount <= RATE_LIMIT;
+  if (allowed) {
+    localRateLimitState.set(key, { count: nextCount, resetAt: current.resetAt });
+  }
+  return allowed;
 }
 
 export function rateLimitKey(request: Request, pathname: string): string {
-  const secret = process.env.IDENTITY_HMAC_SECRET?.trim() ?? null;
-  const signedUserId = request.headers.get('x-user-id')?.trim();
-  const signature = request.headers.get('x-user-id-sig')?.trim();
   const actor =
-    secret &&
-    signedUserId &&
-    signature &&
-    verifyUserIdSignature(signedUserId, signature, secret)
-      ? signedUserId
-      : request.headers.get('cf-connecting-ip')?.trim() ||
-        request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-        'anonymous';
+    request.headers.get('x-premortem-actor-id')?.trim() ||
+    request.headers.get('x-user-id')?.trim() ||
+    request.headers.get('cf-connecting-ip')?.trim() ||
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    'anonymous';
   return `${actor}:${pathname}`;
 }
 

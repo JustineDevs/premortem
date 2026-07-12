@@ -31,6 +31,7 @@ export const STRUCTURE_LANE_AGENTS = [
   'api_deprecation_risk_agent',
   'test_adequacy_agent',
   'integration_boundary_agent',
+  'pr_diff_agent',
   'product_gap_agent'
 ] as const;
 

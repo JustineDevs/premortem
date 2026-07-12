@@ -106,7 +106,7 @@ export async function fetchRecentGitLabPipelines(input: {
     `/projects/${encodedProject}/pipelines?${params.toString()}`
   );
 
-  const rows = (await response.json()) as Array<{
+  const rows: Array<{
     id: number;
     status: string;
     ref: string;
@@ -114,7 +114,7 @@ export async function fetchRecentGitLabPipelines(input: {
     web_url: string;
     created_at: string;
     duration?: number | null;
-  }>;
+  }> = await response.json();
 
   const pipelines: GitLabPipelineSummary[] = [];
   const recentFailedStages = new Set<string>();
@@ -133,7 +133,7 @@ export async function fetchRecentGitLabPipelines(input: {
           input.token,
           `/projects/${encodedProject}/pipelines/${row.id}/jobs?per_page=100`
         );
-        const jobs = (await jobsResponse.json()) as Array<{
+        const jobs: Array<{
           id: number;
           name: string;
           stage: string;
@@ -141,7 +141,7 @@ export async function fetchRecentGitLabPipelines(input: {
           web_url: string;
           duration?: number | null;
           failure_reason?: string | null;
-        }>;
+        }> = await jobsResponse.json();
         failedJobs = jobs
           .filter((job) => job.status === 'failed' || job.status === 'canceled')
           .slice(0, maxFailedJobs)
@@ -190,14 +190,14 @@ export async function fetchOpenGitLabIssues(input: {
     `/projects/${encodedProject}/issues?state=opened&order_by=updated_at&sort=desc&per_page=${maxIssues}`
   );
 
-  const rows = (await response.json()) as Array<{
+  const rows: Array<{
     iid: number;
     title: string;
     state: string;
     labels?: string[];
     updated_at: string;
     web_url: string;
-  }>;
+  }> = await response.json();
 
   return rows.map((row) => ({
     iid: row.iid,

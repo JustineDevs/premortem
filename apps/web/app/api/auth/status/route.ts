@@ -2,14 +2,8 @@ import { NextResponse } from 'next/server';
 
 import { isLocalAuthBypassEnabled } from '@premortem/domain';
 
-import { isSupabaseAuthConfigured } from '@/lib/supabase/server-config';
 import { bffErrorResponse } from '@/lib/server/bff-errors';
-import { hasValidSignedIdentity, resolveRequestActorContext } from '@/lib/server/request-context';
-import {
-  getTurnstileSiteKey,
-  isTurnstileConfigured,
-  isTurnstileEnabled
-} from '@/lib/server/turnstile';
+import { resolveRequestActorContext } from '@/lib/server/request-context';
 import { resolveSupabaseRuntimeConfig } from '@/lib/supabase/server-config';
 
 export async function GET(request: Request) {
@@ -19,67 +13,42 @@ export async function GET(request: Request) {
     if (isLocalAuthBypassEnabled()) {
       const context = await resolveRequestActorContext(request);
       return NextResponse.json({
-        configured: await isSupabaseAuthConfigured(),
+        configured: true,
         authenticated: true,
         mode: 'local_fixture',
         organizationId: context.organizationId,
-        captchaEnabled: isTurnstileEnabled(),
-        captchaConfigured: isTurnstileConfigured(),
-        captchaSiteKey: getTurnstileSiteKey(),
-        supabaseUrl: runtimeConfig?.url ?? null,
-        supabaseAnonKey: runtimeConfig?.anonKey ?? null
-      });
-    }
-
-    const signedUserId = request.headers.get('x-user-id')?.trim();
-    if (signedUserId && hasValidSignedIdentity(request, signedUserId)) {
-      return NextResponse.json({
-        configured: await isSupabaseAuthConfigured(),
-        authenticated: true,
-        mode: 'supabase',
-        captchaEnabled: isTurnstileEnabled(),
-        captchaConfigured: isTurnstileConfigured(),
-        captchaSiteKey: getTurnstileSiteKey(),
-        supabaseUrl: runtimeConfig?.url ?? null,
-        supabaseAnonKey: runtimeConfig?.anonKey ?? null
-      });
-    }
-
-    if (!(await isSupabaseAuthConfigured())) {
-      return NextResponse.json({
-        configured: false,
-        authenticated: false,
-        mode: 'unconfigured',
-        captchaEnabled: isTurnstileEnabled(),
-        captchaConfigured: isTurnstileConfigured(),
-        captchaSiteKey: getTurnstileSiteKey(),
-        supabaseUrl: runtimeConfig?.url ?? null,
-        supabaseAnonKey: runtimeConfig?.anonKey ?? null
+        botIdEnabled: false,
+        botIdConfigured: false,
+        botIdSiteKey: null,
+        supabaseUrl: runtimeConfig.url,
+        supabaseAnonKey: runtimeConfig.anonKey
       });
     }
 
     try {
-      await resolveRequestActorContext(request);
+      const context = await resolveRequestActorContext(request);
       return NextResponse.json({
         configured: true,
         authenticated: true,
         mode: 'supabase',
-        captchaEnabled: isTurnstileEnabled(),
-        captchaConfigured: isTurnstileConfigured(),
-        captchaSiteKey: getTurnstileSiteKey(),
-        supabaseUrl: runtimeConfig?.url ?? null,
-        supabaseAnonKey: runtimeConfig?.anonKey ?? null
+        organizationId: context.organizationId,
+        botIdEnabled: false,
+        botIdConfigured: false,
+        botIdSiteKey: null,
+        supabaseUrl: runtimeConfig.url,
+        supabaseAnonKey: runtimeConfig.anonKey
       });
     } catch {
       return NextResponse.json({
         configured: true,
         authenticated: false,
         mode: 'supabase',
-        captchaEnabled: isTurnstileEnabled(),
-        captchaConfigured: isTurnstileConfigured(),
-        captchaSiteKey: getTurnstileSiteKey(),
-        supabaseUrl: runtimeConfig?.url ?? null,
-        supabaseAnonKey: runtimeConfig?.anonKey ?? null
+        organizationId: null,
+        botIdEnabled: false,
+        botIdConfigured: false,
+        botIdSiteKey: null,
+        supabaseUrl: runtimeConfig.url,
+        supabaseAnonKey: runtimeConfig.anonKey
       });
     }
   } catch (error) {

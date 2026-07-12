@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: premortem
+
+commonLabels:
+  app.kubernetes.io/name: premortem
+  app.kubernetes.io/part-of: premortem
+  app.kubernetes.io/managed-by: kustomize
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - resourcequota.yaml
+  - limitrange.yaml
+  - secret-template.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - api-pdb.yaml
+  - api-hpa.yaml
+  - agent-builder-deployment.yaml
+  - agent-builder-service.yaml
+  - agent-builder-pdb.yaml
+  - networkpolicy.yaml
+  - ingress.yaml
+
+images:
+  - name: premortem-api
+    newName: premortem-api
+    newTag: prod
+  - name: premortem-agent-builder
+    newName: premortem-agent-builder
+    newTag: prod

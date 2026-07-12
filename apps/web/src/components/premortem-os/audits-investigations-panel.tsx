@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Clock, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 
 import type { AuditRun } from '@/lib/premortem-os/types';
+import { formatDate, getAuditRowKey, safeNumber } from '@/lib/premortem-os/format';
 
 type AuditsInvestigationsPanelProps = {
   audits: AuditRun[];
@@ -47,17 +48,18 @@ export function AuditsInvestigationsPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-2 pb-14">
-        {audits.map((audit) => {
+        {audits.map((audit, index) => {
           const isSelected = audit.id === selectedAuditId;
           const openRisks =
             audit.findings?.filter(
-              (finding) =>
-                finding.status !== 'RESOLVED' && finding.status !== 'DISMISSED' && !finding.mergedIntoId
-            ).length || 0;
+                (finding) =>
+                  finding.status !== 'RESOLVED' && finding.status !== 'DISMISSED' && !finding.mergedIntoId
+              ).length || 0;
+          const score = safeNumber(audit.score, 0);
 
           return (
             <button
-              key={audit.id}
+              key={getAuditRowKey(audit, index)}
               type="button"
               onClick={() => onSelectAudit(audit.id)}
               className={`w-full text-left p-3 rounded border text-xs font-medium cursor-pointer transition-all ${
@@ -72,21 +74,21 @@ export function AuditsInvestigationsPanel({
                 </span>
                 <span
                   className={`text-[9px] px-1.5 py-0.5 rounded font-bold font-mono ${
-                    audit.score >= 85
+                    score >= 85
                       ? 'bg-emerald-50 text-emerald-700'
-                      : audit.score >= 60
+                      : score >= 60
                         ? 'bg-amber-50 text-amber-700'
                         : 'bg-rose-50 text-rose-700'
                   }`}
                 >
-                  {audit.score}/100
+                  {score}/100
                 </span>
               </div>
 
               <div className="flex justify-between items-center mt-3 font-mono text-[9px] text-[#717A75]">
                 <div className="flex items-center gap-1">
                   <Clock size={10} />
-                  <span>{new Date(audit.date).toLocaleDateString()}</span>
+                  <span>{formatDate(audit.date)}</span>
                 </div>
                 <span className="font-bold text-rose-600">{openRisks} open risks</span>
               </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useReducer, useRef } from 'react';
 
 import { body14, label14, mono12 } from '../text-styles';
 
@@ -10,6 +10,48 @@ type MarketingAudioPlayerProps = {
   description?: string;
   durationLabel?: string;
 };
+
+type PlayerState = {
+  playing: boolean;
+  currentTime: number;
+  duration: number;
+  ready: boolean;
+};
+
+type PlayerAction =
+  | { type: 'loaded'; duration: number }
+  | { type: 'time'; currentTime: number }
+  | { type: 'ended' }
+  | { type: 'pause' }
+  | { type: 'play' };
+
+const INITIAL_PLAYER_STATE: PlayerState = {
+  playing: false,
+  currentTime: 0,
+  duration: 0,
+  ready: false
+};
+
+function playerReducer(state: PlayerState, action: PlayerAction): PlayerState {
+  switch (action.type) {
+    case 'loaded':
+      return {
+        ...state,
+        duration: action.duration,
+        ready: Number.isFinite(action.duration) && action.duration > 0
+      };
+    case 'time':
+      return { ...state, currentTime: action.currentTime };
+    case 'ended':
+      return { ...state, playing: false, currentTime: 0 };
+    case 'pause':
+      return { ...state, playing: false };
+    case 'play':
+      return { ...state, playing: true };
+    default:
+      return state;
+  }
+}
 
 const WAVE_HEIGHTS = [
   28, 42, 36, 58, 48, 62, 44, 70, 52, 38, 56, 64, 46, 72, 54, 40, 60, 50, 66, 44, 58, 34, 48,
@@ -47,10 +89,8 @@ export function MarketingAudioPlayer({
 }: MarketingAudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const progressId = useId();
-  const [playing, setPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [ready, setReady] = useState(false);
+  const [playerState, dispatch] = useReducer(playerReducer, INITIAL_PLAYER_STATE);
+  const { playing, currentTime, duration, ready } = playerState;
 
   const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
@@ -61,15 +101,15 @@ export function MarketingAudioPlayer({
     if (audio.paused) {
       try {
         await audio.play();
-        setPlaying(true);
+        dispatch({ type: 'play' });
       } catch {
-        setPlaying(false);
+        dispatch({ type: 'pause' });
       }
       return;
     }
 
     audio.pause();
-    setPlaying(false);
+    dispatch({ type: 'pause' });
   }, []);
 
   const seek = useCallback(
@@ -78,7 +118,7 @@ export function MarketingAudioPlayer({
       if (!audio || duration <= 0) return;
       const clamped = Math.min(100, Math.max(0, nextProgress));
       audio.currentTime = (clamped / 100) * duration;
-      setCurrentTime(audio.currentTime);
+      dispatch({ type: 'time', currentTime: audio.currentTime });
     },
     [duration]
   );
@@ -88,24 +128,20 @@ export function MarketingAudioPlayer({
     if (!audio) return;
 
     const onLoaded = () => {
-      setDuration(audio.duration);
-      setReady(Number.isFinite(audio.duration) && audio.duration > 0);
+      dispatch({ type: 'loaded', duration: audio.duration });
     };
-    const onTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const onTimeUpdate = () => dispatch({ type: 'time', currentTime: audio.currentTime });
     const onEnded = () => {
-      setPlaying(false);
-      setCurrentTime(0);
+      dispatch({ type: 'ended' });
     };
-    const onPause = () => setPlaying(false);
-    const onPlay = () => setPlaying(true);
+    const onPause = () => dispatch({ type: 'pause' });
+    const onPlay = () => dispatch({ type: 'play' });
 
     audio.addEventListener('loadedmetadata', onLoaded);
     audio.addEventListener('timeupdate', onTimeUpdate);
     audio.addEventListener('ended', onEnded);
     audio.addEventListener('pause', onPause);
     audio.addEventListener('play', onPlay);
-
-    if (audio.readyState >= 1) onLoaded();
 
     return () => {
       audio.removeEventListener('loadedmetadata', onLoaded);
@@ -168,9 +204,9 @@ export function MarketingAudioPlayer({
               className={`landing-block-audio__wave${playing ? ' landing-block-audio__wave--active' : ''}`}
               aria-hidden
             >
-              {WAVE_HEIGHTS.map((height, index) => (
+              {WAVE_HEIGHTS.map((height) => (
                 <span
-                  key={index}
+                  key={height}
                   className="landing-block-audio__wave-bar"
                   style={{ ['--wave-height' as string]: `${height}%` }}
                 />

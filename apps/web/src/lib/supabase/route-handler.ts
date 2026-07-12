@@ -16,11 +16,8 @@ export type RouteHandlerSupabase = {
 
 export async function createRouteHandlerSupabaseClient(
   request: NextRequest
-): Promise<RouteHandlerSupabase | null> {
+): Promise<RouteHandlerSupabase> {
   const config = await resolveSupabaseRuntimeConfig();
-  if (!config) {
-    return null;
-  }
 
   const pendingCookies: PendingCookie[] = [];
 

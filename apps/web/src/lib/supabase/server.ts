@@ -5,9 +5,6 @@ import { resolveSupabaseRuntimeConfig } from '@/lib/supabase/server-config';
 
 export async function createSupabaseServerClient() {
   const config = await resolveSupabaseRuntimeConfig();
-  if (!config) {
-    return null;
-  }
 
   const cookieStore = await cookies();
 

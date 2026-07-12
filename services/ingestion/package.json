@@ -1,5 +1,5 @@
 {
-  "name": "@premortem/ingestion",
+  "name": "@premortem/ingestion-service",
   "private": true,
   "type": "module",
   "scripts": {

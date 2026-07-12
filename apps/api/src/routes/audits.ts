@@ -6,8 +6,10 @@ import {
   pauseAuditRun,
   recordActivityEvent
 } from '@premortem/db';
+import { canonicalFindingsToSarifLog } from '@premortem/agent-kit';
 import { recordUsageEvent } from '@premortem/db';
 import { fetchPhoenixSemanticGraphForAudit } from '@premortem/observability/phoenix-semantic-graph';
+import { captureServerException } from '@premortem/observability';
 import { getAuditRunSnapshot, getRecentAuditRuns, resolveGraphSnapshotPayload } from '@premortem/orchestrator/read-model';
 
 import { apiErrorResponse } from '../lib/error-response';
@@ -30,6 +32,7 @@ export async function handleAuditCreate(request: Request, env: AppEnv = {}) {
   const projectId = readRequiredString(body, 'projectId');
   const branch = readRequiredString(body, 'branch');
   const commitSha = readOptionalString(body, 'commitSha');
+  const scanCodeSnippet = readOptionalString(body, 'scanCodeSnippet');
   const triggeredById = readOptionalString(body, 'triggeredById');
 
   if (!projectId) {
@@ -40,10 +43,6 @@ export async function handleAuditCreate(request: Request, env: AppEnv = {}) {
     return Response.json({ error: 'branch is required' }, { status: 400 });
   }
 
-  const organizationId = readOptionalString(body, 'organizationId');
-  if (organizationId && organizationId !== actor.organizationId) {
-    return Response.json({ error: 'organizationId is not allowed for this session.' }, { status: 403 });
-  }
   const resolvedOrganizationId = actor.organizationId;
 
   try {
@@ -53,6 +52,7 @@ export async function handleAuditCreate(request: Request, env: AppEnv = {}) {
       projectId,
       branch,
       commitSha: commitSha ?? undefined,
+      scanCodeSnippet: scanCodeSnippet ?? undefined,
       triggeredById: triggeredById ?? actor.profileId,
       triggerSource: 'api'
     });
@@ -112,6 +112,14 @@ async function resolveAuthorizedAuditRun(
   }
 ) {
   const actor = await resolveApiActorContext(request);
+  if (
+    typeof auditRunId !== 'string' ||
+    auditRunId.length === 0 ||
+    auditRunId === 'null' ||
+    auditRunId === 'undefined'
+  ) {
+    return null;
+  }
   const access = await prisma.auditRun.findUnique({
     where: { id: auditRunId },
     select: { organizationId: true }
@@ -196,13 +204,123 @@ export async function handleAuditSemanticGraphRead(request: Request, auditRunId:
   const startedAt = agentStartTimes[0] ?? eventTimes[0] ?? null;
   const completedAt = agentEndTimes.sort().at(-1) ?? eventTimes.sort().at(-1) ?? null;
 
-  const payload = await fetchPhoenixSemanticGraphForAudit({
-    auditRunId,
-    startedAt,
-    completedAt
-  });
+  try {
+    const payload = await fetchPhoenixSemanticGraphForAudit({
+      auditRunId,
+      startedAt,
+      completedAt
+    });
 
-  return Response.json(payload);
+    return Response.json(payload);
+  } catch (error) {
+    captureServerException(error, {
+      surface: 'audit.semantic-graph',
+      auditRunId,
+      organizationId: auditRun.organizationId,
+      projectId: auditRun.projectId
+    });
+
+    const fallbackNodes = [
+      ...auditRun.agentRuns.map((run) => ({
+        id: `agent:${run.id}`,
+        label: run.agentName,
+        kind: 'agent',
+        spanKind: run.status ?? undefined,
+        status: run.status
+      })),
+      ...auditRun.findings.map((finding) => ({
+        id: `finding:${finding.id}`,
+        label: finding.findingKey,
+        kind: 'finding',
+        spanKind: finding.severity,
+        status: finding.severity
+      })),
+      ...auditRun.events.map((event, index) => ({
+        id: `event:${index}`,
+        label: event.eventType,
+        kind: 'event',
+        spanKind: event.eventType,
+        status: event.eventType
+      }))
+    ];
+
+    const fallbackEdges = [
+      ...auditRun.agentRuns.map((run) => ({
+        from: `audit:${auditRun.auditRunId}`,
+        to: `agent:${run.id}`,
+        type: 'runs'
+      })),
+      ...auditRun.findings
+        .filter((finding) => finding.agentRunId)
+        .map((finding) => ({
+          from: `agent:${finding.agentRunId}`,
+          to: `finding:${finding.id}`,
+          type: 'produces'
+        })),
+      ...auditRun.events.map((event, index) => ({
+        from: `audit:${auditRun.auditRunId}`,
+        to: `event:${index}`,
+        type: 'event'
+      }))
+    ];
+
+    return Response.json({
+      configured: false,
+      auditRunId,
+      traceIds: [],
+      nodes: fallbackNodes,
+      edges: fallbackEdges,
+      source: 'unconfigured',
+      warning:
+        error instanceof Error ? error.message : 'Phoenix semantic graph unavailable; returned audit-derived fallback graph.'
+    });
+  }
+}
+
+export async function handleAuditSarifRead(request: Request, auditRunId: string) {
+  const auditRun = await resolveAuthorizedAuditRun(request, auditRunId);
+  if (!auditRun) {
+    return Response.json({ error: 'Audit run not found' }, { status: 404 });
+  }
+
+  const agentNameByRunId = new Map(auditRun.agentRuns.map((run) => [run.id, run.agentName] as const));
+  const findings = auditRun.findings.map((finding) => ({
+    agent: agentNameByRunId.get(finding.agentRunId) ?? 'premortem-agent',
+    finding_id: finding.findingKey,
+    category: finding.category,
+    finding_type: `${finding.category}_risk`,
+    severity: finding.severity as 'low' | 'medium' | 'high' | 'critical',
+    confidence: 0.7,
+    predicted_failure: {
+      summary: finding.predictedFailureSummary,
+      failure_mode: finding.failureMode ?? finding.predictedFailureSummary,
+      trigger_conditions: finding.triggerConditions ?? [],
+      blast_radius: 'component' as const
+    },
+    why_it_matters: finding.whyItMatters ?? finding.predictedFailureSummary,
+    affected_assets: finding.affectedAssets ?? [],
+    evidence: (finding.evidence ?? []).map((entry) => ({
+      kind: entry.kind,
+      ref: entry.ref,
+      reason: entry.reason,
+      ...(entry.codeSnippet ? { codeSnippet: entry.codeSnippet } : {})
+    })),
+    recommended_controls: finding.recommendedControls ?? [],
+    dedupe_keys: [finding.category, finding.findingKey],
+    tags: []
+  }));
+
+  return Response.json(
+    canonicalFindingsToSarifLog(findings, {
+      toolName: 'Premortem',
+      informationUri: `${new URL(request.url).origin}/app?tab=audits&audit=${auditRunId}`
+    }),
+    {
+      headers: {
+        'content-type': 'application/sarif+json; charset=utf-8'
+      }
+    }
+  );
 }
 
 export async function handleAuditList(request: Request) {
@@ -233,7 +351,7 @@ export async function handleAuditCancel(request: Request, auditRunId: string) {
       eventType: 'audit.cancelled',
       objectType: 'audit_run',
       objectId: auditRunId,
-      projectId: cancelled.projectId,
+      projectId: auditRun.projectId,
       summary: `Cancelled audit ${auditRunId}`
     });
     return Response.json({ ok: true, auditRun: cancelled });

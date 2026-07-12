@@ -1,3 +1,4 @@
+import { DEFAULT_QWEN_MODEL } from '@premortem/domain';
 import type {
   LlmCustomProviderConfig,
   LlmProvider,
@@ -13,17 +14,31 @@ export interface ResolveLlmProviderTargetsInput {
 }
 
 const DEFAULT_MODEL_BY_PROVIDER: Record<LlmProvider, string> = {
-  google: 'gemini-3-flash-preview',
+  google: 'gemini-2.5-flash',
   openai: 'gpt-5.4',
   anthropic: 'claude-sonnet-4.6',
-  qwen: 'qwen-plus'
+  qwen: DEFAULT_QWEN_MODEL,
+  openrouter: 'google/gemini-2.5-flash'
 };
+
+function splitPrefixedModelId(model: string): { provider: LlmProvider; model: string } | null {
+  const trimmed = model.trim();
+  const prefixed = trimmed.match(/^(google|openai|anthropic|qwen|openrouter)(:|\/)(.+)$/);
+  if (!prefixed) return null;
+  return {
+    provider: prefixed[1] as LlmProvider,
+    model: prefixed[3]
+  };
+}
 
 function normalizeUrl(value: string) {
   return value.trim().replace(/\/$/, '');
 }
 
-function resolveDefaultProvider(model: string, defaultProvider: LlmProvider) {
+function resolveDefaultProvider(
+  model: string,
+  defaultProvider: LlmProvider
+): { provider: LlmProvider; model: string } {
   const trimmed = model.trim();
   if (!trimmed) {
     return {
@@ -32,12 +47,51 @@ function resolveDefaultProvider(model: string, defaultProvider: LlmProvider) {
     };
   }
 
-  const prefixed = trimmed.match(/^(google|openai|anthropic|qwen)\/(.+)$/);
+  const prefixed = splitPrefixedModelId(trimmed);
   if (prefixed) {
+    if (defaultProvider === 'openrouter' && prefixed.provider !== 'openrouter') {
+      return {
+        provider: 'openrouter',
+        model: trimmed
+      };
+    }
+    const modelSlug = prefixed.provider === 'openrouter' && !prefixed.model.includes('/')
+      ? `openrouter/${prefixed.model}`
+      : prefixed.model;
     return {
-      provider: prefixed[1] as LlmProvider,
-      model: prefixed[2]
+      provider: prefixed.provider,
+      model: modelSlug
     };
+  }
+
+  if (defaultProvider === 'openrouter') {
+    if (
+      trimmed.startsWith('gemini-') ||
+      trimmed.startsWith('gemma-') ||
+      trimmed.startsWith('google-')
+    ) {
+      return { provider: 'openrouter' as const, model: `google/${trimmed}` };
+    }
+
+    if (trimmed.startsWith('gpt-') || trimmed.startsWith('o1') || trimmed.startsWith('o3')) {
+      return { provider: 'openrouter' as const, model: `openai/${trimmed}` };
+    }
+
+    if (trimmed.startsWith('claude-')) {
+      return { provider: 'openrouter' as const, model: `anthropic/${trimmed}` };
+    }
+
+    if (trimmed.startsWith('qwen') || trimmed.startsWith('qwq-')) {
+      return { provider: 'openrouter' as const, model: `qwen/${trimmed}` };
+    }
+  }
+
+  if (
+    trimmed.startsWith('gemini-') ||
+    trimmed.startsWith('gemma-') ||
+    trimmed.startsWith('google-')
+  ) {
+    return { provider: 'google' as const, model: trimmed };
   }
 
   if (trimmed.startsWith('gpt-') || trimmed.startsWith('o1') || trimmed.startsWith('o3')) {
@@ -92,6 +146,23 @@ export function resolveLlmProviderTargets(
     });
   };
 
+  const addManagedFallbacks = (labelPrefix = 'Managed fallback') => {
+    const fallbackProviders: LlmProvider[] = ['google', 'openai', 'qwen', 'anthropic'];
+    for (const provider of fallbackProviders) {
+      if (provider === managed.provider) continue;
+      const candidate: LlmProviderTarget = {
+        provider,
+        model: DEFAULT_MODEL_BY_PROVIDER[provider],
+        label: `${labelPrefix} · ${provider}`,
+        kind: 'managed'
+      };
+      if (!isLlmProviderTargetUsable(candidate)) {
+        continue;
+      }
+      pushUnique(targets, candidate);
+    }
+  };
+
   const addCustomProvider = (provider: LlmCustomProviderConfig, label: string) => {
     pushUnique(targets, {
       provider: 'openai',
@@ -103,11 +174,16 @@ export function resolveLlmProviderTargets(
     });
   };
 
-  if (routing.length === 0) {
-    addManaged('Managed vendor primary');
+  const addUniversalLocalFallbacks = (labelPrefix = 'Local fallback') => {
     for (const provider of customProviders) {
-      addCustomProvider(provider, `Local / hybrid provider: ${provider.name}`);
+      addCustomProvider(provider, `${labelPrefix} · ${provider.name}`);
     }
+  };
+
+  if (routing.length === 0) {
+    addUniversalLocalFallbacks('Local / hybrid provider');
+    addManaged('Managed vendor primary');
+    addManagedFallbacks('Managed fallback');
     return targets;
   }
 
@@ -133,11 +209,11 @@ export function resolveLlmProviderTargets(
     }
   }
 
+  addUniversalLocalFallbacks('Local / hybrid provider');
+  addManagedFallbacks('Managed fallback');
+
   if (targets.length === 0) {
     addManaged('Managed vendor fallback');
-    for (const provider of customProviders) {
-      addCustomProvider(provider, `Local / hybrid provider: ${provider.name}`);
-    }
   }
 
   return targets;
@@ -146,6 +222,10 @@ export function resolveLlmProviderTargets(
 export function isLlmProviderTargetUsable(target: LlmProviderTarget, env = process.env): boolean {
   if (target.provider === 'google') {
     return Boolean(env.GEMINI_API_KEY?.trim());
+  }
+
+  if (target.provider === 'openrouter') {
+    return Boolean(env.OPENROUTER_API_KEY?.trim() || env.OPEN_ROUTER_API_KEY?.trim());
   }
 
   if (target.provider === 'openai') {

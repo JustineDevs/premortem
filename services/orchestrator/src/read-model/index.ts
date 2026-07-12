@@ -2,7 +2,7 @@ import { prisma, resolveGitLabCredentialsForProject, listRecentAuditRunsForOrgan
 import { isProductionMode, normalizeEvidenceRefs } from '@premortem/domain';
 import { captureServerException } from '@premortem/observability/server';
 import { enrichEvidenceWithSourceSnippets } from '../evidence/resolve-evidence-snippets';
-import { getPersistedAuditRun } from '../services/audit-persistence';
+import { getAuditRunDetails } from '@premortem/db';
 import {
   resolveGraphSnapshotPayload,
   resolveStrictGraphSnapshotPayload
@@ -142,8 +142,18 @@ export async function getAuditRunSnapshot(
 ): Promise<AuditRunSnapshot | null> {
   const includeEvidenceSnippets = options?.includeEvidenceSnippets ?? true;
   const includeGraphPayload = options?.includeGraphPayload ?? true;
-  const auditRun = await getPersistedAuditRun(auditRunId);
+  const auditRun = await getAuditRunDetails(auditRunId);
   if (!auditRun) return null;
+  const auditRunCounts = (auditRun as {
+    _count?: {
+      agentRuns?: number;
+      findings?: number;
+      dedupeClusters?: number;
+      issueCandidates?: number;
+      rejectedIssueCandidateArtifacts?: number;
+      events?: number;
+    };
+  })._count;
   const issueCandidatesSource = toArray(auditRun.issueCandidates);
 
   const issueCandidateVersions = issueCandidatesSource.reduce(
@@ -209,7 +219,9 @@ export async function getAuditRunSnapshot(
   const findingsSource = toArray(auditRun.findings);
   const clustersSource = toArray(auditRun.dedupeClusters);
   const rejectedArtifactsSource = toArray(auditRun.rejectedIssueCandidateArtifacts);
-  const eventsSource = toArray(auditRun.events);
+  const eventsSource = toArray(auditRun.events).slice().sort((a, b) =>
+    a.createdAt.getTime() - b.createdAt.getTime()
+  );
 
   const findings = [] as AuditRunSnapshot['findings'];
   for (const finding of findingsSource) {
@@ -324,14 +336,15 @@ export async function getAuditRunSnapshot(
       }
       : null,
     counts: {
-      agentRuns: agentRunsSource.length,
-      findings: findingsSource.length,
-      clusters: clustersSource.length,
-      issueCandidates: issueCandidatesSource.length,
-      rejectedIssueCandidateArtifacts: rejectedArtifactsSource.length,
+      agentRuns: auditRunCounts?.agentRuns ?? agentRunsSource.length,
+      findings: auditRunCounts?.findings ?? findingsSource.length,
+      clusters: auditRunCounts?.dedupeClusters ?? clustersSource.length,
+      issueCandidates: auditRunCounts?.issueCandidates ?? issueCandidatesSource.length,
+      rejectedIssueCandidateArtifacts:
+        auditRunCounts?.rejectedIssueCandidateArtifacts ?? rejectedArtifactsSource.length,
       issueCandidateVersions,
       validationResults,
-      events: eventsSource.length
+      events: auditRunCounts?.events ?? eventsSource.length
     },
     events: eventsSource.map((event) => ({
       eventType: event.eventType,
@@ -397,6 +410,7 @@ export async function getAuditRunSnapshot(
 export { resolveGraphSnapshotPayload };
 
 export interface AuditRunListItem {
+  id: string;
   auditRunId: string;
   projectId: string;
   projectName: string;
@@ -404,9 +418,34 @@ export interface AuditRunListItem {
   commitSha?: string | null;
   runStatus: string;
   createdAt: string;
+  findingCount: number;
+  criticalCount: number;
+  highCount: number;
+  mediumCount: number;
+  lowCount: number;
   reviewableIssueCount: number;
   rejectedIssueCount: number;
   latestEventType?: string;
+}
+
+function countSeverityRows(findings: Array<{ severity?: string }>) {
+  const counts = findings.reduce(
+    (counts, finding) => {
+      const severity = String(finding.severity ?? '').toLowerCase();
+      if (severity === 'critical') counts.critical += 1;
+      else if (severity === 'high') counts.high += 1;
+      else if (severity === 'medium') counts.medium += 1;
+      else if (severity === 'low') counts.low += 1;
+      return counts;
+    },
+    { critical: 0, high: 0, medium: 0, low: 0 }
+  );
+  return {
+    criticalCount: counts.critical,
+    highCount: counts.high,
+    mediumCount: counts.medium,
+    lowCount: counts.low
+  };
 }
 
 export async function getRecentAuditRuns(
@@ -415,6 +454,7 @@ export async function getRecentAuditRuns(
 ): Promise<AuditRunListItem[]> {
   const auditRuns = await listRecentAuditRunsForOrganization(organizationId, limit);
   return auditRuns.map((auditRun) => ({
+    id: auditRun.id,
     auditRunId: auditRun.id,
     projectId: auditRun.projectId,
     projectName: auditRun.project?.name ?? auditRun.projectId,
@@ -422,6 +462,14 @@ export async function getRecentAuditRuns(
     commitSha: auditRun.commitSha,
     runStatus: auditRun.runStatus,
     createdAt: auditRun.createdAt.toISOString(),
+    findingCount: Array.isArray((auditRun as { findings?: Array<{ severity?: string }> }).findings)
+      ? (auditRun as { findings: Array<{ severity?: string }> }).findings.length
+      : 0,
+    ...countSeverityRows(
+      Array.isArray((auditRun as { findings?: Array<{ severity?: string }> }).findings)
+        ? (auditRun as { findings: Array<{ severity?: string }> }).findings
+        : []
+    ),
     reviewableIssueCount: auditRun._count.issueCandidates,
     rejectedIssueCount: auditRun._count.rejectedIssueCandidateArtifacts,
     latestEventType: auditRun.events[0]?.eventType

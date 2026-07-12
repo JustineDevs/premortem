@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist/graphiti",
+    "rootDir": "ts",
+    "declaration": true,
+    "declarationMap": true
+  },
+  "include": ["ts/**/*"]
+}

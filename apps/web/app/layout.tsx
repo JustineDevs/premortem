@@ -1,14 +1,9 @@
 import type { Metadata } from 'next';
-import { GeistSans } from 'geist/font/sans';
-import { Inter } from 'next/font/google';
+import { Analytics } from '@vercel/analytics/next';
+import { Suspense } from 'react';
 
+import { SiteAnalytics } from '@/providers/site-analytics';
 import './globals.css';
-
-const inter = Inter({
-  subsets: ['latin'],
-  weight: ['400', '500', '700'],
-  variable: '--font-inter'
-});
 
 const siteUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'https://premortem.jstn.site');
 
@@ -28,7 +23,7 @@ export const metadata: Metadata = {
     type: 'website',
     images: [
       {
-        url: '/opengraph-image',
+        url: '/opengraph-image.svg',
         width: 1200,
         height: 630,
         alt: 'Premortem'
@@ -39,14 +34,19 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Premortem',
     description: 'Predictive repository audits, swarm analysis, and GitLab issue synthesis for software delivery risk.',
-    images: ['/opengraph-image']
+    images: ['/opengraph-image.svg']
   }
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${GeistSans.variable} ${inter.variable}`}>
-      <body className={GeistSans.className}>{children}</body>
+    <html lang="en">
+      <body>
+        <Suspense fallback={null}>
+          <SiteAnalytics>{children}</SiteAnalytics>
+        </Suspense>
+        <Analytics />
+      </body>
     </html>
   );
 }

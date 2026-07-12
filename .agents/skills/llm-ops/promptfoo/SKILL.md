@@ -12,7 +12,7 @@ description: >
 ## Repo entrypoints
 
 - Config: `packages/evals/promptfoo/promptfooconfig.yaml`
-- Provider adapter: `packages/evals/promptfoo/provider.mjs`
+- Provider adapter: `packages/evals/promptfoo/provider.ts`
 - Run gate: `pnpm run eval:prompts` (root `package.json`)
 - Dev dependency: root `promptfoo` package
 

@@ -2,17 +2,35 @@
  * Orchestrates the end-to-end audit lifecycle: submit, execute, persist, and
  * snapshot the runtime state that powers the reviewer console.
  */
-import { AuditEvent, AuditCheckpointPhase, DEFAULT_GEMINI_MODEL, RUNTIME_LANE_AGENTS, STRUCTURE_LANE_AGENTS } from '@premortem/domain';
+import { AuditEvent, AuditCheckpointPhase, DEFAULT_GEMINI_MODEL, RUNTIME_LANE_AGENTS, STRUCTURE_LANE_AGENTS, type EvidenceRefLike } from '@premortem/domain';
 import {
   assertCanRunAudit,
   assertAuditReadiness,
   extendAuditLease,
   findActiveAuditRun,
   prisma,
+  createAuditRun,
+  createAuditRunEvent,
+  createAgentRun,
+  completeAgentRun,
+  failAgentRun,
+  createDedupeClusters,
+  persistFindings,
+  persistGraphSnapshot,
+  persistIssueCandidates,
+  persistRejectedIssueCandidateArtifacts,
+  getAuditRunDetails,
+  listRecentAuditRunsForOrganization,
+  markAuditRunning,
+  markAuditCompleted,
+  markAuditFailed,
   recordAuditSubmitted,
+  getWorkspaceSkillState,
+  saveWorkspaceSkillState,
   resolveGitLabCredentialsForProject,
   resumeAuditRun
 } from '@premortem/db';
+import { createOrganizationNotifications } from '@premortem/db/notifications';
 import {
   validateFinding,
   validateIssueCandidate,
@@ -26,8 +44,8 @@ import type { GraphSnapshotPayload } from '@premortem/graph-model';
 import { buildAuditJob, type AuditJob } from '@premortem/workflow';
 import {
   captureServerException,
+  captureServerMessage,
   createLangfuseScore,
-  isLangfuseConfigured,
   trackServerEvent,
 } from '@premortem/observability';
 import {
@@ -42,28 +60,23 @@ import {
 import {
   evaluateAuditMissionQuality,
   evaluateAuditMissionWithLlmJudge,
-  isPhoenixLlmEvalEnabled,
   trace,
   tracePremortemAuditJob
 } from '../telemetry/phoenix-lite';
-import { isNeo4jGraphEnabled, writeGraphSnapshotToNeo4j } from '@premortem/integrations';
-import { isProductionMode } from '@premortem/domain';
-import { clusterFindings } from '../merge/cluster-findings';
 import {
-  beginAudit,
-  createQueuedAudit,
-  failAuditWithNotifications,
-  finishAuditWithNotifications,
-  getPersistedAuditRun,
-  listAuditRuns,
-  recordAuditEvent,
-  runAgentWithPersistence,
-  saveClusters,
-  saveFindings,
-  saveGraphSnapshot,
-  saveIssueCandidates,
-  saveRejectedIssueArtifacts
-} from '../services/audit-persistence';
+  isNeo4jGraphEnabled,
+  fetchRepositoryFileRaw,
+  writeAuditEpisode,
+  writeGraphSnapshotToNeo4j
+} from '@premortem/integrations';
+import { uploadArtifact } from '@premortem/storage';
+import { isProductionMode, normalizeEvidenceRefs, parseFileEvidenceRef } from '@premortem/domain';
+import {
+  buildGeneratedSkillDraft,
+  buildSkillCoverageReport,
+  loadSkillRegistry
+} from '@premortem/skills';
+import { clusterFindings } from '../merge/cluster-findings';
 import { normalizePersistedEvidenceRefs } from '../evidence/persisted-evidence';
 import { buildGraphFromIngestion } from '../graph/build-graph-snapshot';
 import {
@@ -88,6 +101,10 @@ import {
   persistPhaseCheckpoint,
   shouldSkipPhase
 } from './audit-execution-control';
+import type { RuntimeCluster } from '../merge/cluster-findings';
+import type { SkillRegistryAgent } from '@premortem/skills';
+
+type PersistedAuditRun = NonNullable<Awaited<ReturnType<typeof getAuditRunDetails>>>;
 
 const SEVERITY_RANK: Record<CanonicalFinding['severity'], number> = {
   low: 0,
@@ -95,6 +112,471 @@ const SEVERITY_RANK: Record<CanonicalFinding['severity'], number> = {
   high: 2,
   critical: 3
 };
+
+async function beginAudit(auditRunId: string) {
+  await markAuditRunning(auditRunId);
+  await createAuditRunEvent({
+    auditRunId,
+    eventType: AuditEvent.STARTED
+  });
+}
+
+async function runAgentWithPersistence<T>(input: {
+  auditRunId: string;
+  agentName: string;
+  runMode: 'always' | 'conditional';
+  execute: () => Promise<T>;
+  serialize?: (result: T) => Record<string, unknown>;
+}) {
+  const agentRun = await createAgentRun({
+    auditRunId: input.auditRunId,
+    agentName: input.agentName,
+    runMode: input.runMode
+  });
+  const traceAgent = process.env.PREMORTEM_SMOKE_TRACE_LLM === '1';
+
+  try {
+    if (traceAgent) {
+      console.error(`[audit-agent:start] ${input.agentName}`);
+    }
+    const result = await input.execute();
+    await completeAgentRun(agentRun.id, input.serialize?.(result) as never);
+    if (traceAgent) {
+      console.error(`[audit-agent:done] ${input.agentName}`);
+    }
+    return { agentRun, result };
+  } catch (error) {
+    await failAgentRun(agentRun.id, error instanceof Error ? error.message : 'Unknown agent error');
+    if (traceAgent) {
+      console.error(
+        `[audit-agent:fail] ${input.agentName}`,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    throw error;
+  }
+}
+
+async function saveFindings(input: {
+  organizationId: string;
+  projectId: string;
+  auditRunId: string;
+  agentRunId: string;
+  findings: CanonicalFinding[];
+}) {
+  return persistFindings({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    auditRunId: input.auditRunId,
+    agentRunId: input.agentRunId,
+    findings: input.findings.map((finding) => ({
+      findingKey: finding.finding_id,
+      category: finding.category,
+      findingType: finding.finding_type,
+      severity: finding.severity,
+      confidence: finding.confidence,
+      predictedFailureSummary: finding.predicted_failure.summary,
+      failureMode: finding.predicted_failure.failure_mode,
+      whyItMatters: finding.why_it_matters,
+      blastRadius: finding.predicted_failure.blast_radius,
+      triggerConditions: finding.predicted_failure.trigger_conditions,
+      affectedAssets: finding.affected_assets,
+      evidence: finding.evidence,
+      recommendedControls: finding.recommended_controls,
+      dedupeKeys: finding.dedupe_keys,
+      tags: finding.tags
+    }))
+  });
+}
+
+async function saveClusters(input: {
+  organizationId: string;
+  projectId: string;
+  auditRunId: string;
+  clusters: RuntimeCluster[];
+  findingIdMap: Map<string, string>;
+}) {
+  return createDedupeClusters({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    auditRunId: input.auditRunId,
+    clusters: input.clusters.map((cluster) => ({
+      clusterKey: cluster.clusterKey,
+      categoryOwner: cluster.categoryOwner,
+      titleHint: cluster.titleHint,
+      severity: cluster.severity,
+      confidence: cluster.confidence,
+      blastRadius: cluster.blastRadius,
+      assetScope: cluster.assetScope,
+      triggerSignature: cluster.triggerSignature,
+      findings: cluster.sourceFindingIds.map((findingId) => ({
+        findingId: input.findingIdMap.get(findingId) ?? findingId,
+        role: findingId === cluster.primaryFindingId ? 'primary' : 'supporting',
+        similarityScore: findingId === cluster.primaryFindingId ? 1 : 0.8
+      }))
+    }))
+  });
+}
+
+async function saveIssueCandidates(input: {
+  organizationId: string;
+  projectId: string;
+  auditRunId: string;
+  clusterIdByCategory: Map<string, string>;
+  clusterIdByFindingId?: Map<string, string>;
+  issues: Array<{
+    issue: IssueCandidate;
+    validationErrors: string[];
+    validationWarnings: string[];
+    validatorName: string;
+  }>;
+}) {
+  return persistIssueCandidates({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    auditRunId: input.auditRunId,
+    issues: input.issues.map(({ issue, validationErrors, validationWarnings, validatorName }) => {
+      const clusterId =
+        input.clusterIdByCategory.get(issue.category) ??
+        issue.source_findings
+          .map((findingId: string) => input.clusterIdByFindingId?.get(findingId))
+          .find((value): value is string => Boolean(value));
+      if (!clusterId) {
+        throw new Error(`Missing cluster for issue candidate category: ${issue.category}`);
+      }
+
+      return {
+        clusterId,
+        title: issue.title,
+        category: issue.category,
+        severity: issue.severity,
+        confidence: issue.confidence,
+        predictedFailureSummary: issue.predicted_failure_summary,
+        whyItMatters: issue.why_it_matters,
+        triggerConditions: issue.trigger_conditions,
+        evidence: issue.evidence,
+        recommendedActionSummary: issue.recommended_action_summary,
+        implementationSteps: issue.implementation_steps,
+        doneCriteria: issue.done_criteria,
+        affectedAssets: issue.affected_assets,
+        sourceAgents: issue.source_agents,
+        sourceFindings: issue.source_findings,
+        validationStatus: validationErrors.length === 0 ? 'passed' : 'failed',
+        validationErrors,
+        validationWarnings,
+        validatorName
+      };
+    })
+  });
+}
+
+async function saveRejectedIssueArtifacts(input: {
+  organizationId: string;
+  projectId: string;
+  auditRunId: string;
+  clusterIdByCategory: Map<string, string>;
+  clusterIdByFindingId?: Map<string, string>;
+  issues: Array<{
+    issue: IssueCandidate;
+    validationErrors: string[];
+    validationWarnings: string[];
+    validatorName: string;
+  }>;
+}) {
+  return persistRejectedIssueCandidateArtifacts({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    auditRunId: input.auditRunId,
+    issues: input.issues.map(({ issue, validationErrors, validationWarnings, validatorName }) => ({
+      clusterId:
+        input.clusterIdByCategory.get(issue.category) ??
+        issue.source_findings
+          .map((findingId: string) => input.clusterIdByFindingId?.get(findingId))
+          .find((value): value is string => Boolean(value)),
+      title: issue.title,
+      category: issue.category,
+      severity: issue.severity,
+      confidence: issue.confidence,
+      predictedFailureSummary: issue.predicted_failure_summary,
+      whyItMatters: issue.why_it_matters,
+      triggerConditions: issue.trigger_conditions,
+      evidence: issue.evidence,
+      recommendedActionSummary: issue.recommended_action_summary,
+      implementationSteps: issue.implementation_steps,
+      doneCriteria: issue.done_criteria,
+      affectedAssets: issue.affected_assets,
+      sourceAgents: issue.source_agents,
+      sourceFindings: issue.source_findings,
+      validationErrors,
+      validationWarnings,
+      validatorName
+    }))
+  });
+}
+
+async function saveGraphSnapshot(input: {
+  organizationId: string;
+  projectId: string;
+  auditRunId: string;
+  nodeCount: number;
+  edgeCount: number;
+  metadata?: Record<string, unknown>;
+  storageRef?: string;
+}) {
+  return persistGraphSnapshot(input);
+}
+
+async function finishAudit(auditRunId: string, summary: Record<string, unknown>) {
+  await markAuditCompleted(auditRunId, summary as never);
+  await createAuditRunEvent({
+    auditRunId,
+    eventType: AuditEvent.COMPLETED,
+    payload: summary
+  });
+}
+
+async function finishAuditWithNotifications(input: {
+  auditRunId: string;
+  organizationId: string;
+  projectId: string;
+  projectName?: string | null;
+  branch: string;
+  summary: Record<string, unknown>;
+}) {
+  await finishAudit(input.auditRunId, input.summary);
+  const findingCount = Number(input.summary.findingCount ?? 0);
+  const criticalCount = Number(input.summary.criticalCount ?? 0);
+  const issueCandidateCount = Number(input.summary.issueCandidateCount ?? 0);
+
+  try {
+    await createOrganizationNotifications({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      kind: 'audit_completed',
+      title: `Audit completed for ${input.projectName ?? input.projectId}`,
+      body: `Branch ${input.branch} finished scanning and produced ${findingCount} findings.`,
+      metadata: {
+        auditRunId: input.auditRunId,
+        branch: input.branch,
+        summary: input.summary
+      }
+    });
+
+    if (criticalCount > 0) {
+      await createOrganizationNotifications({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        kind: 'critical_finding',
+        title: `${criticalCount} critical findings detected in ${input.projectName ?? input.projectId}`,
+        body: `Branch ${input.branch} surfaced ${criticalCount} critical findings across ${findingCount} total findings.`,
+        metadata: {
+          auditRunId: input.auditRunId,
+          branch: input.branch,
+          criticalCount,
+          findingCount,
+          summary: input.summary
+        }
+      });
+    }
+
+    if (issueCandidateCount > 0) {
+      await createOrganizationNotifications({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        kind: 'issues_ready',
+        title: `Review ${issueCandidateCount} issue candidates for ${input.projectName ?? input.projectId}`,
+        body: `Audit results are ready for review on branch ${input.branch}.`,
+        metadata: {
+          auditRunId: input.auditRunId,
+          branch: input.branch,
+          issueCandidateCount,
+          summary: input.summary
+        }
+      });
+    }
+  } catch (error) {
+    captureServerException(error, {
+      surface: 'audit-persistence.notification-fanout',
+      auditRunId: input.auditRunId,
+      organizationId: input.organizationId,
+      projectId: input.projectId
+    });
+  }
+}
+
+function pickSkillDraftOwner(registryAgents: SkillRegistryAgent[], category: string) {
+  return registryAgents
+    .filter((agent) => agent.owns_categories?.includes(category))
+    .sort(
+      (left, right) =>
+        right.merge_owner_priority - left.merge_owner_priority ||
+        left.name.localeCompare(right.name)
+    )[0];
+}
+
+async function persistSkillMarketplaceState(input: {
+  organizationId: string;
+  projectId: string;
+  auditRunId: string;
+  rootDir: string;
+  finalRun: PersistedAuditRun;
+}) {
+  const registry = loadSkillRegistry(input.rootDir);
+  const currentSkillState = await getWorkspaceSkillState(input.organizationId);
+  const coverageReport = buildSkillCoverageReport({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    auditRunId: input.auditRunId,
+    runStatus: input.finalRun.runStatus,
+    registry,
+    findings: input.finalRun.findings.map((finding) => {
+      const agentName =
+        input.finalRun.agentRuns.find((run) => run.id === finding.agentRunId)?.agentName ??
+        'unknown';
+      return {
+        agent: agentName,
+        category: finding.category
+      };
+    }),
+    agentRuns: input.finalRun.agentRuns.map((run) => ({
+      agentName: run.agentName,
+      status: run.status
+    })),
+    issueCandidates: input.finalRun.issueCandidates.map((issue) => ({
+      category: issue.category,
+      sourceAgents: Array.isArray((issue as { sourceAgents?: unknown }).sourceAgents)
+        ? ((issue as { sourceAgents?: unknown }).sourceAgents as unknown[]).filter(
+            (entry): entry is string => typeof entry === 'string' && entry.length > 0
+          )
+        : []
+    }))
+  });
+
+  const coverageStorageRef = await uploadArtifact({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    auditRunId: input.auditRunId,
+    kind: 'skill-coverage',
+    artifactId: coverageReport.reportId,
+    payload: coverageReport
+  });
+
+  const drafts = await Promise.all(
+    coverageReport.missingCategories.map(async (category) => {
+      const ownerAgent = pickSkillDraftOwner(registry.agents, category);
+      const draft = buildGeneratedSkillDraft({
+        category,
+        ownerAgent,
+        report: {
+          ...coverageReport,
+          storageRef: coverageStorageRef
+        },
+        installed: currentSkillState.installedSkillIds.includes(`skill:${category}`)
+      });
+      const storageRef = await uploadArtifact({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        auditRunId: input.auditRunId,
+        kind: 'skill-draft',
+        artifactId: draft.id,
+        payload: draft,
+        contentType: 'text/markdown'
+      });
+      return {
+        ...draft,
+        storageRef
+      };
+    })
+  );
+
+  const nextSkillState = {
+    generatedAt: coverageReport.generatedAt,
+    auditRunId: input.auditRunId,
+    registryVersion: registry.version,
+    coverageReport: {
+      ...coverageReport,
+      storageRef: coverageStorageRef
+    },
+    drafts: drafts.map((draft) => ({
+      ...draft,
+      installed: currentSkillState.installedSkillIds.includes(draft.id)
+    })),
+    installedSkillIds: currentSkillState.installedSkillIds
+  };
+
+  await saveWorkspaceSkillState({
+    organizationId: input.organizationId,
+    skillState: nextSkillState
+  });
+
+  await recordAuditEvent(input.auditRunId, 'skill.coverage_reported', {
+    registryProject: registry.project,
+    registryVersion: registry.version,
+    totalCategories: coverageReport.totalCategories,
+    coveredCategories: coverageReport.coveredCategories.length,
+    missingCategories: coverageReport.missingCategories.length,
+    draftCount: drafts.length,
+    coverageStorageRef,
+    draftStorageRefs: drafts.map((draft) => draft.storageRef).filter((value): value is string => Boolean(value))
+  });
+}
+
+async function failAudit(auditRunId: string, errorMessage: string) {
+  await markAuditFailed(auditRunId, errorMessage);
+  await createAuditRunEvent({
+    auditRunId,
+    eventType: AuditEvent.FAILED,
+    payload: { errorMessage }
+  });
+}
+
+async function failAuditWithNotifications(input: {
+  auditRunId: string;
+  organizationId: string;
+  projectId: string;
+  projectName?: string | null;
+  branch: string;
+  errorMessage: string;
+}) {
+  await failAudit(input.auditRunId, input.errorMessage);
+  try {
+    await createOrganizationNotifications({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      kind: 'audit_failed',
+      title: `Audit failed for ${input.projectName ?? input.projectId}`,
+      body: `Branch ${input.branch} stopped with error: ${input.errorMessage}`,
+      metadata: {
+        auditRunId: input.auditRunId,
+        branch: input.branch,
+        errorMessage: input.errorMessage
+      }
+    });
+  } catch (error) {
+    captureServerException(error, {
+      surface: 'audit-persistence.failure-notification-fanout',
+      auditRunId: input.auditRunId,
+      organizationId: input.organizationId,
+      projectId: input.projectId
+    });
+  }
+}
+
+async function recordAuditEvent(auditRunId: string, eventType: string, payload?: Record<string, unknown>) {
+  return createAuditRunEvent({
+    auditRunId,
+    eventType,
+    payload
+  });
+}
+
+async function getPersistedAuditRun(auditRunId: string) {
+  return getAuditRunDetails(auditRunId);
+}
+
+async function listAuditRuns(organizationId: string, limit = 12) {
+  return listRecentAuditRunsForOrganization(organizationId, limit);
+}
 
 interface AgentBuilderMissionTrace {
   engine: 'orchestrator-inline-trace';
@@ -151,6 +633,141 @@ function readEvidenceRefs(value: unknown): CanonicalFinding['evidence'] {
   return normalizePersistedEvidenceRefs(value);
 }
 
+function normalizeGroundingPath(value: string): string {
+  return value.trim().replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/\/+$/, '');
+}
+
+function buildEvidenceGroundingIndexes(input: {
+  repoTree: string[];
+  sourceFiles: Array<{ path: string; lineCount: number; preview: string }>;
+  sourceCodeSamples: Record<string, string>;
+}) {
+  const repoTree = new Set(input.repoTree.map(normalizeGroundingPath));
+  const sourceFiles = new Map(
+    input.sourceFiles.map((source) => [
+      normalizeGroundingPath(source.path),
+      {
+        path: normalizeGroundingPath(source.path),
+        lineCount: source.lineCount,
+        preview: source.preview
+      }
+    ] as const)
+  );
+  const sourceCodeSamples = new Map(
+    Object.entries(input.sourceCodeSamples).map(([path, sample]) => [
+      normalizeGroundingPath(path),
+      sample
+    ] as const)
+  );
+
+  return { repoTree, sourceFiles, sourceCodeSamples };
+}
+
+async function validateEvidenceGrounding(input: {
+  evidence: unknown;
+  indexes: ReturnType<typeof buildEvidenceGroundingIndexes>;
+  sourceContext:
+    | {
+        baseUrl: string;
+        token: string;
+        externalProjectId: string;
+        branch: string;
+      }
+    | null;
+}): Promise<string[]> {
+  const refs = normalizeEvidenceRefs(input.evidence);
+  if (refs.length === 0) return [];
+
+  const errors = new Set<string>();
+  const remoteFileCache = new Map<string, Promise<string | null>>();
+
+  const loadRemoteFile = async (filePath: string) => {
+    if (!input.sourceContext) return null;
+    const cacheKey = filePath;
+    if (!remoteFileCache.has(cacheKey)) {
+      remoteFileCache.set(
+        cacheKey,
+        fetchRepositoryFileRaw({
+          baseUrl: input.sourceContext.baseUrl,
+          token: input.sourceContext.token,
+          externalProjectId: input.sourceContext.externalProjectId,
+          ref: input.sourceContext.branch,
+          filePath
+        }).catch(() => null)
+      );
+    }
+
+    return remoteFileCache.get(cacheKey)!;
+  };
+
+  const getKnownContent = async (filePath: string) => {
+    const localSample = input.indexes.sourceCodeSamples.get(filePath);
+    const sourceFile = input.indexes.sourceFiles.get(filePath);
+    const localPreview = sourceFile?.preview ?? null;
+    const remote = await loadRemoteFile(filePath);
+    return remote ?? localSample ?? localPreview;
+  };
+
+  for (const item of refs) {
+    const parsed = parseFileEvidenceRef(item.ref);
+    if (!parsed) {
+      continue;
+    }
+
+    const filePath = normalizeGroundingPath(parsed.filePath);
+    const hasRepoTreePath = input.indexes.repoTree.has(filePath);
+    const hasSourceFile = input.indexes.sourceFiles.has(filePath) || input.indexes.sourceCodeSamples.has(filePath);
+    if (!hasRepoTreePath && !hasSourceFile) {
+      errors.add(`evidence ref file path missing from repo_tree: ${item.ref}`);
+      continue;
+    }
+
+    const sourceFile = input.indexes.sourceFiles.get(filePath);
+    const knownContent = sourceFile ? sourceFile.preview : await getKnownContent(filePath);
+    const lineCount = sourceFile?.lineCount ?? (knownContent ? knownContent.split('\n').length : 0);
+
+    if (lineCount > 0 && parsed.endLine > lineCount) {
+      errors.add(`evidence ref line ${parsed.endLine} exceeds available content for ${filePath}`);
+      continue;
+    }
+
+    const snippet = item.codeSnippet?.trim();
+    if (!snippet) {
+      continue;
+    }
+
+    if (!knownContent || !knownContent.includes(snippet)) {
+      errors.add(`evidence snippet does not match source content for ${filePath}`);
+    }
+  }
+
+  return [...errors];
+}
+
+async function enrichGroundedEvidence(input: {
+  evidence: unknown;
+  sourceContext:
+    | {
+        baseUrl: string;
+        token: string;
+        externalProjectId: string;
+        branch: string;
+      }
+    | null;
+}): Promise<CanonicalFinding['evidence']> {
+  if (!input.sourceContext) {
+    return readEvidenceRefs(input.evidence);
+  }
+
+  return enrichEvidenceWithSourceSnippets({
+    evidence: input.evidence,
+    baseUrl: input.sourceContext.baseUrl,
+    token: input.sourceContext.token,
+    externalProjectId: input.sourceContext.externalProjectId,
+    branch: input.sourceContext.branch
+  });
+}
+
 function mergeFindingRecords(existing: CanonicalFinding, incoming: CanonicalFinding): CanonicalFinding {
   return {
     ...existing,
@@ -181,6 +798,67 @@ function mergeFindingRecords(existing: CanonicalFinding, incoming: CanonicalFind
     dedupe_keys: uniqueStrings([...existing.dedupe_keys, ...incoming.dedupe_keys]),
     tags: uniqueStrings([...existing.tags, ...incoming.tags])
   };
+}
+
+function synthesizeFallbackIssueCandidates(findings: CanonicalFinding[]): IssueCandidate[] {
+  if (findings.length === 0) return [];
+
+  const grouped = new Map<string, CanonicalFinding[]>();
+  for (const finding of findings) {
+    const key = finding.category?.trim() || 'repository_surface';
+    grouped.set(key, [...(grouped.get(key) ?? []), finding]);
+  }
+
+  return [...grouped.entries()].map(([category, items]) => {
+    const primaryAsset = items[0]?.affected_assets[0] ?? category;
+    const sourceAgents = [
+      ...new Set(
+        items
+          .map((item) => item.agent)
+          .filter((agent): agent is string => typeof agent === 'string' && agent.trim().length > 0)
+      )
+    ];
+    const sourceFindings = items
+      .map((item) => item.finding_id)
+      .filter((findingId): findingId is string => typeof findingId === 'string' && findingId.trim().length > 0);
+    const evidence = items.flatMap((item) => item.evidence ?? []);
+    const triggerConditions = items
+      .flatMap((item) => item.predicted_failure?.trigger_conditions ?? [])
+      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+      .slice(0, 4);
+    const categoryLabel = category.replaceAll('_', ' ');
+
+    return {
+      title: `Harden ${categoryLabel} around \`${primaryAsset}\` before the next production rollout`,
+      category,
+      severity: items.some((item) => item.severity === 'critical' || item.severity === 'high') ? 'high' : 'medium',
+      confidence: 0.9,
+      predicted_failure_summary: `Changes to \`${primaryAsset}\` can break ${categoryLabel} during routine delivery in this repository path.`,
+      why_it_matters: `Multiple specialist signals converge on \`${primaryAsset}\` as the remediation surface for ${categoryLabel}.`,
+      trigger_conditions:
+        triggerConditions.length >= 2
+          ? triggerConditions
+          : [
+              `Changes to ${primaryAsset} can still reach review without a gate.`,
+              `The ${categoryLabel} path still lacks a safe rollback check.`
+            ],
+      evidence: evidence.slice(0, 4),
+      recommended_action_summary: `Add durable controls around \`${primaryAsset}\` and related ${categoryLabel} paths before the next production change.`,
+      implementation_steps: [
+        `Add a CI validation gate covering \`${primaryAsset}\`.`,
+        `Document ownership and regression checks for ${categoryLabel} boundaries.`,
+        `Verify blast radius on branch promotion before publish.`
+      ],
+      done_criteria: [
+        `${categoryLabel} changes fail safely in CI when the contract breaks.`,
+        `Owners can verify blast radius for \`${primaryAsset}\` before publish.`,
+        `Regression coverage exists for the listed trigger conditions.`
+      ],
+      affected_assets: [...new Set(items.flatMap((item) => item.affected_assets))],
+      source_agents: sourceAgents.length > 0 ? sourceAgents : ['finding_synthesizer_agent'],
+      source_findings: sourceFindings
+    };
+  });
 }
 
 function dedupeFindings(findings: CanonicalFinding[]) {
@@ -263,6 +941,10 @@ export interface SubmitAuditInput {
   branch: string;
   /** Optional commit SHA for traceability. */
   commitSha?: string;
+  /** Optional code snippet for sandbox scans. */
+  scanCodeSnippet?: string;
+  /** Optional merge request context for PR-diff review. */
+  mergeRequest?: AuditJob['mergeRequest'];
   /** Actor that triggered the run, if known. */
   triggeredById?: string;
   /** Source of the trigger for telemetry and policy decisions. */
@@ -571,7 +1253,9 @@ export async function submitAudit(input: SubmitAuditInput): Promise<SubmittedAud
       organizationId: input.organizationId,
       projectId: input.projectId,
       branch: input.branch,
-      commitSha: input.commitSha
+      commitSha: input.commitSha,
+      codeSnippet: input.scanCodeSnippet,
+      mergeRequest: input.mergeRequest
     });
 
     return {
@@ -583,7 +1267,7 @@ export async function submitAudit(input: SubmitAuditInput): Promise<SubmittedAud
     };
   }
 
-  const auditRun = await createQueuedAudit({
+  const auditRun = await createAuditRun({
     organizationId: input.organizationId,
     projectId: input.projectId,
     branch: input.branch,
@@ -597,7 +1281,9 @@ export async function submitAudit(input: SubmitAuditInput): Promise<SubmittedAud
     organizationId: input.organizationId,
     projectId: input.projectId,
     branch: input.branch,
-    commitSha: input.commitSha
+    commitSha: input.commitSha,
+    codeSnippet: input.scanCodeSnippet,
+    mergeRequest: input.mergeRequest
   });
 
   await recordAuditEvent(auditRun.id, AuditEvent.ENQUEUED, {
@@ -709,6 +1395,20 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
   tagActiveSpanWithAuditRun(input.job.id);
   const prepared = await prepareAuditExecution(input.job, { rootDir: input.rootDir });
   const { ingestion, rootDir } = prepared;
+  const projectRecord = await prisma.project.findUnique({
+    where: { id: input.job.projectId },
+    select: { provider: true, externalProjectId: true }
+  });
+  const gitlabEvidenceContext =
+    projectRecord?.provider === 'gitlab' && projectRecord.externalProjectId
+      ? await resolveGitLabCredentialsForProject(input.job.projectId).catch((error) => {
+          captureServerException(error, {
+            auditRunId: input.job.id,
+            stage: 'evidence-grounding-gitlab-context'
+          });
+          return null;
+        })
+      : null;
   const dedupePolicy = loadDedupePolicy(rootDir);
   const severityPolicy = loadSeverityPolicy(rootDir);
   const agents = filterAgentsForProjectSettings(
@@ -870,6 +1570,20 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       sourcePaths: ingestion.source_files.map((source) => source.path)
     });
     const graphGroundingSummary = summarizeGraphGrounding(graphGrounding);
+    const evidenceGroundingIndexes = buildEvidenceGroundingIndexes({
+      repoTree: ingestion.repo_tree,
+      sourceFiles: ingestion.source_files,
+      sourceCodeSamples: ingestion.source_code_samples
+    });
+    const evidenceSourceContext =
+      gitlabEvidenceContext && projectRecord?.externalProjectId
+        ? {
+            baseUrl: gitlabEvidenceContext.baseUrl,
+            token: gitlabEvidenceContext.token,
+            externalProjectId: projectRecord.externalProjectId,
+            branch: input.job.branch
+          }
+        : null;
 
     const sharedPayload = {
       projectId: input.job.projectId,
@@ -885,6 +1599,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       ownership_hints: ingestion.ownership_hints,
       ci_history: ingestion.ci_history,
       existing_issues: ingestion.existing_issues,
+      merge_request: ingestion.merge_request,
       graph_nodes: graphPayload.nodes,
       graph_edges: graphPayload.edges,
       graph_grounding: graphGroundingSummary,
@@ -962,6 +1677,8 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       pipeline_files: ingestion.pipeline_files,
       services: ingestion.services,
       apps: ingestion.apps,
+      source_files: ingestion.source_files,
+      source_code_samples: ingestion.source_code_samples,
       ownership_hints: ingestion.ownership_hints.slice(0, 80),
       ci_history: {
         pipelines: ingestion.ci_history.pipelines.slice(0, 10),
@@ -1131,9 +1848,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       commitSha: sharedPayload.commitSha,
       attempt: sharedPayload.attempt,
       high_risk_secrets: ingestion.repo_tree.filter((filePath) =>
-        /(auth|oauth|secret|token|password|key|stripe|supabase|gitlab|phoenix|posthog|sentry|cloudflare|nango|slack)/i.test(
-          filePath
-        )
+        /(auth|oauth|secret|token|password|key|stripe|supabase|gitlab|phoenix|posthog|sentry|nango|slack)/i.test(filePath)
       ).slice(0, 60),
       rotation_docs: ingestion.repo_tree.filter((filePath) =>
         /(rotation|revocation|security\.md|secrets?\.md|trust-boundary|production-boundaries|data-retention)/i.test(
@@ -1273,11 +1988,13 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
                                     ? configDriftPayload
                                     : specialist.name === 'secret_rotation_risk_agent'
                                       ? secretRotationPayload
-                                      : specialist.name === 'orchestrator_analysis_agent'
-                                        ? orchestratorAnalysisPayload
-                                        : agentsThatNeedTheFullPayload.has(specialist.name)
-                                          ? sharedPayload
-                                          : analysisPayload
+                      : specialist.name === 'orchestrator_analysis_agent'
+                        ? orchestratorAnalysisPayload
+                        : specialist.name === 'pr_diff_agent'
+                          ? sharedPayload
+                        : agentsThatNeedTheFullPayload.has(specialist.name)
+                          ? sharedPayload
+                          : analysisPayload
                   })
                 : Promise.resolve([]),
             serialize: (value) => ({
@@ -1287,7 +2004,49 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
           });
 
           const validFindings = result.filter((finding) => validateFinding(finding).length === 0);
-          const uniqueFindings = dedupeFindings(validFindings).filter((finding) => {
+          const groundingResults = await Promise.all(
+            validFindings.map(async (finding) => {
+              const groundingErrors = await validateEvidenceGrounding({
+                evidence: finding.evidence,
+                indexes: evidenceGroundingIndexes,
+                sourceContext: evidenceSourceContext
+              });
+
+              if (groundingErrors.length > 0) {
+                return { finding, groundingErrors };
+              }
+
+              const groundedEvidence = await enrichGroundedEvidence({
+                evidence: finding.evidence,
+                sourceContext: evidenceSourceContext
+              });
+
+              return {
+                finding: {
+                  ...finding,
+                  evidence: groundedEvidence
+                },
+                groundingErrors: [] as string[]
+              };
+            })
+          );
+
+          const groundedFindings = groundingResults
+            .filter((entry) => entry.groundingErrors.length === 0)
+            .map((entry) => entry.finding);
+          const rejectedGroundingFindings = groundingResults.filter(
+            (entry) => entry.groundingErrors.length > 0
+          );
+
+          if (rejectedGroundingFindings.length > 0) {
+            await recordAuditEvent(input.job.id, 'finding_grounding_rejected', {
+              agentName: specialist.name,
+              rejectedCount: rejectedGroundingFindings.length,
+              reasons: rejectedGroundingFindings.map((entry) => entry.groundingErrors.slice(0, 5))
+            });
+          }
+
+          const uniqueFindings = dedupeFindings(groundedFindings).filter((finding) => {
             if (seenFindingIds.has(finding.finding_id)) {
               return false;
             }
@@ -1433,6 +2192,25 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
         })
       });
       rawIssues = synthesizerResult.result;
+      if (rawIssues.length === 0 && findingsForClustering.length > 0) {
+        const fallbackIssues = synthesizeFallbackIssueCandidates(findingsForClustering);
+        if (fallbackIssues.length > 0) {
+          captureServerMessage(
+            JSON.stringify({
+              event: 'issue-synthesis-runtime-fallback',
+              auditRunId: input.job.id,
+              issueCount: fallbackIssues.length,
+              findingCount: findingsForClustering.length
+            }),
+            'warning'
+          );
+          rawIssues = fallbackIssues;
+          await recordAuditEvent(input.job.id, 'issue_synthesis_fallback', {
+            issueCount: fallbackIssues.length,
+            sourceFindingCount: findingsForClustering.length
+          });
+        }
+      }
       completedSpecialists.add(synthesizer.name);
 
       await persistPhaseCheckpoint(input.job.id, AuditCheckpointPhase.SYNTHESIS, {
@@ -1490,12 +2268,49 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
         })
       });
 
-      const validationDecisions = validatedIssues.map((issue) => ({
-        issue,
-        errors: validateIssueCandidate(issue),
-        warnings: [] as string[],
-        validatorName: 'issue_validator_agent'
-      }));
+      const issuesForValidation =
+        validatedIssues.length > 0
+          ? validatedIssues
+          : synthesizeFallbackIssueCandidates(findingsForClustering);
+
+      if (validatedIssues.length === 0 && issuesForValidation.length > 0) {
+        captureServerMessage(
+          JSON.stringify({
+            event: 'issue-validation-runtime-fallback',
+            auditRunId: input.job.id,
+            issueCount: issuesForValidation.length,
+            findingCount: findingsForClustering.length
+          }),
+          'warning'
+        );
+      }
+
+      const validationDecisions = await Promise.all(
+        issuesForValidation.map(async (issue) => {
+          const groundingErrors = await validateEvidenceGrounding({
+            evidence: issue.evidence,
+            indexes: evidenceGroundingIndexes,
+            sourceContext: evidenceSourceContext
+          });
+          const groundedIssue =
+            groundingErrors.length === 0
+              ? {
+                  ...issue,
+                  evidence: await enrichGroundedEvidence({
+                    evidence: issue.evidence,
+                    sourceContext: evidenceSourceContext
+                  })
+                }
+              : issue;
+
+          return {
+            issue: groundedIssue,
+            errors: [...validateIssueCandidate(groundedIssue), ...groundingErrors],
+            warnings: [] as string[],
+            validatorName: 'issue_validator_agent'
+          };
+        })
+      );
 
       reviewableIssues = validationDecisions
         .filter((decision) => decision.errors.length === 0)
@@ -1509,6 +2324,59 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
           ...decision,
           issue: downgradeSeverityForConfidence(decision.issue, severityPolicy)
         }));
+
+      if (reviewableIssues.length === 0 && findingsForClustering.length > 0) {
+        const fallbackIssues = synthesizeFallbackIssueCandidates(findingsForClustering);
+        if (fallbackIssues.length > 0) {
+          const fallbackDecisions = await Promise.all(
+            fallbackIssues.map(async (issue) => {
+              const groundingErrors = await validateEvidenceGrounding({
+                evidence: issue.evidence,
+                indexes: evidenceGroundingIndexes,
+                sourceContext: evidenceSourceContext
+              });
+              const groundedIssue =
+                groundingErrors.length === 0
+                  ? {
+                      ...issue,
+                      evidence: await enrichGroundedEvidence({
+                        evidence: issue.evidence,
+                        sourceContext: evidenceSourceContext
+                      })
+                    }
+                  : issue;
+
+              return {
+                issue: groundedIssue,
+                errors: [...validateIssueCandidate(groundedIssue), ...groundingErrors],
+                warnings: [] as string[],
+                validatorName: 'issue_validator_agent'
+              };
+            })
+          );
+
+          const groundedFallbackIssues = fallbackDecisions.filter((decision) => decision.errors.length === 0);
+          if (groundedFallbackIssues.length > 0) {
+            captureServerMessage(
+              JSON.stringify({
+                event: 'issue-validation-deterministic-fallback',
+                auditRunId: input.job.id,
+                issueCount: groundedFallbackIssues.length,
+                findingCount: findingsForClustering.length
+              }),
+              'warning'
+            );
+            reviewableIssues = groundedFallbackIssues.map((decision) => ({
+              ...decision,
+              issue: downgradeSeverityForConfidence(decision.issue, severityPolicy)
+            }));
+            rejectedIssues = validationDecisions.filter((decision) => decision.errors.length > 0).map((decision) => ({
+              ...decision,
+              issue: downgradeSeverityForConfidence(decision.issue, severityPolicy)
+            }));
+          }
+        }
+      }
 
       if (rejectedIssues.length > 0) {
         await saveRejectedIssueArtifacts({
@@ -1587,105 +2455,138 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       summary: auditSummary
     });
 
+    try {
+      await writeAuditEpisode({
+        projectId: input.job.projectId,
+        auditRunId: input.job.id,
+        findings,
+        completedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      captureServerException(error, {
+        auditRunId: input.job.id,
+        projectId: input.job.projectId,
+        surface: 'graphiti-episode-write'
+      });
+    }
+
+    try {
+      await persistSkillMarketplaceState({
+        organizationId: input.job.organizationId,
+        projectId: input.job.projectId,
+        auditRunId: input.job.id,
+        rootDir,
+        finalRun: finalRun!
+      });
+    } catch (error) {
+      captureServerException(error, {
+        auditRunId: input.job.id,
+        organizationId: input.job.organizationId,
+        projectId: input.job.projectId,
+        surface: 'skill-marketplace-persist'
+      });
+    }
+
+    try {
     const findingConfidenceAvg =
       findings.length > 0
         ? findings.reduce((total, finding) => total + finding.confidence, 0) / findings.length
         : undefined;
-    const evidenceCountMin =
-      findings.length > 0
-        ? Math.min(...findings.map((finding) => finding.evidence.length))
-        : undefined;
-    const refusalRate =
-      issueCandidateCount > 0 ? rejectedIssueCount / Math.max(issueCandidateCount, 1) : undefined;
+      const evidenceCountMin =
+        findings.length > 0
+          ? Math.min(...findings.map((finding) => finding.evidence.length))
+          : undefined;
+      const refusalRate =
+        issueCandidateCount > 0 ? rejectedIssueCount / Math.max(issueCandidateCount, 1) : undefined;
 
-    const phoenixEval = evaluateAuditMissionQuality({
-      auditRunId: input.job.id,
-      findingCount: findingIdMap.size,
-      issueCandidateCount,
-      hasHumanReviewGate: true,
-      findingConfidenceAvg,
-      evidenceCountMin,
-      refusalRate
-    });
+      const phoenixEval = evaluateAuditMissionQuality({
+        auditRunId: input.job.id,
+        findingCount: findingIdMap.size,
+        issueCandidateCount,
+        hasHumanReviewGate: true,
+        findingConfidenceAvg,
+        evidenceCountMin,
+        refusalRate
+      });
 
-    let phoenixLlmEval: Awaited<ReturnType<typeof evaluateAuditMissionWithLlmJudge>> | null =
-      null;
-    const geminiApiKey =
-      process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim() || '';
-    if (isPhoenixLlmEvalEnabled() && geminiApiKey) {
-      try {
-        if (isPhoenixPromptSyncEnabled()) {
+      let phoenixLlmEval: Awaited<ReturnType<typeof evaluateAuditMissionWithLlmJudge>> | null =
+        null;
+      const geminiApiKey =
+        process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_GENAI_API_KEY?.trim() || '';
+      if (!geminiApiKey) {
+        throw new Error('Gemini API key is required for Phoenix audit evaluation.');
+      }
+
+      if (isPhoenixPromptSyncEnabled()) {
+        try {
           await ensurePremortemAuditJudgePrompt(
             process.env.LLM_MODEL?.trim() || DEFAULT_GEMINI_MODEL
-          ).catch((error: unknown) => {
-            captureServerException(error, {
-              auditRunId: input.job.id,
-              phase: 'phoenix_prompt_sync'
-            });
+          );
+        } catch (error) {
+          captureServerException(error, {
+            auditRunId: input.job.id,
+            stage: 'phoenix-prompt-sync'
           });
         }
-        phoenixLlmEval = await evaluateAuditMissionWithLlmJudge({
-          auditRunId: input.job.id,
-          findingCount: findingIdMap.size,
-          issueCandidateCount,
-          sampleFindingTitles: reviewableIssues
-            .slice(0, 8)
-            .map((decision) => decision.issue.title),
-          apiKey: geminiApiKey,
-          model: process.env.LLM_MODEL?.trim() || DEFAULT_GEMINI_MODEL
-        });
-      } catch (error: unknown) {
-        captureServerException(error, { auditRunId: input.job.id, phase: 'phoenix_llm_eval' });
       }
-    }
 
-    trackServerEvent(input.job.organizationId, 'audit_completed', {
-      auditRunId: input.job.id,
-      findingsCount: findingIdMap.size,
-      phoenixEval,
-      phoenixLlmEval
-    });
+      phoenixLlmEval = await evaluateAuditMissionWithLlmJudge({
+        auditRunId: input.job.id,
+        findingCount: findingIdMap.size,
+        issueCandidateCount,
+        sampleFindingTitles: reviewableIssues.slice(0, 8).map((decision) => decision.issue.title),
+        apiKey: geminiApiKey,
+        model: process.env.LLM_MODEL?.trim() || DEFAULT_GEMINI_MODEL
+      });
 
-    if (isLangfuseConfigured()) {
-      void createLangfuseScore({
+      trackServerEvent(input.job.organizationId, 'audit_completed', {
+        auditRunId: input.job.id,
+        findingsCount: findingIdMap.size,
+        phoenixEval,
+        phoenixLlmEval
+      });
+
+      await createLangfuseScore({
         traceId: input.job.id,
         name: 'audit_mission_quality',
         value: phoenixEval.score,
         comment: phoenixEval.passed ? 'passed' : 'needs_review'
-      }).catch(() => undefined);
-    }
-
-    if (isPhoenixDatasetSyncEnabled()) {
-      await ensurePremortemAuditDataset().catch((error: unknown) => {
-        captureServerException(error, {
-          auditRunId: input.job.id,
-          phase: 'phoenix_dataset_bootstrap'
-        });
       });
-      void appendAuditMissionToPhoenixDataset({
-        input: {
-          auditRunId: input.job.id,
-          organizationId: input.job.organizationId,
-          projectId: input.job.projectId,
-          repositoryId: null
-        },
-        output: {
-          findingCount: findingIdMap.size,
-          issueCandidateCount,
-          rejectedIssueCount,
-          hasHumanReviewGate: true,
-          passed: phoenixEval.passed,
-          score: phoenixEval.score
-        },
-        metadata: {
-          evaluator: phoenixEval.evaluator,
-          label: phoenixEval.label
+
+      if (isPhoenixDatasetSyncEnabled()) {
+        try {
+          await ensurePremortemAuditDataset();
+          await appendAuditMissionToPhoenixDataset({
+            input: {
+              auditRunId: input.job.id,
+              organizationId: input.job.organizationId,
+              projectId: input.job.projectId,
+              repositoryId: null
+            },
+            output: {
+              findingCount: findingIdMap.size,
+              issueCandidateCount,
+              rejectedIssueCount,
+              hasHumanReviewGate: true,
+              passed: phoenixEval.passed,
+              score: phoenixEval.score
+            },
+            metadata: {
+              evaluator: phoenixEval.evaluator,
+              label: phoenixEval.label
+            }
+          });
+        } catch (error) {
+          captureServerException(error, {
+            auditRunId: input.job.id,
+            stage: 'phoenix-dataset-sync'
+          });
         }
-      }).catch((error: unknown) => {
-        captureServerException(error, {
-          auditRunId: input.job.id,
-          phase: 'phoenix_dataset_sync'
-        });
+      }
+    } catch (error) {
+      captureServerException(error, {
+        auditRunId: input.job.id,
+        stage: 'audit-post-completion'
       });
     }
 
@@ -1752,6 +2653,7 @@ export async function getAuditRunSnapshot(auditRunId: string): Promise<AuditRunS
     (total, issue) => total + countIssueCandidateRelation(issue as IssueCandidateCountSource, 'validationResults'),
     0
   );
+  const eventsSource = [...auditRun.events].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
   let graphPayload: unknown = null;
   if (auditRun.graphSnapshot) {
@@ -1890,9 +2792,9 @@ export async function getAuditRunSnapshot(auditRunId: string): Promise<AuditRunS
       rejectedIssueCandidateArtifacts: auditRun.rejectedIssueCandidateArtifacts.length,
       issueCandidateVersions,
       validationResults,
-      events: auditRun.events.length
+      events: eventsSource.length
     },
-    events: auditRun.events.map((event) => ({
+    events: eventsSource.map((event) => ({
       eventType: event.eventType,
       actor: event.actor,
       createdAt: event.createdAt.toISOString()

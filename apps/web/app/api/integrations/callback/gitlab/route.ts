@@ -76,9 +76,15 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const origin = getPublicAppOrigin(getRequestOrigin(request));
+  const requestOrigin = request.headers.get('origin');
   const cookies = integrationOAuthCookieNames();
   const savedState = request.cookies.get(cookies.state)?.value;
   const next = request.cookies.get(cookies.next)?.value ?? '/app?tab=settings';
+
+  if (requestOrigin && requestOrigin !== origin) {
+    return clearCookies(redirectWithNotice(request, next, 'invalid_state'));
+  }
+
   const formData = await request.formData();
   const state = formData.get('state');
   const code = formData.get('code');

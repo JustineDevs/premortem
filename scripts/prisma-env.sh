@@ -6,8 +6,8 @@ cd "$ROOT_DIR"
 
 # Parse .env.local safely (quoted passwords, pooler normalization) before Prisma CLI.
 eval "$(
-  node <<'EOF'
-import { loadPremortemLocalEnv } from './scripts/load-local-env.mjs';
+  node --input-type=module --import tsx <<'EOF'
+const { loadPremortemLocalEnv } = (await import('./scripts/load-local-env.ts')).default;
 
 loadPremortemLocalEnv();
 

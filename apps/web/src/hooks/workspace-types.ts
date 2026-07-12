@@ -1,3 +1,5 @@
+import type { WorkspaceSkillState } from '@premortem/skills';
+
 export interface WorkspaceIntegration {
   id: string;
   name: string;
@@ -40,6 +42,7 @@ export interface WorkspaceBundle {
     slackNangoConnectionId: string;
     slackNangoProviderKey: string;
   };
+  skills: WorkspaceSkillState;
   llm: {
     selectedGeminiModel: string;
     maxTokens: number;
@@ -71,20 +74,24 @@ export interface WorkspaceBundle {
     seats: number;
     auditQuotaMonthly: number;
     auditsUsedMonth: number;
+    publishQuotaMonthly: number | null;
+    publishesUsedMonth: number;
+    stripeCustomerId: string | null;
+    stripeSubscriptionId: string | null;
+    currentPeriodStart: string | null;
+    currentPeriodEnd: string | null;
     stripeConfigured: boolean;
     stripeTestMode: boolean;
     stripeBillingConfigured: boolean;
     canPublish: boolean;
     maxRepos: number;
-    invoices: Array<{
-      id: string;
-      date: string;
-      amount: number;
-      status: string;
-      method: string;
-      hostedInvoiceUrl: string | null;
-      invoicePdfUrl: string | null;
-    }>;
+    historyRetentionDays: number;
+    supportLevel: 'community' | 'email' | 'priority' | 'dedicated';
+    sarifExportEnabled: boolean;
+    webhooksEnabled: boolean;
+    graphitiMemoryEnabled: boolean;
+    skillMarketplaceEnabled: boolean;
+    invoices: StripeInvoiceSummary[];
   };
   apiKeys: Array<{
     id: string;
@@ -105,4 +112,17 @@ export interface WorkspaceBundle {
     runningAudits: number;
     continuousAuditEnabled: boolean;
   };
+}
+
+export interface StripeInvoiceSummary {
+  id: string;
+  amount_due?: number;
+  status: string;
+  created?: number;
+  hosted_invoice_url?: string | null;
+  date?: string;
+  amount?: number;
+  method?: string;
+  hostedInvoiceUrl?: string | null;
+  invoicePdfUrl?: string | null;
 }

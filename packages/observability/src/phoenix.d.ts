@@ -17,10 +17,11 @@ export interface PhoenixEndpointProbe {
 }
 export declare function probePhoenixEndpoint(): Promise<PhoenixEndpointProbe>;
 export declare function isPhoenixEnabled(): boolean;
-export declare function initPhoenixTracing(serviceName: string): {
+export declare function initPhoenixTracing(serviceName: string): Promise<{
     shutdown: () => Promise<void>;
-} | undefined;
+} | undefined>;
 export declare function shutdownPhoenixTracing(): Promise<void>;
+export declare function probePhoenixTracing(serviceName?: string): Promise<void>;
 export declare const tracePremortemAgentMission: typeof traceAgent;
 export declare const tracePremortemAuditJob: typeof traceChain;
 export declare const tracePremortemToolCall: typeof traceTool;

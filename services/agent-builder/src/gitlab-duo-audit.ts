@@ -164,6 +164,17 @@ export async function runGitLabDuoAudit(input: GitLabDuoAuditInput) {
     projectId: project.id,
     branch: resolvedBranch,
     commitSha: resolvedCommitSha || undefined,
+    mergeRequest: resolvedMergeRequest
+      ? {
+          iid: resolvedMergeRequest.iid,
+          title: resolvedMergeRequest.title ?? undefined,
+          sourceBranch: resolvedMergeRequest.sourceBranch ?? undefined,
+          targetBranch: resolvedMergeRequest.targetBranch ?? undefined,
+          sha: resolvedMergeRequest.sha ?? undefined,
+          webUrl: resolvedMergeRequest.webUrl ?? undefined,
+          action: 'open'
+        }
+      : undefined,
     triggeredById: undefined,
     triggerSource: 'api'
   });
