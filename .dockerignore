@@ -11,6 +11,10 @@ node_modules
 **/dist
 **/.next
 **/.turbo
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
 **/*.log
 docs
 apps/web

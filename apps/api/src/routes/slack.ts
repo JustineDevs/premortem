@@ -4,7 +4,7 @@ import { captureServerException } from '@premortem/observability/server';
 import { createLlmAdapter } from '@premortem/llm';
 import { getAuditRunSnapshot } from '@premortem/orchestrator/read-model';
 
-import type { AppEnv, ExecutionContextLike } from '../lib/types';
+import type { AppEnv, ExecutionContextLike } from '../lib/types.js';
 
 type SlackCommandAction = 'audit' | 'status';
 

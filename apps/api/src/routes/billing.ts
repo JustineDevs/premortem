@@ -5,8 +5,8 @@ import {
   buildStripePaymentLinkUrl,
   getStripeClient,
   resolveStripePriceId
-} from '../lib/stripe';
-import { resolveApiActorContext } from '../lib/request-context';
+} from '../lib/stripe.js';
+import { resolveApiActorContext } from '../lib/request-context.js';
 
 const BILLING_ROLES = ['owner', 'admin', 'billing', 'member'] as const;
 

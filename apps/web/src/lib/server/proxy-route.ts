@@ -1,6 +1,7 @@
 import { ConsoleReviewAction } from '@premortem/domain';
 
 import { proxyPremortemApi, proxyPremortemApiRaw } from '@/lib/server/proxy-api';
+import { getApiBaseUrl } from '@/lib/runtime-config';
 import { verifyBotId } from '@/lib/server/botid';
 
 const RAW_PROXY_PATHS = new Set([
@@ -49,14 +50,47 @@ async function proxy(request: Request) {
     return new Response(null, { status: 204, headers: responseHeaders });
   }
   if (url.pathname === '/api/health') {
-    return proxyPremortemApiRaw('/health', {
-      method: request.method.toUpperCase(),
-      headers: forwardableHeaders(request.headers),
-      body:
-        request.method.toUpperCase() === 'GET' || request.method.toUpperCase() === 'HEAD'
-          ? undefined
-          : await request.clone().arrayBuffer()
-    });
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/health`, {
+        method: request.method.toUpperCase(),
+        headers: forwardableHeaders(request.headers),
+        body:
+          request.method.toUpperCase() === 'GET' || request.method.toUpperCase() === 'HEAD'
+            ? undefined
+            : await request.clone().arrayBuffer()
+      });
+
+      if (response.ok) {
+        return response;
+      }
+
+      const payload = await response.json().catch(() => ({}));
+      return Response.json(
+        {
+          ok: true,
+          service: 'premortem-web',
+          mode: 'nextjs',
+          backendHealthy: false,
+          backendStatus: response.status,
+          backendError: payload?.error ?? 'backend_unavailable',
+          apiBaseUrl: getApiBaseUrl()
+        },
+        { status: 200 }
+      );
+    } catch (error) {
+      return Response.json(
+        {
+          ok: true,
+          service: 'premortem-web',
+          mode: 'nextjs',
+          backendHealthy: false,
+          backendStatus: 503,
+          backendError: error instanceof Error ? error.message : 'backend_unavailable',
+          apiBaseUrl: getApiBaseUrl()
+        },
+        { status: 200 }
+      );
+    }
   }
   let nestedIssueRoute: string | null = null;
   let nestedIssueActionBody: Record<string, unknown> | null = null;

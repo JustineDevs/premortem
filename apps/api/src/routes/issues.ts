@@ -19,14 +19,14 @@ import {
 } from '@premortem/domain';
 import { publishIssueCandidate, reconcilePublishedIssues } from '@premortem/gitlab-sync';
 
-import { apiErrorResponse } from '../lib/error-response';
-import { ORG_ADMIN_ROLES, ORG_WRITE_ROLES, requireApiRole } from '../lib/authorization';
+import { apiErrorResponse } from '../lib/error-response.js';
+import { ORG_ADMIN_ROLES, ORG_WRITE_ROLES, requireApiRole } from '../lib/authorization.js';
 import {
   readJsonRecord,
   readOptionalString,
   readRequiredString
-} from '../lib/request-body';
-import { resolveApiActorContext } from '../lib/request-context';
+} from '../lib/request-body.js';
+import { resolveApiActorContext } from '../lib/request-context.js';
 
 function isMissingIssueCandidateError(error: unknown) {
   if (!(error instanceof Error)) return false;

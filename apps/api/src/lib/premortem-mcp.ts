@@ -7,9 +7,9 @@ import { z } from 'zod';
 import { getRecentAuditRuns, getAuditRunSnapshot } from '@premortem/orchestrator/read-model';
 import { getWorkspaceBundle, listOrganizationProjects, getOrganizationEntitlements } from '@premortem/db';
 import { submitAudit } from '@premortem/orchestrator';
-import { BILLING_ROLES, ORG_ADMIN_ROLES, ORG_WRITE_ROLES } from './authorization';
-import { resolveApiActorContext } from './request-context';
-import type { AppEnv } from './types';
+import { BILLING_ROLES, ORG_ADMIN_ROLES, ORG_WRITE_ROLES } from './authorization.js';
+import { resolveApiActorContext } from './request-context.js';
+import type { AppEnv } from './types.js';
 
 type ActorRole = 'owner' | 'admin' | 'member' | 'viewer' | 'billing';
 

@@ -5,6 +5,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 type DeploymentSummary = {
   provider: 'Alibaba Cloud';
   deploymentTarget: 'ecs';
+  buildStrategy: 'runner-built-image';
+  rolloutStrategy: 'single-container-with-rollback';
   instanceId: string | null;
   regionId: string | null;
   host: string | null;
@@ -21,6 +23,8 @@ function resolveSummary(): DeploymentSummary {
   return {
     provider: 'Alibaba Cloud',
     deploymentTarget: 'ecs',
+    buildStrategy: 'runner-built-image',
+    rolloutStrategy: 'single-container-with-rollback',
     instanceId: readEnv('ALIBABA_CLOUD_ECS_INSTANCE_ID'),
     regionId: readEnv('ALIBABA_CLOUD_REGION_ID'),
     host: readEnv('ALIBABA_CLOUD_ECS_HOST'),
@@ -67,6 +71,9 @@ async function main() {
     JSON.stringify(
       {
         ...summary,
+        runtimeOnly: true,
+        buildOnHost: false,
+        rollbackSupported: true,
         ecsMetadata: metadata,
         healthUrl:
           summary.publicUrl ?? (summary.host ? `http://${summary.host}:${summary.apiPort}` : null)

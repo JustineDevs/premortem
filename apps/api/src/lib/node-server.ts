@@ -14,8 +14,8 @@ import { isLocalAuthBypassEnabled, LOCAL_DEV_FIXTURE } from '@premortem/domain';
 import { initServerObservability } from '@premortem/observability/server';
 import type { AuditJob } from '@premortem/workflow';
 
-import { appRouter } from '../lib/router';
-import type { AppEnv } from './types';
+import { appRouter } from '../lib/router.js';
+import type { AppEnv } from './types.js';
 
 function resolveRepoRoot() {
   let current = path.dirname(fileURLToPath(import.meta.url));

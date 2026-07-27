@@ -7,20 +7,29 @@ ENV PATH="${PNPM_HOME}:${PATH}"
 WORKDIR /repo
 
 RUN corepack enable
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
-COPY apps ./apps
-COPY packages ./packages
-COPY services ./services
-COPY scripts ./scripts
+FROM base AS pruner
+
+COPY . .
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm dlx turbo@2.0.12 prune --scope=@premortem/agent-builder --docker
 
 FROM base AS build
 
-RUN pnpm install --frozen-lockfile
+COPY tsconfig.base.json ./tsconfig.base.json
+COPY scripts/fix-esm-imports.ts ./scripts/fix-esm-imports.ts
+COPY scripts/setup-husky.ts ./scripts/setup-husky.ts
+COPY --from=pruner /repo/out/json/ ./
+COPY --from=pruner /repo/out/full/ ./
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm install --frozen-lockfile --prefer-offline --ignore-scripts
 RUN pnpm --filter @premortem/agent-builder... build
 RUN pnpm --filter @premortem/agent-builder deploy --prod /tmp/premortem-agent-builder
 
-FROM node:22-bookworm-slim AS runtime
+FROM base AS runtime
 
 ENV NODE_ENV=production
 WORKDIR /app

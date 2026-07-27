@@ -6,9 +6,9 @@ import { createLlmAdapter, discoverLocalLlmProviders, type LlmCustomProviderConf
 import { getOrganizationLlmSettings, listOrganizationProjects, recordActivityEvent } from '@premortem/db';
 import { validateInput, recordAuditStep } from '@premortem/security';
 
-import { readJsonRecord, readOptionalString } from '../lib/request-body';
-import { resolveApiActorContext } from '../lib/request-context';
-import type { AppEnv } from '../lib/types';
+import { readJsonRecord, readOptionalString } from '../lib/request-body.js';
+import { resolveApiActorContext } from '../lib/request-context.js';
+import type { AppEnv } from '../lib/types.js';
 
 const SandboxEvidenceSchema = z
   .object({

@@ -6,13 +6,13 @@ import {
   listDiscoveredRepositories
 } from '@premortem/db';
 
-import { apiErrorResponse } from '../lib/error-response';
+import { apiErrorResponse } from '../lib/error-response.js';
 import {
   readJsonRecord,
   readOptionalStringArray,
   readRequiredString
-} from '../lib/request-body';
-import { resolveApiActorContext } from '../lib/request-context';
+} from '../lib/request-body.js';
+import { resolveApiActorContext } from '../lib/request-context.js';
 
 export async function handleIntegrationRepositoriesList(
   request: Request,

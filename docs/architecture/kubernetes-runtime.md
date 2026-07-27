@@ -2,6 +2,8 @@
 
 Premortem keeps the production frontend on Vercel and the production backend on Alibaba Cloud ECS, but the backend is now packaged as a real Kubernetes workload set so the same runtime can move between ECS-hosted containers and cluster-backed deployment without changing the application contract.
 
+The ECS release path is intentionally strict: the image is built on the CI runner, copied to ECS, loaded there, and started only after health passes. If the new container fails health, the previous container is restored.
+
 ## What is packaged
 
 - `apps/api` becomes the public backend API container

@@ -3,7 +3,7 @@ import { PLAN_LIMITS } from '@premortem/db/entitlements';
 import { prisma } from '@premortem/db/client';
 import type Stripe from 'stripe';
 
-import { getStripeClient } from '../lib/stripe';
+import { getStripeClient } from '../lib/stripe.js';
 
 function planFromMetadata(
   metadata: Stripe.Metadata | null | undefined

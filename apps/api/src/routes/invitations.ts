@@ -1,7 +1,7 @@
 import { acceptOrganizationInvitation, getOrganizationInvitationByToken } from '@premortem/db';
 
-import { apiErrorResponse } from '../lib/error-response';
-import { resolveApiAuthIdentity } from '../lib/request-context';
+import { apiErrorResponse } from '../lib/error-response.js';
+import { resolveApiAuthIdentity } from '../lib/request-context.js';
 
 export async function handleInvitationRead(_request: Request, token: string) {
   const invitation = await getOrganizationInvitationByToken(token);

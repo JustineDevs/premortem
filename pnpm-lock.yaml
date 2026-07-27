@@ -49,6 +49,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
+      '@premortem/agent-kit':
+        specifier: workspace:*
+        version: link:../../packages/agent-kit
       '@premortem/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -70,6 +73,9 @@ importers:
       '@premortem/orchestrator':
         specifier: workspace:*
         version: link:../../services/orchestrator
+      '@premortem/security':
+        specifier: workspace:*
+        version: link:../../packages/security
       '@premortem/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
@@ -505,6 +511,9 @@ importers:
       '@premortem/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@premortem/orchestrator':
+        specifier: workspace:*
+        version: link:../orchestrator
     devDependencies:
       typescript:
         specifier: ^5.6.3

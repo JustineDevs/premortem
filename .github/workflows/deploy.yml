@@ -56,39 +56,8 @@ jobs:
             echo "ECS_DEPLOY_REF=$ECS_DEPLOY_REF"
           } >>"$GITHUB_ENV"
 
-      - name: Install SSH key
-        run: |
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$ECS_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -p "$ECS_PORT" -H "$ECS_HOST" >> ~/.ssh/known_hosts
-
       - name: Deploy API on Alibaba Cloud ECS
-        run: |
-          ssh -p "$ECS_PORT" "$ECS_USER@$ECS_HOST" "bash -lc '
-            set -euo pipefail
-            cd \"${ECS_APP_DIR}\"
-            git fetch --all --prune
-            git checkout --detach \"${ECS_DEPLOY_REF}\"
-            docker build -f apps/api/Dockerfile -t premortem-api:prod .
-            docker rm -f premortem-api >/dev/null 2>&1 || true
-            docker run -d \
-              --name premortem-api \
-              --restart unless-stopped \
-              --env-file .env.production \
-              -p 127.0.0.1:18787:18787 \
-              premortem-api:prod
-            for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
-              if curl -fsS http://127.0.0.1:18787/health >/tmp/premortem-api-health.json; then
-                cat /tmp/premortem-api-health.json
-                exit 0
-              fi
-              sleep 5
-            done
-            echo \"API health check failed after deployment\" >&2
-            docker logs --tail 80 premortem-api >&2 || true
-            exit 1
-          '"
+        run: bash scripts/deploy/alibaba-cloud-ecs-runtime.sh
 
       - name: Verify public API endpoint
         run: |

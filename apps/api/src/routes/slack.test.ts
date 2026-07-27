@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
 
-import { handleSlackEventsPost } from './slack';
+import { handleSlackEventsPost } from './slack.js';
 
 function signSlackPayload(secret: string, timestamp: string, rawBody: string) {
   const digest = crypto.createHmac('sha256', secret).update(`v0:${timestamp}:${rawBody}`).digest('hex');

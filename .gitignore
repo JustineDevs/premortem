@@ -26,6 +26,8 @@ apps/web/.wrangler/tmp/
 .turbo
 .cache/
 .next
+.venv/
+**/.venv/
 coverage
 dist
 *.log
@@ -45,6 +47,7 @@ dist
 *.db-journal
 packages/*/src/**/*.js
 packages/domain/src/*.js
+**/.venv/
 **/__pycache__/
 .pytest_cache/
 .mypy_cache/

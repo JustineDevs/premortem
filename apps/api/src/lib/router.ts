@@ -12,11 +12,11 @@ import {
   handleAuditResume,
   handleAuditSemanticGraphRead,
   handleAuditSarifRead
-} from '../routes/audits';
-import { handleSandboxAuditCreate } from '../routes/audits-sandbox';
-import { handleBillingSubscriptionPost } from '../routes/billing-subscription';
-import { handleBillingCheckoutPost, handleBillingPortalPost } from '../routes/billing';
-import { handleStripeWebhookPost } from '../routes/stripe-webhook';
+} from '../routes/audits.js';
+import { handleSandboxAuditCreate } from '../routes/audits-sandbox.js';
+import { handleBillingSubscriptionPost } from '../routes/billing-subscription.js';
+import { handleBillingCheckoutPost, handleBillingPortalPost } from '../routes/billing.js';
+import { handleStripeWebhookPost } from '../routes/stripe-webhook.js';
 import {
   handleIssueApprove,
   handleIssueAction,
@@ -27,7 +27,7 @@ import {
   handleIssueReconcile,
   handleIssueReject,
   handleIssueSplit
-} from '../routes/issues';
+} from '../routes/issues.js';
 import {
   handleWorkspaceBillingPatch,
   handleWorkspaceActivityExport,
@@ -49,37 +49,37 @@ import {
   handleWorkspaceRuntimePatch,
   handleWorkspaceRuntimeStopAll,
   handleWorkspaceWorkItemAttributesPatch
-} from '../routes/workspace';
-import { handleWorkspaceSkillsInstall as handleWorkspaceSkillsInstallRoute } from '../routes/skills';
-import { handleSlackEventsPost, handleSlackPremortemCommandPost } from '../routes/slack';
+} from '../routes/workspace.js';
+import { handleWorkspaceSkillsInstall as handleWorkspaceSkillsInstallRoute } from '../routes/skills.js';
+import { handleSlackEventsPost, handleSlackPremortemCommandPost } from '../routes/slack.js';
 import {
   handleProjectCreate,
   handleProjectAccuracy,
   handleProjectList,
   handleProjectSettingsPatch,
   handlePublicProjectCreate
-} from '../routes/projects';
+} from '../routes/projects.js';
 import {
   handleIntegrationRepositoriesDisable,
   handleIntegrationRepositoriesEnable,
   handleIntegrationRepositoriesList
-} from '../routes/repositories';
-import { handleReconciliationList } from '../routes/reconciliation';
+} from '../routes/repositories.js';
+import { handleReconciliationList } from '../routes/reconciliation.js';
 import {
   handleInvitationAccept,
   handleInvitationRead
-} from '../routes/invitations';
-import { handleGitLabIssueWebhookPost } from '../routes/webhooks';
-import { handleMcpRequest } from '../routes/mcp';
-import type { AppEnv, ExecutionContextLike } from './types';
-import { ApiForbiddenError } from './authorization';
-import { ApiUnauthorizedError } from './request-context';
+} from '../routes/invitations.js';
+import { handleGitLabIssueWebhookPost } from '../routes/webhooks.js';
+import { handleMcpRequest } from '../routes/mcp.js';
+import type { AppEnv, ExecutionContextLike } from './types.js';
+import { ApiForbiddenError } from './authorization.js';
+import { ApiUnauthorizedError } from './request-context.js';
 import {
   attachRequestId,
   checkRateLimit,
   rateLimitKey,
   resolveRequestId
-} from './request-guard';
+} from './request-guard.js';
 
 const app = new Hono<{ Bindings: AppEnv; Variables: { requestId: string } }>();
 

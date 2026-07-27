@@ -12,11 +12,11 @@ import { fetchPhoenixSemanticGraphForAudit } from '@premortem/observability/phoe
 import { captureServerException } from '@premortem/observability';
 import { getAuditRunSnapshot, getRecentAuditRuns, resolveGraphSnapshotPayload } from '@premortem/orchestrator/read-model';
 
-import { apiErrorResponse } from '../lib/error-response';
-import { ORG_WRITE_ROLES, requireApiRole } from '../lib/authorization';
-import { readJsonRecord, readOptionalString, readRequiredString } from '../lib/request-body';
-import { resolveApiActorContext } from '../lib/request-context';
-import type { AppEnv } from '../lib/types';
+import { apiErrorResponse } from '../lib/error-response.js';
+import { ORG_WRITE_ROLES, requireApiRole } from '../lib/authorization.js';
+import { readJsonRecord, readOptionalString, readRequiredString } from '../lib/request-body.js';
+import { resolveApiActorContext } from '../lib/request-context.js';
+import type { AppEnv } from '../lib/types.js';
 
 export async function handleAuditCreate(request: Request, env: AppEnv = {}) {
   if (!env.AUDIT_QUEUE) {

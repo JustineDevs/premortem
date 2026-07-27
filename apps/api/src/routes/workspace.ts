@@ -29,15 +29,15 @@ import { createNangoConnectSession, listNangoConnections } from '@premortem/inte
 import { discoverLocalLlmProviders } from '@premortem/llm';
 import { normalizeWorkItemAttributeConfig } from '@premortem/domain';
 
-import { apiErrorResponse } from '../lib/error-response';
-import { resolveApiActorContext } from '../lib/request-context';
+import { apiErrorResponse } from '../lib/error-response.js';
+import { resolveApiActorContext } from '../lib/request-context.js';
 import {
   BILLING_ROLES,
   ORG_ADMIN_ROLES,
   ORG_WRITE_ROLES,
   PROFILE_EDIT_ROLES,
   requireApiRole
-} from '../lib/authorization';
+} from '../lib/authorization.js';
 import {
   readJsonRecord,
   readOptionalBoolean,
@@ -46,7 +46,7 @@ import {
   readOptionalStringArray,
   readOptionalStringLiteral,
   readRequiredString
-} from '../lib/request-body';
+} from '../lib/request-body.js';
 
 export async function handleWorkspaceGet(request: Request) {
   const actor = await resolveApiActorContext(request);

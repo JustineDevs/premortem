@@ -3,8 +3,8 @@ import { handleGitLabIssueWebhook } from '@premortem/gitlab-sync';
 import { verifySharedSecretToken } from '@premortem/security';
 import { z } from 'zod';
 
-import { apiErrorResponse } from '../lib/error-response';
-import type { AppEnv } from '../lib/types';
+import { apiErrorResponse } from '../lib/error-response.js';
+import type { AppEnv } from '../lib/types.js';
 
 export interface GitLabPushWebhookPayload {
   object_kind?: 'push';

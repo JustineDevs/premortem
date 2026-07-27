@@ -1,6 +1,6 @@
 import type { AppRole } from '@premortem/db';
 
-import type { ApiActorContext } from './request-context';
+import type { ApiActorContext } from './request-context.js';
 
 export class ApiForbiddenError extends Error {
   constructor(message = 'Forbidden') {

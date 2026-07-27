@@ -4,9 +4,9 @@ import { prisma } from '@premortem/db/client';
 import { createOrganizationNotifications } from '@premortem/db/notifications';
 import type Stripe from 'stripe';
 
-import { getStripeClient } from '../lib/stripe';
-import { readJsonRecord, readOptionalString, readOptionalStringLiteral } from '../lib/request-body';
-import { resolveApiActorContext } from '../lib/request-context';
+import { getStripeClient } from '../lib/stripe.js';
+import { readJsonRecord, readOptionalString, readOptionalStringLiteral } from '../lib/request-body.js';
+import { resolveApiActorContext } from '../lib/request-context.js';
 
 const BILLING_ROLES = ['owner', 'admin', 'billing', 'member'] as const;
 

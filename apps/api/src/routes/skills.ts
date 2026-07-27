@@ -1,8 +1,8 @@
 import { installWorkspaceSkillDraft, recordActivityEvent } from '@premortem/db';
 
-import { ORG_ADMIN_ROLES, requireApiRole } from '../lib/authorization';
-import { resolveApiActorContext } from '../lib/request-context';
-import { readJsonRecord, readRequiredString } from '../lib/request-body';
+import { ORG_ADMIN_ROLES, requireApiRole } from '../lib/authorization.js';
+import { resolveApiActorContext } from '../lib/request-context.js';
+import { readJsonRecord, readRequiredString } from '../lib/request-body.js';
 
 export async function handleWorkspaceSkillsInstall(request: Request) {
   const body = (await readJsonRecord(request)) ?? {};

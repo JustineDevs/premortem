@@ -25,15 +25,21 @@ pnpm build
 ## 2. API backend deploy
 
 After CI succeeds, `.github/workflows/deploy.yml` deploys `apps/api` on Alibaba Cloud ECS when the backend environment and deployment target are configured.
+The runner builds the Docker image, transfers the image archive to ECS, and ECS only loads and runs the prebuilt container. The host never performs a Docker build. The reusable deploy script lives at `scripts/deploy/alibaba-cloud-ecs-runtime.sh`.
 
 Manual deploy:
 
 ```bash
-pnpm --filter @premortem/api build
-node scripts/deploy/alibaba-cloud-ecs.ts
+export ECS_PORT=22
+export ECS_USER=root
+export ECS_HOST=your-ecs-host
+export ECS_APP_DIR=/root/workspace/premortem
+export ECS_DEPLOY_REF="$(git rev-parse HEAD)"
+
+bash scripts/deploy/alibaba-cloud-ecs-runtime.sh
 ```
 
-The deployment helper prints the ECS instance metadata when it can reach the Alibaba Cloud metadata service and falls back to the configured host or public URL when metadata is unavailable.
+The deployment helper prints the ECS instance metadata when it can reach the Alibaba Cloud metadata service and falls back to the configured host or public URL when metadata is unavailable. It also keeps the previous ECS container around until the new one passes health, then removes the backup.
 
 Set backend secrets in the ECS runtime environment or deployment system, not in git:
 
@@ -68,10 +74,21 @@ Frontend environment variables (production):
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_URL`, `SUPABASE_ANON_KEY` as server-side fallbacks accepted by the web runtime
 - `NEXT_PUBLIC_APP_URL` = `https://premortem.jstn.site`
+- `PREMORTEM_SITE_URL` = `https://premortem.jstn.site`
 - `PREMORTEM_API_BASE_URL` = `https://api.jstn.site`
 - `DATABASE_URL`, `DIRECT_URL` (server routes / Prisma)
+- `AUTH_JWT_SECRET`, `IDENTITY_HMAC_SECRET`
+- `NEXT_PUBLIC_BOTID_SITE_KEY`, `BOTID_SECRET_KEY`
+- `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
 - `STRIPE_PRICE_PRO`, `STRIPE_PRICE_TEAM`, `STRIPE_PRICE_SCALE`, `STRIPE_PRICE_PRO_ANNUAL`, `STRIPE_PRICE_TEAM_ANNUAL`, `STRIPE_PRICE_SCALE_ANNUAL`
+- `STRIPE_PAYMENT_LINK_PRO_MONTHLY`, `STRIPE_PAYMENT_LINK_PRO_ANNUAL`, `STRIPE_PAYMENT_LINK_TEAM_MONTHLY`, `STRIPE_PAYMENT_LINK_TEAM_ANNUAL`, `STRIPE_PAYMENT_LINK_SCALE_MONTHLY`, `STRIPE_PAYMENT_LINK_SCALE_ANNUAL`
+- `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`, `GITLAB_TOKEN`, `GITLAB_WEBHOOK_SECRET`
+- `GITHUB_CLIENT_ID`, `GITHUB_SECRET`, `GITHUB_TOKEN`
+- `SLACK_APP_ID`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`, `SLACK_VERIFICATION_TOKEN`, `SLACK_SCOPE_TOKEN`, `SLACK_SANDBOX`
+- `NANGO_BASE_URL`, `NANGO_SECRET_KEY`, `NANGO_WEBHOOK_SIGNING_KEY`
+- `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `QWEN_API_KEY`
+- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`
 - `SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`
 - `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`
 - Do **not** set `PREMORTEM_AUTH_DISABLED` in production

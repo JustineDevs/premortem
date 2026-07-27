@@ -1,6 +1,6 @@
 import { listReconciliationEvents } from '@premortem/db';
 
-import { resolveApiActorContext } from '../lib/request-context';
+import { resolveApiActorContext } from '../lib/request-context.js';
 
 export async function handleReconciliationList(request: Request) {
   const actor = await resolveApiActorContext(request);

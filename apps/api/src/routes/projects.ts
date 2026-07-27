@@ -15,7 +15,7 @@ import { ProjectConnectionStatus } from '@premortem/domain';
 import { captureServerException } from '@premortem/observability';
 import { syncGitLabQualityGate } from '@premortem/integrations';
 
-import { apiErrorResponse } from '../lib/error-response';
+import { apiErrorResponse } from '../lib/error-response.js';
 import {
   readJsonRecord,
   readOptionalBoolean,
@@ -24,9 +24,9 @@ import {
   readOptionalStringArray,
   readOptionalStringLiteral,
   readRequiredString
-} from '../lib/request-body';
-import { ORG_WRITE_ROLES, requireApiRole } from '../lib/authorization';
-import { resolveApiActorContext } from '../lib/request-context';
+} from '../lib/request-body.js';
+import { ORG_WRITE_ROLES, requireApiRole } from '../lib/authorization.js';
+import { resolveApiActorContext } from '../lib/request-context.js';
 
 function normalizeProvider(provider: string | undefined): 'gitlab' | 'github' {
   if (provider === 'github') return 'github';

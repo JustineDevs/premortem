@@ -28,7 +28,19 @@ export function getApiBaseUrl() {
   }
 
   if (process.env.NODE_ENV === 'production') {
-    throw new Error('PREMORTEM_API_BASE_URL is required in production');
+    const fallback = process.env.NEXT_PUBLIC_APP_URL?.trim();
+    if (fallback) {
+      try {
+        const url = new URL(fallback);
+        if (url.hostname.startsWith('premortem.')) {
+          return 'https://api.jst.site';
+        }
+      } catch {
+        // fall through to the canonical backend URL below
+      }
+    }
+
+    return 'https://api.jst.site';
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();

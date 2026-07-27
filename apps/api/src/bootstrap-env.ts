@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { hasConfiguredRuntimeCredentials, validateProductionBootEnv } from '@premortem/domain';
 import { assertCoreObservabilityConfigured } from '@premortem/observability/boot';
 
-import { loadPremortemLocalEnv } from './lib/load-local-env';
+import { loadPremortemLocalEnv } from './lib/load-local-env.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 loadPremortemLocalEnv(repoRoot);

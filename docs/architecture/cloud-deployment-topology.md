@@ -9,7 +9,7 @@ This page is a short pointer to the canonical deployment story:
 Current runtime split:
 
 - Vercel hosts the frontend and web BFF.
-- Alibaba Cloud ECS hosts the production backend today.
+- Alibaba Cloud ECS hosts the production backend today with runner-built images, runtime-only container startup, and health-gated rollback.
 - Kubernetes manifests package the same backend runtime for cluster-backed deployment and portability.
 - Supabase provides auth, Postgres, and storage.
 - Neo4j stores graph snapshots and audit topology.
