@@ -6,7 +6,9 @@
     "apps/web/scripts/**/*.{ts,tsx,js,jsx,mjs,cjs}",
     "packages/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
     "scripts/**/*.{ts,tsx,js,jsx,mjs,cjs}",
-    "services/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}"
+    "services/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    "services/agent-builder/src/server.ts",
+    "services/agent-builder/src/gitlab-duo-audit.ts"
   ],
   "project": [
     "apps/*/src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
@@ -55,10 +57,8 @@
     "packages/security/src/**/*": ["files", "exports", "types"],
     "packages/integrations/scripts/**/*": ["files"],
     "packages/integrations/test/**/*": ["files"],
-    "services/agent-builder/src/gitlab-duo-audit.ts": ["files"],
     "services/gitlab-sync/src/**/*": ["files", "exports", "types"],
     "services/graph-builder/src/**/*": ["files", "exports", "types"],
-    "services/agent-builder/src/server.ts": ["files"],
     "services/orchestrator/src/**/*": ["files", "exports", "types"]
   },
   "ignoreDependencies": [

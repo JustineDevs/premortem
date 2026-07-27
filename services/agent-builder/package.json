@@ -3,11 +3,16 @@
   "private": true,
   "type": "module",
   "main": "./dist/services/agent-builder/src/index.js",
+  "bin": "./dist/services/agent-builder/src/server.js",
   "types": "./src/index.ts",
   "exports": {
     ".": {
       "types": "./src/index.ts",
       "default": "./dist/services/agent-builder/src/index.js"
+    },
+    "./server": {
+      "types": "./src/server.ts",
+      "default": "./dist/services/agent-builder/src/server.js"
     }
   },
   "scripts": {
