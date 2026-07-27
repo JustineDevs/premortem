@@ -70,10 +70,30 @@ if [ -n "${ECS_PRIVATE_KEY:-}" ]; then
   ssh -p "$ECS_PORT" "$ECS_USER@$ECS_HOST" \
     "ECS_APP_DIR=$(printf '%q' "$ECS_APP_DIR") ECS_DEPLOY_REF=$(printf '%q' "$ECS_DEPLOY_REF") bash -se" <<'REMOTE'
 set -euo pipefail
+trap 'rm -f .env.production.runtime' EXIT
 
 cd "$ECS_APP_DIR"
 git fetch --all --prune >/dev/null 2>&1 || true
 printf 'Deploy ref: %s\n' "$ECS_DEPLOY_REF"
+
+python3 - <<'PY'
+from pathlib import Path
+
+source = Path('.env.production')
+target = Path('.env.production.runtime')
+lines = []
+for line in source.read_text().splitlines():
+    if '=' not in line or line.lstrip().startswith('#'):
+        lines.append(line)
+        continue
+    key, value = line.split('=', 1)
+    stripped = value.strip()
+    if key in {'DATABASE_URL', 'DIRECT_URL'} and len(stripped) >= 2:
+        if (stripped[0] == stripped[-1]) and stripped[0] in {'"', "'"}:
+            stripped = stripped[1:-1]
+    lines.append(f'{key}={stripped}')
+target.write_text('\n'.join(lines) + '\n')
+PY
 
 PREV_CONTAINER=""
 if docker ps -a --format '{{.Names}}' | grep -qx 'premortem-api'; then
@@ -88,7 +108,7 @@ rm -f /tmp/premortem-api-image.tar.gz
 docker run -d \
   --name premortem-api \
   --restart unless-stopped \
-  --env-file .env.production \
+  --env-file .env.production.runtime \
   -p 127.0.0.1:18787:18787 \
   premortem-api:prod
 
@@ -127,10 +147,30 @@ else
     "$ECS_USER@$ECS_HOST" \
     "ECS_APP_DIR=$(printf '%q' "$ECS_APP_DIR") ECS_DEPLOY_REF=$(printf '%q' "$ECS_DEPLOY_REF") bash -se" <<'REMOTE'
 set -euo pipefail
+trap 'rm -f .env.production.runtime' EXIT
 
 cd "$ECS_APP_DIR"
 git fetch --all --prune >/dev/null 2>&1 || true
 printf 'Deploy ref: %s\n' "$ECS_DEPLOY_REF"
+
+python3 - <<'PY'
+from pathlib import Path
+
+source = Path('.env.production')
+target = Path('.env.production.runtime')
+lines = []
+for line in source.read_text().splitlines():
+    if '=' not in line or line.lstrip().startswith('#'):
+        lines.append(line)
+        continue
+    key, value = line.split('=', 1)
+    stripped = value.strip()
+    if key in {'DATABASE_URL', 'DIRECT_URL'} and len(stripped) >= 2:
+        if (stripped[0] == stripped[-1]) and stripped[0] in {'"', "'"}:
+            stripped = stripped[1:-1]
+    lines.append(f'{key}={stripped}')
+target.write_text('\n'.join(lines) + '\n')
+PY
 
 PREV_CONTAINER=""
 if docker ps -a --format '{{.Names}}' | grep -qx 'premortem-api'; then
@@ -145,7 +185,7 @@ rm -f /tmp/premortem-api-image.tar.gz
 docker run -d \
   --name premortem-api \
   --restart unless-stopped \
-  --env-file .env.production \
+  --env-file .env.production.runtime \
   -p 127.0.0.1:18787:18787 \
   premortem-api:prod
 

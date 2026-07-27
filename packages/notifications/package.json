@@ -2,12 +2,12 @@
   "name": "@premortem/notifications",
   "private": true,
   "type": "module",
-  "main": "./index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/notifications/src/index.js",
+  "types": "./dist/notifications/src/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./index.js"
+      "types": "./dist/notifications/src/index.d.ts",
+      "default": "./dist/notifications/src/index.js"
     }
   },
   "files": [
