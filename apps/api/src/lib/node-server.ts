@@ -19,6 +19,7 @@ import type { AppEnv } from './types.js';
 
 function resolveRepoRoot() {
   let current = path.dirname(fileURLToPath(import.meta.url));
+  const runtimeFallback = process.env.PREMORTEM_REPO_ROOT?.trim() || process.cwd();
 
   while (true) {
     const packageJsonPath = path.join(current, 'package.json');
@@ -29,7 +30,7 @@ function resolveRepoRoot() {
 
     const parent = path.dirname(current);
     if (parent === current) {
-      throw new Error('Unable to locate Premortem repository root.');
+      return runtimeFallback;
     }
 
     current = parent;
