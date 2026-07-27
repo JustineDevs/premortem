@@ -28,6 +28,15 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile --prefer-offline --ignore-scripts
 RUN pnpm --filter @premortem/api... build
 RUN pnpm --filter @premortem/api deploy --prod /tmp/premortem-api
+RUN set -eu; \
+    GENERATED_PRISMA_CLIENT="$(find node_modules -path '*/.prisma/client/default.js' -print -quit | xargs -r dirname)"; \
+    DEPLOY_PRISMA_CLIENT="$(find /tmp/premortem-api/node_modules -path '*/.prisma/client/default.js' -print -quit | xargs -r dirname)"; \
+    if [ -z "$GENERATED_PRISMA_CLIENT" ] || [ -z "$DEPLOY_PRISMA_CLIENT" ]; then \
+      echo "Prisma client artifact not found in build or deploy tree" >&2; \
+      exit 1; \
+    fi; \
+    rm -rf "$DEPLOY_PRISMA_CLIENT"; \
+    cp -R "$GENERATED_PRISMA_CLIENT" "$DEPLOY_PRISMA_CLIENT"
 
 FROM base AS runtime
 
