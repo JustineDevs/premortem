@@ -88,6 +88,8 @@ The `pnpm run build:pages` wrapper loads repo-root `.env.production` before the 
 
 If `VERCEL_TOKEN`, `VERCEL_ORG_ID`, or `VERCEL_PROJECT_ID` are missing from GitHub Actions secrets, the deploy workflow now falls back to verifying the live `premortem.jstn.site` entrypoint instead of failing the deployment record.
 
+When the production web entrypoint is protected by Vercel BotID, the smoke check treats the expected `Vercel Security Checkpoint` response as a healthy edge response for the automated runner and logs that the browser protection layer is active.
+
 Frontend environment variables (production):
 
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`

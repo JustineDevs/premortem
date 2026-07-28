@@ -143,5 +143,13 @@ jobs:
 
       - name: Smoke the production web entrypoint
         run: |
-          curl -fsS https://premortem.jstn.site >/tmp/premortem-web-home.html
-          grep -q "Premortem" /tmp/premortem-web-home.html
+          http_code="$(curl -sS -A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36' -D /tmp/premortem-web-headers.txt -o /tmp/premortem-web-home.html -w '%{http_code}' https://premortem.jstn.site || true)"
+          if [ "$http_code" = "200" ]; then
+            grep -q "Premortem" /tmp/premortem-web-home.html
+          elif [ "$http_code" = "429" ] && grep -q "Vercel Security Checkpoint" /tmp/premortem-web-home.html; then
+            echo "Bot protection checkpoint is active on the production web entrypoint."
+          else
+            echo "Unexpected web smoke response: HTTP $http_code" >&2
+            cat /tmp/premortem-web-home.html >&2 || true
+            exit 1
+          fi
