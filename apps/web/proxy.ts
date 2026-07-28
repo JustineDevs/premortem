@@ -20,7 +20,7 @@ function loginRedirectUrl(request: NextRequest): URL {
   return url;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   if (isLocalAuthBypassEnabled() || !isProtectedRoute(request.nextUrl.pathname)) {
     return NextResponse.next({ request });
   }

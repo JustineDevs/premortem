@@ -460,12 +460,12 @@ const promptCases = [
           blast_radius: 'Publishing, billing, and workspace mutation'
         },
         why_it_matters: 'Trust boundaries define who can mutate production state.',
-        affected_assets: ['apps/web/middleware.ts', 'apps/api/src/lib/request-context.ts'],
+        affected_assets: ['apps/web/proxy.ts', 'apps/api/src/lib/request-context.ts'],
         evidence: [
           {
             kind: 'code',
-            ref: 'apps/web/middleware.ts:1',
-            reason: 'Middleware is where local trust bypasses should be constrained.'
+            ref: 'apps/web/proxy.ts:1',
+            reason: 'Proxy is where local trust bypasses should be constrained.'
           },
           {
             kind: 'code',
@@ -773,12 +773,12 @@ const promptCases = [
           failure_mode: 'A production environment runs with a local-only auth bypass or a stale fallback variable.',
           trigger_conditions: [
             'Environment validation does not reject the bypass flag in production.',
-            'The middleware path accepts the bypass before route auth runs.'
+          'The proxy path accepts the bypass before route auth runs.'
           ],
-          blast_radius: 'Auth middleware, worker routes, and every authenticated surface'
+        blast_radius: 'Auth proxy, worker routes, and every authenticated surface'
         },
         why_it_matters: 'A single config mismatch can turn the whole app into a fixture-mode deployment.',
-        affected_assets: ['packages/domain/src/production-mode.ts', 'apps/web/middleware.ts'],
+        affected_assets: ['packages/domain/src/production-mode.ts', 'apps/web/proxy.ts'],
         evidence: [
           {
             kind: 'file',
@@ -787,13 +787,13 @@ const promptCases = [
           },
           {
             kind: 'file',
-            ref: 'apps/web/middleware.ts:1',
-            reason: 'The middleware decides whether auth is enforced on incoming requests.'
+            ref: 'apps/web/proxy.ts:1',
+            reason: 'The proxy decides whether auth is enforced on incoming requests.'
           }
         ],
         recommended_controls: [
           'Fail production boot if auth bypass flags are present.',
-          'Add a config regression test that exercises the middleware in production mode.'
+          'Add a config regression test that exercises the proxy in production mode.'
         ],
         dedupe_keys: ['config-drift:auth-bypass', 'production:boot-validation'],
         tags: ['config', 'auth']
@@ -804,7 +804,7 @@ const promptCases = [
         cluster_id: 'cluster-config-drift',
         root_cause: 'Production boot checks and runtime auth bypass flags are not aligned.',
         finding_ids: ['finding-config-001'],
-        remediation_surface: 'boot validation and middleware'
+        remediation_surface: 'boot validation and proxy'
       }
     ]
   },
