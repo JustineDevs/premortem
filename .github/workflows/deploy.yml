@@ -47,7 +47,14 @@ jobs:
           ECS_PORT="${ECS_PORT:-22}"
           ECS_APP_DIR="${ECS_APP_DIR:-/root/workspace/premortem}"
           ECS_PUBLIC_URL="${ECS_PUBLIC_URL:-https://api.jstn.site}"
+          ECS_SSH_REACHABLE=false
+          if timeout 5 bash -lc ">/dev/tcp/${ECS_HOST}/${ECS_PORT}" >/dev/null 2>&1; then
+            ECS_SSH_REACHABLE=true
+          fi
           if [ -z "${ECS_PRIVATE_KEY:-}" ] && [ -z "${ECS_PASSWORD:-}" ]; then
+            ECS_CAN_DEPLOY=false
+            ECS_AUTH_MODE=verify-only
+          elif [ "${ECS_SSH_REACHABLE}" != "true" ]; then
             ECS_CAN_DEPLOY=false
             ECS_AUTH_MODE=verify-only
           else
@@ -58,6 +65,7 @@ jobs:
             echo "ECS_HOST=$ECS_HOST"
             echo "ECS_PORT=$ECS_PORT"
             echo "ECS_USER=$ECS_USER"
+            echo "ECS_SSH_REACHABLE=$ECS_SSH_REACHABLE"
             echo "ECS_CAN_DEPLOY=$ECS_CAN_DEPLOY"
             echo "ECS_AUTH_MODE=$ECS_AUTH_MODE"
             echo "ECS_APP_DIR=$ECS_APP_DIR"
@@ -70,7 +78,7 @@ jobs:
           if [ "${ECS_CAN_DEPLOY:-false}" = "true" ]; then
             bash scripts/deploy/alibaba-cloud-ecs-runtime.sh
           else
-            echo "No ECS SSH credentials configured in GitHub Secrets; verifying the current production-api deployment only."
+            echo "Skipping SSH deploy path because ECS is not reachable from GitHub Actions or auth is unavailable; verifying the current production-api deployment only."
           fi
 
       - name: Verify public API endpoint

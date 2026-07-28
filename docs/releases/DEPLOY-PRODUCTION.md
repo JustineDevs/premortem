@@ -51,6 +51,8 @@ GitHub Actions accepts either SSH key auth or password auth for the ECS hop:
 
 If the repo only has the host secret configured, the GitHub deploy workflow now falls back to verification-only mode: it checks the live `api.jstn.site` health endpoint and marks the deployment successful when the backend is already healthy.
 
+If ECS SSH is configured but GitHub Actions cannot open the port, the workflow also falls back to verification-only mode instead of failing the deployment record. That keeps the production status aligned with the live API while still making the transport problem visible in the job logs.
+
 The deployment helper prints the ECS instance metadata when it can reach the Alibaba Cloud metadata service and falls back to the configured host or public URL when metadata is unavailable. It also keeps the previous ECS container around until the new one passes health, then removes the backup.
 The ECS runtime helper now also starts an explicit Caddy edge proxy on ports 80 and 443 when `ECS_PUBLIC_URL` is set, so `api.jstn.site` can terminate TLS on the ECS host and forward to the local API container on `127.0.0.1:18787`.
 If the public URL still times out after a deploy, the remaining causes are outside the container runtime itself: security-group rules, host firewall rules, or DNS not pointing at the ECS public IP.
