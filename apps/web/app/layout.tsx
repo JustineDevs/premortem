@@ -42,12 +42,10 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const botIdEnabled = process.env.PREMORTEM_BOTID_ENABLED === '1';
-
   return (
     <html lang="en">
       <body>
-        {botIdEnabled ? <BotIdClient protect={botIdProtectRoutes} /> : null}
+        <BotIdClient protect={botIdProtectRoutes} />
         <Suspense fallback={null}>
           <SiteAnalytics>{children}</SiteAnalytics>
         </Suspense>
