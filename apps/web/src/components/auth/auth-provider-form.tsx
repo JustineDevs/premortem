@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useState, type FormEvent, type MouseEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import Image from 'next/image';
 
 import { authLinks, authProviderHref, type AuthMode } from '@/lib/auth-links';
@@ -155,49 +155,6 @@ export function AuthProviderForm({
     return true;
   }
 
-  async function handleProviderClick(provider: 'gitlab' | 'github', event: MouseEvent<HTMLButtonElement>) {
-    event.preventDefault();
-
-    if (!requireTermsIfNeeded()) {
-      return;
-    }
-
-    if (provider === 'github' && !githubEnabled) {
-      return;
-    }
-
-    setUiState((current) => ({ ...current, isSigningIn: true }));
-
-    try {
-      const form = event.currentTarget.form;
-      const response = await fetch(authProviderHref(provider, mode, nextPath), {
-        method: 'POST',
-        headers: {
-          accept: 'application/json'
-        },
-        body: form ? new FormData(form) : undefined
-      });
-
-      const payload = (await response.json().catch(() => null)) as
-        | { url?: string; error?: string }
-        | null;
-
-      if (!response.ok || !payload?.url) {
-        throw new Error(payload?.error ?? 'Unable to start sign-in.');
-      }
-
-      window.location.assign(payload.url);
-    } catch (error) {
-      setAuthNotice({
-        message:
-          error instanceof Error ? error.message : 'Unable to start provider sign-in.',
-        tone: 'error'
-      });
-    } finally {
-      setUiState((current) => ({ ...current, isSigningIn: false }));
-    }
-  }
-
   async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAuthNotice(null);
@@ -323,7 +280,7 @@ export function AuthProviderForm({
         ) : null}
 
         <section className="landing-auth-section" aria-label="Provider sign-in">
-          <form className="landing-auth-form" onSubmit={(event) => event.preventDefault()}>
+          <form className="landing-auth-form">
             <input
               type="hidden"
               name="termsAccepted"
@@ -331,14 +288,13 @@ export function AuthProviderForm({
             />
             <div className="landing-auth-card__providers">
               <button
-                type="button"
+                type="submit"
+                formMethod="post"
+                formAction={authProviderHref('gitlab', mode, nextPath)}
                 className="landing-auth-provider landing-auth-provider--gitlab"
                 data-border="true"
                 aria-disabled={uiState.isSigningIn || !uiState.agreedToTerms}
                 disabled={uiState.isSigningIn || !uiState.agreedToTerms}
-                onClick={(event) => {
-                  void handleProviderClick('gitlab', event);
-                }}
               >
                 <GitLabLogo />
                 <span style={{ ...navLink, color: 'rgb(255, 255, 255)' }}>
@@ -354,9 +310,6 @@ export function AuthProviderForm({
                 disabled={uiState.isSigningIn || !uiState.agreedToTerms || !githubEnabled}
                 title={githubEnabled ? undefined : 'GitHub repository integration is roadmap.'}
                 style={githubEnabled ? undefined : { opacity: 1 }}
-                onClick={(event) => {
-                  void handleProviderClick('github', event);
-                }}
               >
                 <Image
                   src={assets.githubIcon}
