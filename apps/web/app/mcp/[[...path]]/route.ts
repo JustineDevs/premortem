@@ -1,28 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { getMcpUpstreamUrl } from '@/lib/runtime-config';
+import { isLikelyMcpHealthProbe } from '@/lib/mcp-health';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-type McpProbeRequest = Pick<NextRequest, 'method' | 'headers' | 'nextUrl'>;
-
-function isLikelyMcpHealthProbe(request: McpProbeRequest) {
-  const method = request.method.toUpperCase();
-  if (method !== 'GET' && method !== 'HEAD') return false;
-
-  const pathname = request.nextUrl.pathname.replace(/\/$/, '');
-  if (pathname !== '/mcp' && pathname !== '/mcp/healthz') return false;
-
-  if (pathname === '/mcp/healthz') return true;
-
-  const accept = request.headers.get('accept') ?? '';
-  const mcpSpecificHeaders = ['mcp-session-id', 'last-event-id', 'x-mcp-session-id'];
-  if (accept.includes('text/event-stream')) return false;
-  if (mcpSpecificHeaders.some((header) => request.headers.has(header))) return false;
-
-  return true;
-}
 
 function buildUpstreamUrl(request: NextRequest) {
   const upstreamBase = new URL(getMcpUpstreamUrl());
@@ -102,5 +84,3 @@ export async function DELETE(request: NextRequest) {
 export async function OPTIONS(request: NextRequest) {
   return proxyMcpRequest(request);
 }
-
-export { isLikelyMcpHealthProbe };

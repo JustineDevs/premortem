@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isLikelyMcpHealthProbe } from '../../app/mcp/[[...path]]/route.js';
+import { isLikelyMcpHealthProbe } from './mcp-health.js';
 
 function makeRequest(
   pathname: string,
