@@ -29,8 +29,9 @@ jobs:
     env:
       ECS_HOST: ${{ secrets.ALIBABA_CLOUD_ECS_HOST }}
       ECS_PORT: ${{ secrets.ALIBABA_CLOUD_ECS_SSH_PORT }}
-      ECS_USER: ${{ secrets.ALIBABA_CLOUD_ECS_SSH_USER }}
-      ECS_PRIVATE_KEY: ${{ secrets.ALIBABA_CLOUD_ECS_SSH_PRIVATE_KEY }}
+      ECS_USER: ${{ secrets.ALIBABA_CLOUD_ECS_USER || secrets.ALIBABA_CLOUD_ECS_SSH_USER || 'root' }}
+      ECS_PRIVATE_KEY: ${{ secrets.ALIBABA_CLOUD_ECS_PRIVATE_KEY || secrets.ALIBABA_CLOUD_ECS_SSH_PRIVATE_KEY }}
+      ECS_PASSWORD: ${{ secrets.ALIBABA_CLOUD_ECS_PASSWORD || secrets.ALIBABA_CLOUD_ECS_SSH_PASSWORD }}
       ECS_APP_DIR: ${{ secrets.ALIBABA_CLOUD_ECS_APP_DIR }}
       ECS_PUBLIC_URL: ${{ secrets.ALIBABA_CLOUD_ECS_PUBLIC_URL }}
       ECS_DEPLOY_REF: ${{ github.event.workflow_run.head_sha || github.sha }}
@@ -42,8 +43,11 @@ jobs:
       - name: Validate ECS deploy inputs
         run: |
           : "${ECS_HOST:?ALIBABA_CLOUD_ECS_HOST secret is required}"
-          : "${ECS_USER:?ALIBABA_CLOUD_ECS_SSH_USER secret is required}"
-          : "${ECS_PRIVATE_KEY:?ALIBABA_CLOUD_ECS_SSH_PRIVATE_KEY secret is required}"
+          : "${ECS_USER:?ALIBABA_CLOUD_ECS_USER or ALIBABA_CLOUD_ECS_SSH_USER secret is required}"
+          if [ -z "${ECS_PRIVATE_KEY:-}" ] && [ -z "${ECS_PASSWORD:-}" ]; then
+            echo "Either ALIBABA_CLOUD_ECS_PRIVATE_KEY/ALIBABA_CLOUD_ECS_SSH_PRIVATE_KEY or ALIBABA_CLOUD_ECS_PASSWORD/ALIBABA_CLOUD_ECS_SSH_PASSWORD must be set" >&2
+            exit 1
+          fi
           ECS_PORT="${ECS_PORT:-22}"
           ECS_APP_DIR="${ECS_APP_DIR:-/root/workspace/premortem}"
           ECS_PUBLIC_URL="${ECS_PUBLIC_URL:-http://${ECS_HOST}:18787}"
@@ -51,6 +55,7 @@ jobs:
             echo "ECS_HOST=$ECS_HOST"
             echo "ECS_PORT=$ECS_PORT"
             echo "ECS_USER=$ECS_USER"
+            echo "ECS_AUTH_MODE=$([ -n "${ECS_PRIVATE_KEY:-}" ] && printf key || printf password)"
             echo "ECS_APP_DIR=$ECS_APP_DIR"
             echo "ECS_PUBLIC_URL=$ECS_PUBLIC_URL"
             echo "ECS_DEPLOY_REF=$ECS_DEPLOY_REF"

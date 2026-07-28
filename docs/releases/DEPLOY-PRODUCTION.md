@@ -39,6 +39,16 @@ export ECS_DEPLOY_REF="$(git rev-parse HEAD)"
 bash scripts/deploy/alibaba-cloud-ecs-runtime.sh
 ```
 
+GitHub Actions accepts either SSH key auth or password auth for the ECS hop:
+
+- `ALIBABA_CLOUD_ECS_HOST`
+- `ALIBABA_CLOUD_ECS_SSH_PORT`
+- `ALIBABA_CLOUD_ECS_USER` or `ALIBABA_CLOUD_ECS_SSH_USER`
+- `ALIBABA_CLOUD_ECS_PRIVATE_KEY` or `ALIBABA_CLOUD_ECS_SSH_PRIVATE_KEY`
+- `ALIBABA_CLOUD_ECS_PASSWORD` or `ALIBABA_CLOUD_ECS_SSH_PASSWORD`
+- `ALIBABA_CLOUD_ECS_APP_DIR`
+- `ALIBABA_CLOUD_ECS_PUBLIC_URL`
+
 The deployment helper prints the ECS instance metadata when it can reach the Alibaba Cloud metadata service and falls back to the configured host or public URL when metadata is unavailable. It also keeps the previous ECS container around until the new one passes health, then removes the backup.
 The ECS runtime helper now also starts an explicit Caddy edge proxy on ports 80 and 443 when `ECS_PUBLIC_URL` is set, so `api.jstn.site` can terminate TLS on the ECS host and forward to the local API container on `127.0.0.1:18787`.
 If the public URL still times out after a deploy, the remaining causes are outside the container runtime itself: security-group rules, host firewall rules, or DNS not pointing at the ECS public IP.
