@@ -7,6 +7,8 @@ if (process.env.NODE_ENV !== 'production') {
   loadPremortemLocalEnv(path.resolve(__dirname, '../..'));
 }
 
+const botIdEnabled = process.env.PREMORTEM_BOTID_ENABLED === '1';
+
 const monorepoRoot = path.resolve(__dirname, '../..');
 process.env.NEXT_PRIVATE_OUTPUT_TRACE_ROOT ??= monorepoRoot;
 
@@ -40,4 +42,4 @@ const nextConfig = {
   },
 };
 
-export default withBotId(nextConfig);
+export default botIdEnabled ? withBotId(nextConfig) : nextConfig;

@@ -5,9 +5,10 @@ import { Suspense } from 'react';
 
 import { SiteAnalytics } from '@/providers/site-analytics';
 import { botIdProtectRoutes } from '@/lib/botid-protect';
+import { getCanonicalSiteOrigin } from '@/lib/runtime-config';
 import './globals.css';
 
-const siteUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'https://premortem.jstn.site');
+const siteUrl = new URL(getCanonicalSiteOrigin());
 
 export const metadata: Metadata = {
   metadataBase: siteUrl,
@@ -41,10 +42,12 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const botIdEnabled = process.env.PREMORTEM_BOTID_ENABLED === '1';
+
   return (
     <html lang="en">
       <body>
-        <BotIdClient protect={botIdProtectRoutes} />
+        {botIdEnabled ? <BotIdClient protect={botIdProtectRoutes} /> : null}
         <Suspense fallback={null}>
           <SiteAnalytics>{children}</SiteAnalytics>
         </Suspense>
