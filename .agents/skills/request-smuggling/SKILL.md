@@ -301,7 +301,7 @@ Also load [H2_SMUGGLING_VARIANTS.md](./H2_SMUGGLING_VARIANTS.md) when you need:
 - Fat GET request smuggling (body in GET request)
 - Request smuggling → cache poisoning chain (response queue misalignment)
 - Client-side desync (CSD) via browser Fetch API with JavaScript PoC templates
-- CDN/reverse proxy product behavior matrix (HAProxy, Nginx, Apache, Cloudflare, AWS ALB, Envoy, Varnish, etc.)
+- CDN/reverse proxy product behavior matrix (HAProxy, Nginx, Apache, CDN, AWS ALB, Envoy, Varnish, etc.)
 
 ---
 

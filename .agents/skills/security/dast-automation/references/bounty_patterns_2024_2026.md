@@ -67,7 +67,7 @@ complements — does not replace — `hackerone_attack_patterns.md`.
 
 ### P23. WAF Bypass via Parser Discrepancies (WAFFLED)
 
-- **CVE / Source:** "WAFFLED" research — arXiv:2503.10846 (2025). 1207 bypasses across AWS WAF, Azure WAF, Cloud Armor, Cloudflare, ModSecurity.
+- **CVE / Source:** "WAFFLED" research — arXiv:2503.10846 (2025). 1207 bypasses across AWS WAF, Azure WAF, Cloud Armor, CDN, ModSecurity.
 - **Summary:** Content-type, boundary, and encoding edge cases produce different parser outputs in the WAF vs. the application. Example: multipart boundary with trailing whitespace, duplicate `Content-Type`, chunked-body with body-size mismatch — WAF sees a benign body; backend sees the real payload.
 - **Affected surface:** All WAFs in inline-proxy deployment; especially effective against signature-first WAFs.
 - **Detection (automated):**

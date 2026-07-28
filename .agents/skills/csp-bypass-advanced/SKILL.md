@@ -66,7 +66,7 @@ script-src 'self' *.googleapis.com *.gstatic.com cdn.jsdelivr.net
 
 | Whitelisted CDN | Bypass |
 |---|---|
-| `cdnjs.cloudflare.com` | Host arbitrary JS via CDNJS (find lib with callback/eval): `angular.js` → template injection |
+| `cdnjs.cdn.com` | Host arbitrary JS via CDNJS (find lib with callback/eval): `angular.js` → template injection |
 | `cdn.jsdelivr.net` | jsdelivr serves any npm package or GitHub file: `cdn.jsdelivr.net/npm/attacker-package@1.0.0/evil.js` |
 | `*.googleapis.com` | Google JSONP endpoints, Google Maps callback parameter |
 | `unpkg.com` | Same as jsdelivr — serves arbitrary npm packages |

@@ -403,7 +403,7 @@ export const authSessionsGuideDoc: StructuredDoc = {
       bullets: [
         '/login and /signup use Supabase SSR cookies via apps/web middleware.',
         'Supported login flows include email/password and magic link.',
-        'Vercel BotID protects the OAuth handoff and must validate before the GitLab redirect continues.',
+        'Vercel BotID protects the OAuth handoff automatically before the GitLab redirect continues.',
         'BFF routes read session and map to organization membership.',
         'GET /api/auth/status reports whether auth is configured.'
       ]
@@ -451,7 +451,7 @@ export const authSessionsGuideDoc: StructuredDoc = {
         'ERR_TOO_MANY_REDIRECTS on /login: canonical host redirect; align APP URL and OAuth callback host.',
         '401 on /api/workspace: session expired or auth disabled without local verification credentials.',
         'Callback failure on /login or /signup: Supabase could not exchange the external code for a session, or the callback host did not match NEXT_PUBLIC_APP_URL.',
-        'BotID-config notice on /login or /signup: browser protection is enabled but the deployment environment is missing the required BotID setup.',
+        'BotID notice on /login or /signup: browser protection is active in production and stays off in local verification mode.',
         'Empty /app after login: workspace exists but no projects registered yet, or the current role only exposes profile, billing, and model settings.'
       ]
     }

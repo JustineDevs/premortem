@@ -289,7 +289,7 @@ print(response)
 | Nginx | Passes raw TCP after 101 — smuggling possible if backend doesn't validate WS frames |
 | HAProxy | Depends on `option http-server-close` vs `tunnel` mode |
 | AWS ALB | Terminates WebSocket — reframes traffic, harder to smuggle |
-| Cloudflare | Inspects WebSocket frames — raw HTTP smuggling blocked |
+| CDN | Inspects WebSocket frames — raw HTTP smuggling blocked |
 | Varnish | Does not support WebSocket natively — upgrade may bypass cache entirely |
 
 ---

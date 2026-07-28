@@ -15,7 +15,6 @@ Parent: [CORE-BEHAVIOR.md](CORE-BEHAVIOR.md)
   reference/         awesome-ai-software-engineering
   frontend/          Next.js, React best practices
   data/              Supabase, Postgres
-  cloudflare/        Workers, agents SDK
   gitlab/            glab, orbit
 ```
 

@@ -196,7 +196,7 @@ Cookie: admin=true
 | Apache (as proxy) | Usually forwards body |
 | HAProxy | Forwards body by default |
 | AWS ALB | May strip body on GET |
-| Cloudflare | May strip body on GET |
+| CDN | May strip body on GET |
 | Express.js (back-end) | Ignores GET body by default |
 | Gunicorn (back-end) | Ignores GET body |
 | PHP-FPM | Ignores GET body |
@@ -392,7 +392,7 @@ desync(
 | **HAProxy** | Forwards both | TE | Strips CL when TE is present (configurable) |
 | **Nginx** | Rejects dual headers (400) | N/A | Strict — hard to smuggle through |
 | **Apache (mod_proxy)** | Forwards both | CL | Historic CL.TE source |
-| **Cloudflare** | Normalizes | TE | Strips CL when TE present; strong normalization |
+| **CDN** | Normalizes | TE | Strips CL when TE present; strong normalization |
 | **AWS ALB** | Normalizes | Varies | Has had CL.TE vulns historically (patched) |
 | **AWS CloudFront** | Normalizes | CL | May pass TE obfuscation variants |
 | **Varnish** | Forwards both | TE | Configurable; default prefers TE |
@@ -408,7 +408,7 @@ desync(
 |---|---|---|---|
 | **HAProxy** | Translates | May pass TE | Passes CL |
 | **Nginx** | Translates | Strips TE (usually) | Passes CL |
-| **Cloudflare** | Translates | Strips TE | Normalizes CL |
+| **CDN** | Translates | Strips TE | Normalizes CL |
 | **AWS ALB** | Translates | Strips TE | Passes CL |
 | **AWS CloudFront** | Translates | May pass obfuscated TE | Passes CL |
 | **Envoy** | Translates | Strips TE | Strict validation |
@@ -421,7 +421,7 @@ desync(
 | HAProxy | Yes | Default behavior |
 | Nginx | Yes (as proxy) | Forwards if body present |
 | Apache | Yes | Forwards body |
-| Cloudflare | Strips | Removes GET body |
+| CDN | Strips | Removes GET body |
 | AWS ALB | Depends on version | May strip |
 | Varnish | Strips | Removes GET body |
 | Envoy | Yes | Forwards |
@@ -432,7 +432,7 @@ desync(
 |---|---|---|
 | HAProxy | Yes (connection pool) | High risk — smuggled data affects other users |
 | Nginx | Yes (keepalive upstream) | High risk |
-| Cloudflare | Yes | High risk but strong normalization |
+| CDN | Yes | High risk but strong normalization |
 | AWS ALB | Yes | High risk |
 | Envoy | Yes | Lower risk (strict parsing) |
 | Varnish | Configurable | Depends on `beresp.do_stream` |
@@ -446,7 +446,7 @@ desync(
 ```
 1. Identify architecture:
    - Check Via, Server, X-Served-By headers
-   - Detect CDN (Cloudflare cf-ray, CloudFront x-amz-cf-id, etc.)
+   - Detect CDN (CDN cf-ray, CloudFront x-amz-cf-id, etc.)
 
 2. HTTP version probing:
    - curl --http2 https://target.com -v

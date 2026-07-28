@@ -905,7 +905,7 @@ export const troubleshootingDoc = {
       bullets: [
         'ERR_TOO_MANY_REDIRECTS on /login: middleware canonical host redirect. Use one host (127.0.0.1 vs localhost) in NEXT_PUBLIC_APP_URL and GitLab OAuth app.',
         '401 in /app: set PREMORTEM_AUTH_DISABLED=1 only for local verification, or complete Supabase login.',
-        'BotID-config notice on /login or /signup: browser protection is enabled but the deployment environment is missing the required BotID setup.',
+        'BotID notice on /login or /signup: browser protection is active in production and stays off in local verification mode.',
         'Callback failure on /login or /signup: the external code exchange failed or the callback host did not match NEXT_PUBLIC_APP_URL.',
         'OAuth state mismatch: clear cookies and reconnect GitLab from Settings.'
       ],
@@ -1220,7 +1220,7 @@ export const faqDoc = {
       bullets: [
         'Sign in with email/password, magic link, or GitLab OAuth. GitHub repository integration, Bitbucket, Azure DevOps, and Gitea remain roadmap surfaces.',
         'Forgot password flows use Supabase email recovery and the existing auth callback route.',
-        'Vercel BotID protects /login and /signup when the browser protection layer is configured.',
+        'Vercel BotID protects /login and /signup automatically in production.',
         'If auth is unavailable in local development, check NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.',
         'Use PREMORTEM_AUTH_DISABLED=1 only in local verification mode, never in production.'
       ]

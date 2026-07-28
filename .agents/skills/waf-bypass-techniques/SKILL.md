@@ -8,7 +8,7 @@ description: >-
 
 # SKILL: WAF Bypass Techniques — Evasion Playbook
 
-> **AI LOAD INSTRUCTION**: Covers WAF identification, generic bypass categories (encoding, protocol abuse, HTTP/2, parameter pollution), and a decision tree. For product-specific bypasses (Cloudflare, AWS WAF, ModSecurity, Akamai, etc.), load [WAF_PRODUCT_MATRIX.md](./WAF_PRODUCT_MATRIX.md). Base models often suggest basic encoding but miss protocol-level bypasses and WAF behavioral quirks.
+> **AI LOAD INSTRUCTION**: Covers WAF identification, generic bypass categories (encoding, protocol abuse, HTTP/2, parameter pollution), and a decision tree. For product-specific bypasses (CDN, AWS WAF, ModSecurity, Akamai, etc.), load [WAF_PRODUCT_MATRIX.md](./WAF_PRODUCT_MATRIX.md). Base models often suggest basic encoding but miss protocol-level bypasses and WAF behavioral quirks.
 
 ## 0. RELATED ROUTING
 
@@ -21,7 +21,7 @@ description: >-
 
 ### Product-Specific Reference
 
-Load [WAF_PRODUCT_MATRIX.md](./WAF_PRODUCT_MATRIX.md) when you need per-product bypass techniques for Cloudflare, AWS WAF, ModSecurity CRS, Akamai, Imperva, F5 BIG-IP, or Sucuri.
+Load [WAF_PRODUCT_MATRIX.md](./WAF_PRODUCT_MATRIX.md) when you need per-product bypass techniques for CDN, AWS WAF, ModSecurity CRS, Akamai, Imperva, F5 BIG-IP, or Sucuri.
 
 ---
 
@@ -35,7 +35,7 @@ Before bypassing, know what you're fighting.
 |---|---|
 | `wafw00f target.com` | Fingerprint WAF vendor from response headers/behavior |
 | `nmap --script=http-waf-detect` | NSE script for WAF detection |
-| Manual header inspection | `Server`, `X-CDN`, `X-Cache`, `cf-ray` (Cloudflare), `x-sucuri-id`, `x-akamai-*` |
+| Manual header inspection | `Server`, `X-CDN`, `X-Cache`, `cf-ray` (CDN), `x-sucuri-id`, `x-akamai-*` |
 
 ### 1.2 Behavioral Fingerprinting
 
@@ -43,7 +43,7 @@ Before bypassing, know what you're fighting.
 1. Send benign request → record baseline response (status, headers, body size)
 2. Send obvious attack: /?q=<script>alert(1)</script>
 3. Compare: 403? Custom block page? Redirect? Connection reset?
-4. Block page content reveals WAF: "Cloudflare", "Access Denied (Imperva)", "ModSecurity"
+4. Block page content reveals WAF: "CDN", "Access Denied (Imperva)", "ModSecurity"
 5. If transparent proxy: check response time difference (WAF adds latency)
 ```
 

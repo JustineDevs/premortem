@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
 import { Analytics } from '@vercel/analytics/next';
+import { BotIdClient } from 'botid/client';
 import { Suspense } from 'react';
 
 import { SiteAnalytics } from '@/providers/site-analytics';
+import { botIdProtectRoutes } from '@/lib/botid-protect';
 import './globals.css';
 
 const siteUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'https://premortem.jstn.site');
@@ -42,6 +44,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
+        <BotIdClient protect={botIdProtectRoutes} />
         <Suspense fallback={null}>
           <SiteAnalytics>{children}</SiteAnalytics>
         </Suspense>

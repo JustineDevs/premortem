@@ -13,7 +13,6 @@ Only upstream, vendor-authored skill packs stay here. No custom-generated placeh
 | Security | [[security/README\|security/]] | hardw00t/ai-security-arsenal |
 | LLM ops | [[llm-ops/README\|llm-ops/]] | promptfoo, langfuse, invariant |
 | Reference | [[reference/README\|reference/]] | awesome-ai-software-engineering |
-| Cloudflare | [[cloudflare/README\|cloudflare/]] | Cloudflare platform |
 | Google Cloud | [[google-cloud/README\|google-cloud/]] | GCP / Gemini |
 | GitLab | [[gitlab/README\|gitlab/]] | GitLab workflow |
 | Frontend | [[frontend/README\|frontend/]] | Next.js, React |

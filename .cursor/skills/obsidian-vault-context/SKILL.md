@@ -31,7 +31,6 @@ Then use companion notes as needed:
 - `.cursor/obsidian-vault/Technology/Supabase.md`
 - `.cursor/obsidian-vault/Technology/Prisma.md`
 - `.cursor/obsidian-vault/Technology/GitLab.md`
-- `.cursor/obsidian-vault/Premortem/Cloudflare Workers.md`
 
 ## Rules
 

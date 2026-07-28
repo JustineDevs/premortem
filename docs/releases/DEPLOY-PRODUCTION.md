@@ -40,6 +40,9 @@ bash scripts/deploy/alibaba-cloud-ecs-runtime.sh
 ```
 
 The deployment helper prints the ECS instance metadata when it can reach the Alibaba Cloud metadata service and falls back to the configured host or public URL when metadata is unavailable. It also keeps the previous ECS container around until the new one passes health, then removes the backup.
+The ECS runtime helper now also starts an explicit Caddy edge proxy on ports 80 and 443 when `ECS_PUBLIC_URL` is set, so `api.jstn.site` can terminate TLS on the ECS host and forward to the local API container on `127.0.0.1:18787`.
+If the public URL still times out after a deploy, the remaining causes are outside the container runtime itself: security-group rules, host firewall rules, or DNS not pointing at the ECS public IP.
+Runtime secrets are written on the ECS host to `/etc/premortem/premortem-api.env` with `0700` parent directory permissions and `0600` file permissions. The app checkout never stores the runtime env file inside the repo tree.
 
 Set backend secrets in the ECS runtime environment or deployment system, not in git:
 
@@ -78,8 +81,7 @@ Frontend environment variables (production):
 - `PREMORTEM_API_BASE_URL` = `https://api.jstn.site`
 - `DATABASE_URL`, `DIRECT_URL` (server routes / Prisma)
 - `AUTH_JWT_SECRET`, `IDENTITY_HMAC_SECRET`
-- `NEXT_PUBLIC_BOTID_SITE_KEY`, `BOTID_SECRET_KEY`
-- `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`
+- BotID runs automatically in production on Vercel and does not require a secret key
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
 - `STRIPE_PRICE_PRO`, `STRIPE_PRICE_TEAM`, `STRIPE_PRICE_SCALE`, `STRIPE_PRICE_PRO_ANNUAL`, `STRIPE_PRICE_TEAM_ANNUAL`, `STRIPE_PRICE_SCALE_ANNUAL`
 - `STRIPE_PAYMENT_LINK_PRO_MONTHLY`, `STRIPE_PAYMENT_LINK_PRO_ANNUAL`, `STRIPE_PAYMENT_LINK_TEAM_MONTHLY`, `STRIPE_PAYMENT_LINK_TEAM_ANNUAL`, `STRIPE_PAYMENT_LINK_SCALE_MONTHLY`, `STRIPE_PAYMENT_LINK_SCALE_ANNUAL`
@@ -94,6 +96,13 @@ Frontend environment variables (production):
 - Do **not** set `PREMORTEM_AUTH_DISABLED` in production
 
 Stripe webhook endpoint: `https://premortem.jstn.site/api/webhooks/stripe`
+
+Preview environment on Vercel:
+
+- Vercel automatically provides `VERCEL_ENV=preview` and `VERCEL_URL` for preview deployments.
+- Set preview-scoped environment variables in Vercel so preview deployments do not read production backend URLs or production-only secrets.
+- Recommended preview variables: `PREMORTEM_API_BASE_URL`, `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`, `SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`, `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`.
+- If `PREMORTEM_API_BASE_URL` is missing in preview, the web runtime now fails loudly instead of silently falling back to production.
 
 ## 3.5 Kubernetes package
 

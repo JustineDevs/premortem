@@ -4,12 +4,16 @@ function isLoopbackHost(hostname: string) {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 }
 
-export function shouldEnforceBotId(request?: Request) {
-  if (process.env.NODE_ENV !== 'production') {
-    return false;
-  }
+export function isBotIdConfigured() {
+  return process.env.NODE_ENV === 'production';
+}
 
-  if (!process.env.NEXT_PUBLIC_BOTID_SITE_KEY || !process.env.BOTID_SECRET_KEY) {
+export function isBotIdEnabled() {
+  return process.env.NODE_ENV === 'production';
+}
+
+export function shouldEnforceBotId(request?: Request) {
+  if (!isBotIdEnabled()) {
     return false;
   }
 

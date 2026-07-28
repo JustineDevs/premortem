@@ -9,6 +9,29 @@ function canonicalLoopbackHostname(hostname: string) {
   return hostname;
 }
 
+export function getDeploymentEnvironment(): 'production' | 'preview' | 'development' {
+  const vercelEnv = process.env.VERCEL_ENV?.trim();
+  if (vercelEnv === 'production' || vercelEnv === 'preview' || vercelEnv === 'development') {
+    return vercelEnv;
+  }
+
+  return process.env.NODE_ENV === 'production' ? 'production' : 'development';
+}
+
+export function getVercelDeploymentOrigin(): string | null {
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  if (!vercelUrl) {
+    return null;
+  }
+
+  try {
+    const url = vercelUrl.startsWith('http') ? new URL(vercelUrl) : new URL(`https://${vercelUrl}`);
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
 export function getRequestOrigin(request: { headers: Headers; url: string }): string {
   const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
   const host = forwardedHost || request.headers.get('host')?.trim();
@@ -27,20 +50,25 @@ export function getApiBaseUrl() {
     return configured.replace(/\/$/, '');
   }
 
-  if (process.env.NODE_ENV === 'production') {
+  const deploymentEnvironment = getDeploymentEnvironment();
+  if (deploymentEnvironment === 'preview') {
+    throw new Error('PREMORTEM_API_BASE_URL is required for Vercel preview deployments.');
+  }
+
+  if (deploymentEnvironment === 'production') {
     const fallback = process.env.NEXT_PUBLIC_APP_URL?.trim();
     if (fallback) {
       try {
         const url = new URL(fallback);
         if (url.hostname.startsWith('premortem.')) {
-          return 'https://api.jst.site';
+          return 'https://api.jstn.site';
         }
       } catch {
         // fall through to the canonical backend URL below
       }
     }
 
-    return 'https://api.jst.site';
+    return 'https://api.jstn.site';
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
@@ -73,6 +101,10 @@ export function getPublicAppOrigin(requestOrigin?: string): string {
     } catch {
       return configured.replace(/\/$/, '');
     }
+  }
+  const vercelOrigin = getVercelDeploymentOrigin();
+  if (vercelOrigin) {
+    return vercelOrigin;
   }
   return 'http://127.0.0.1:13000';
 }

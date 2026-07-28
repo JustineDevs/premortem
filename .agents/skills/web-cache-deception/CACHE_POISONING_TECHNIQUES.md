@@ -340,7 +340,7 @@ GET /page;jsessionid=abc;param=value HTTP/1.1
 
 ## 6. CDN-SPECIFIC BEHAVIOR
 
-### 6.1 Cloudflare
+### 6.1 CDN
 
 ```
 # Cache status header: cf-cache-status
@@ -355,10 +355,10 @@ GET /page;jsessionid=abc;param=value HTTP/1.1
 
 # Bypass methods:
 # - Set Cache-Control: no-cache on origin
-# - Use __cf_chl_jschl_tk__ (Cloudflare challenge token) — not in key
+# - Use __cf_chl_jschl_tk__ (CDN challenge token) — not in key
 
 # Interesting behaviors:
-# - Cloudflare Workers can modify cache key
+# - CDN Workers can modify cache key
 # - cf-connecting-ip header added (unkeyed, may be reflected)
 # - True-Client-IP header (unkeyed on some plans)
 ```
@@ -449,7 +449,7 @@ curl -H "Pragma: akamai-x-get-cache-key" https://target.com/ -v
 
 | CDN | Default Cache Key Components | Query String Default | Cookie Default |
 |---|---|---|---|
-| Cloudflare | Host + path + query | Included | Excluded |
+| CDN | Host + path + query | Included | Excluded |
 | CloudFront | Host + path (query configurable) | Excluded by default | Excluded |
 | Akamai | Host + path + query | Included | Excluded |
 | Varnish | URL (path + query) | Included | Excluded (no cache with Cookie) |
@@ -517,7 +517,7 @@ Tells cache to never serve cached version. Some caches respect this, others igno
 
 | CDN | Vary: * Behavior |
 |---|---|
-| Cloudflare | Does not cache |
+| CDN | Does not cache |
 | CloudFront | Does not cache |
 | Varnish | Depends on VCL config |
 | Nginx | Does not cache (default) |
