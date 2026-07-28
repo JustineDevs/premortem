@@ -165,18 +165,6 @@ export async function ensureDockerServices(options = {}) {
   const neo4jNeeded = !neo4jDisabled();
   const postgresNeeded = usesLocalDockerPostgres();
 
-  if (neo4jNeeded && (await isPortOpen('127.0.0.1', boltPort))) {
-    console.log(
-      JSON.stringify({
-        service: 'docker',
-        status: 'ready',
-        note: 'Neo4j already listening',
-        neo4jBolt: `bolt://127.0.0.1:${boltPort}`
-      })
-    );
-    return { started: ['neo4j'], skipped: [], alreadyRunning: true };
-  }
-
   const docker = await canUseDocker();
   if (!docker.ok) {
     const message = docker.reason ?? 'Docker unavailable';
@@ -200,13 +188,43 @@ export async function ensureDockerServices(options = {}) {
     return { started: [], skipped: services };
   }
 
-  console.log(JSON.stringify({ service: 'docker', action: 'up', services, useSudo: docker.useSudo ?? false }));
-  await dockerComposeUp(services, docker.useSudo);
+  const alreadyRunning = [];
+  if (neo4jNeeded && (await isPortOpen('127.0.0.1', boltPort))) {
+    alreadyRunning.push('neo4j');
+  }
+  if (postgresNeeded && (await isPortOpen('127.0.0.1', postgresPort))) {
+    alreadyRunning.push('postgres');
+  }
 
-  if (services.includes('neo4j')) {
+  const servicesToStart = services.filter((service) => !alreadyRunning.includes(service));
+  if (servicesToStart.length === 0) {
+    console.log(
+      JSON.stringify({
+        service: 'docker',
+        status: 'ready',
+        note: 'Required services already listening',
+        neo4jBolt: neo4jNeeded ? `bolt://127.0.0.1:${boltPort}` : null,
+        postgres: postgresNeeded ? `127.0.0.1:${postgresPort}` : null
+      })
+    );
+    return { started: [], skipped: [], alreadyRunning: true };
+  }
+
+  console.log(
+    JSON.stringify({
+      service: 'docker',
+      action: 'up',
+      services: servicesToStart,
+      useSudo: docker.useSudo ?? false,
+      alreadyRunning
+    })
+  );
+  await dockerComposeUp(servicesToStart, docker.useSudo);
+
+  if (servicesToStart.includes('neo4j')) {
     await waitForPort('127.0.0.1', boltPort);
   }
-  if (services.includes('postgres')) {
+  if (servicesToStart.includes('postgres')) {
     await waitForPort('127.0.0.1', postgresPort);
   }
 
@@ -214,12 +232,12 @@ export async function ensureDockerServices(options = {}) {
     JSON.stringify({
       service: 'docker',
       status: 'ready',
-      neo4jBolt: services.includes('neo4j') ? `bolt://127.0.0.1:${boltPort}` : null,
-      postgres: services.includes('postgres') ? `127.0.0.1:${postgresPort}` : null
+      neo4jBolt: neo4jNeeded ? `bolt://127.0.0.1:${boltPort}` : null,
+      postgres: postgresNeeded ? `127.0.0.1:${postgresPort}` : null
     })
   );
 
-  return { started: services, skipped: [] };
+  return { started: servicesToStart, skipped: alreadyRunning };
 }
 
 const isDirectRun =

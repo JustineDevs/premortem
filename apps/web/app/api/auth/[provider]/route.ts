@@ -5,7 +5,7 @@ import { isLocalAuthBypassEnabled } from '@premortem/domain';
 import { authLinks, type AuthMode, type AuthProvider } from '@/lib/auth-links';
 import {
   getCanonicalLoopbackOrigin,
-  getPublicAppOrigin,
+  getAuthRedirectOrigin,
   getRequestOrigin
 } from '@/lib/runtime-config';
 import { createRouteHandlerSupabaseClient } from '@/lib/supabase/route-handler';
@@ -77,8 +77,9 @@ async function startOAuth(request: NextRequest, provider: AuthProvider) {
   const modeParam = request.nextUrl.searchParams.get('mode');
   const mode: AuthMode = isAuthMode(modeParam) ? modeParam : 'login';
   const next = safeNextPath(request.nextUrl.searchParams.get('next'));
-  const origin = getPublicAppOrigin(getRequestOrigin(request));
-  const canonicalOrigin = getCanonicalLoopbackOrigin(getRequestOrigin(request));
+  const requestOrigin = getRequestOrigin(request);
+  const origin = getAuthRedirectOrigin(requestOrigin);
+  const canonicalOrigin = getCanonicalLoopbackOrigin(requestOrigin);
   const fallbackPath = mode === 'signup' ? authLinks.signup : authLinks.login;
 
   if (canonicalOrigin && canonicalOrigin !== origin) {

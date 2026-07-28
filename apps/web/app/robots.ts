@@ -1,6 +1,8 @@
 import type { MetadataRoute } from 'next';
 
-const siteUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'https://premortem.jstn.site');
+import { getCanonicalSiteOrigin } from '@/lib/runtime-config';
+
+const siteUrl = new URL(getCanonicalSiteOrigin());
 
 export default function robots(): MetadataRoute.Robots {
   return {

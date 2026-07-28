@@ -11,7 +11,7 @@ import { resolveActorOrganization } from '@premortem/db/actor-context';
 import { authLinks, type AuthMode } from '@/lib/auth-links';
 import {
   getCanonicalLoopbackOrigin,
-  getPublicAppOrigin,
+  getAuthRedirectOrigin,
   getRequestOrigin
 } from '@/lib/runtime-config';
 import { createRouteHandlerSupabaseClient, type RouteHandlerSupabase } from '@/lib/supabase/route-handler';
@@ -73,8 +73,9 @@ function authFailureRedirect(
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  const origin = getPublicAppOrigin(getRequestOrigin(request));
-  const canonicalOrigin = getCanonicalLoopbackOrigin(getRequestOrigin(request));
+  const requestOrigin = getRequestOrigin(request);
+  const origin = getAuthRedirectOrigin(requestOrigin);
+  const canonicalOrigin = getCanonicalLoopbackOrigin(requestOrigin);
   const code = searchParams.get('code');
   const callbackError = searchParams.get('error');
   const next = safeNextPath(searchParams.get('next'));

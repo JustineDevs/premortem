@@ -9,6 +9,23 @@ function canonicalLoopbackHostname(hostname: string) {
   return hostname;
 }
 
+function parseOriginCandidate(candidate: string | undefined | null): URL | null {
+  if (!candidate) {
+    return null;
+  }
+
+  try {
+    return new URL(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function isLoopbackOrigin(candidate: string | undefined | null): boolean {
+  const url = parseOriginCandidate(candidate);
+  return Boolean(url && isLoopbackHostname(url.hostname));
+}
+
 export function getDeploymentEnvironment(): 'production' | 'preview' | 'development' {
   const vercelEnv = process.env.VERCEL_ENV?.trim();
   if (vercelEnv === 'production' || vercelEnv === 'preview' || vercelEnv === 'development') {
@@ -45,12 +62,28 @@ export function getRequestOrigin(request: { headers: Headers; url: string }): st
 }
 
 export function getApiBaseUrl() {
+  const deploymentEnvironment = getDeploymentEnvironment();
   const configured = process.env.PREMORTEM_API_BASE_URL?.trim();
   if (configured) {
-    return configured.replace(/\/$/, '');
-  }
+    try {
+      const url = new URL(configured);
+      if (!isLoopbackHostname(url.hostname) || deploymentEnvironment === 'development') {
+        return url.origin;
+      }
+    } catch {
+      if (deploymentEnvironment === 'development') {
+        return configured.replace(/\/$/, '');
+      }
+    }
 
-  const deploymentEnvironment = getDeploymentEnvironment();
+    if (deploymentEnvironment === 'preview') {
+      throw new Error('PREMORTEM_API_BASE_URL must not resolve to localhost in preview deployments.');
+    }
+
+    if (deploymentEnvironment === 'production') {
+      return 'https://api.jstn.site';
+    }
+  }
   if (deploymentEnvironment === 'preview') {
     throw new Error('PREMORTEM_API_BASE_URL is required for Vercel preview deployments.');
   }
@@ -91,10 +124,34 @@ export function getApiBaseUrl() {
 
 /** Stable origin for browser-auth redirects. Prefer the live request origin to preserve session cookies. */
 export function getPublicAppOrigin(requestOrigin?: string): string {
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const deploymentEnvironment = getDeploymentEnvironment();
+
+  if (deploymentEnvironment !== 'development') {
+    if (requestOrigin && !isLoopbackOrigin(requestOrigin)) {
+      return requestOrigin;
+    }
+
+    if (configured && !isLoopbackOrigin(configured)) {
+      try {
+        return new URL(configured).origin;
+      } catch {
+        return configured.replace(/\/$/, '');
+      }
+    }
+
+    const vercelOrigin = getVercelDeploymentOrigin();
+    if (vercelOrigin) {
+      return vercelOrigin;
+    }
+
+    throw new Error('NEXT_PUBLIC_APP_URL is required for preview and production deployments.');
+  }
+
   if (requestOrigin) {
     return requestOrigin;
   }
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+
   if (configured) {
     try {
       return new URL(configured).origin;
@@ -106,7 +163,52 @@ export function getPublicAppOrigin(requestOrigin?: string): string {
   if (vercelOrigin) {
     return vercelOrigin;
   }
+
   return 'http://127.0.0.1:13000';
+}
+
+export function getCanonicalSiteOrigin(): string {
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (configured) {
+    try {
+      const url = new URL(configured);
+      if (!isLoopbackHostname(url.hostname)) {
+        return url.origin;
+      }
+    } catch {
+      return configured.replace(/\/$/, '');
+    }
+  }
+
+  const vercelOrigin = getVercelDeploymentOrigin();
+  if (vercelOrigin) {
+    return vercelOrigin;
+  }
+
+  const deploymentEnvironment = getDeploymentEnvironment();
+  if (deploymentEnvironment === 'development') {
+    return 'http://127.0.0.1:13000';
+  }
+
+  return 'https://premortem.jstn.site';
+}
+
+/**
+ * Stable redirect origin for auth handoffs.
+ *
+ * In development, keep using the live request origin so local cookies and
+ * callbacks remain on the same loopback host. In preview and production,
+ * prefer the canonical external site origin so a stale or proxied localhost
+ * host header cannot leak into OAuth redirects.
+ */
+export function getAuthRedirectOrigin(requestOrigin?: string): string {
+  const deploymentEnvironment = getDeploymentEnvironment();
+
+  if (deploymentEnvironment === 'development') {
+    return getPublicAppOrigin(requestOrigin);
+  }
+
+  return getCanonicalSiteOrigin();
 }
 
 /**
@@ -116,6 +218,10 @@ export function getPublicAppOrigin(requestOrigin?: string): string {
  * callback exchanges stay bound to the same origin.
  */
 export function getCanonicalLoopbackOrigin(requestOrigin?: string): string | null {
+  if (getDeploymentEnvironment() !== 'development') {
+    return null;
+  }
+
   const candidate = requestOrigin ?? process.env.NEXT_PUBLIC_APP_URL?.trim();
   if (!candidate) {
     return null;
@@ -141,4 +247,31 @@ export function getCanonicalLoopbackOrigin(requestOrigin?: string): string | nul
 
 export function gitlabOAuthRedirectUri(requestOrigin?: string): string {
   return `${getPublicAppOrigin(requestOrigin)}/api/integrations/callback/gitlab`;
+}
+
+export function getMcpUpstreamUrl(): string {
+  const deploymentEnvironment = getDeploymentEnvironment();
+  const configured = process.env.MCP_UPSTREAM_URL?.trim();
+  if (configured) {
+    try {
+      const url = new URL(configured);
+      if (!isLoopbackHostname(url.hostname) || deploymentEnvironment === 'development') {
+        return url.origin + url.pathname.replace(/\/$/, '');
+      }
+    } catch {
+      if (deploymentEnvironment === 'development') {
+        return configured.replace(/\/$/, '');
+      }
+    }
+
+    if (deploymentEnvironment === 'preview') {
+      throw new Error('MCP_UPSTREAM_URL must not resolve to localhost in preview deployments.');
+    }
+
+    if (deploymentEnvironment === 'production') {
+      return `${getApiBaseUrl()}/api/mcp`;
+    }
+  }
+
+  return `${getApiBaseUrl()}/api/mcp`;
 }

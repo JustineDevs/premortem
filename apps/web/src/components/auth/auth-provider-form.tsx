@@ -5,7 +5,12 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, type FormEvent, type MouseEvent } from 'react';
 import Image from 'next/image';
 
-import { authLinks, authProviderHref, type AuthMode } from '@/lib/auth-links';
+import {
+  authLinks,
+  authProviderHref,
+  getCanonicalBrowserAppOrigin,
+  type AuthMode
+} from '@/lib/auth-links';
 import { type AuthProviderBootstrap } from '@/lib/auth/auth-provider-bootstrap';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { marketingLinks } from '@/lib/marketing-links';
@@ -80,7 +85,8 @@ function readFragmentNotice(): string | null {
 }
 
 function getEmailRedirectUrl(nextPath: string, mode: AuthMode) {
-  const url = new URL(authLinks.callback, window.location.origin);
+  const origin = getCanonicalBrowserAppOrigin() ?? window.location.origin;
+  const url = new URL(authLinks.callback, origin);
   url.searchParams.set('next', nextPath);
   url.searchParams.set('mode', mode);
   return url.toString();
@@ -238,7 +244,18 @@ export function AuthProviderForm({
     try {
       const form = event.currentTarget.closest('form');
       const formData = form ? new FormData(form) : new FormData();
-      const response = await fetch(authProviderHref('gitlab', mode, nextPath), {
+      const authUrl = authProviderHref('gitlab', mode, nextPath);
+      const currentOrigin = window.location.origin;
+      const targetOrigin = new URL(authUrl, currentOrigin).origin;
+
+      if (form && targetOrigin !== currentOrigin) {
+        form.setAttribute('action', authUrl);
+        form.setAttribute('method', 'post');
+        form.submit();
+        return;
+      }
+
+      const response = await fetch(authUrl, {
         method: 'POST',
         headers: { accept: 'application/json' },
         body: formData

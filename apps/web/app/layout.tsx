@@ -6,6 +6,7 @@ import { Suspense } from 'react';
 import { SiteAnalytics } from '@/providers/site-analytics';
 import { botIdProtectRoutes } from '@/lib/botid-protect';
 import { getCanonicalSiteOrigin } from '@/lib/runtime-config';
+import { isBotIdEnabled } from '@/lib/server/botid';
 import './globals.css';
 
 const siteUrl = new URL(getCanonicalSiteOrigin());
@@ -45,7 +46,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <BotIdClient protect={botIdProtectRoutes} />
+        {isBotIdEnabled() ? <BotIdClient protect={botIdProtectRoutes} /> : null}
         <Suspense fallback={null}>
           <SiteAnalytics>{children}</SiteAnalytics>
         </Suspense>

@@ -4,12 +4,16 @@ import {
   exchangeGitLabCode,
   integrationOAuthCookieNames
 } from '@/lib/gitlab-oauth';
-import { getPublicAppOrigin, getRequestOrigin, gitlabOAuthRedirectUri } from '@/lib/runtime-config';
+import {
+  getAuthRedirectOrigin,
+  getRequestOrigin,
+  gitlabOAuthRedirectUri
+} from '@/lib/runtime-config';
 import { persistGitLabConnection } from '@/lib/server/persist-gitlab-connection';
 import { resolveRequestActorContext } from '@/lib/server/request-context';
 
 function redirectWithNotice(request: NextRequest, next: string, notice: string, detail?: string) {
-  const redirectUrl = new URL(next, getPublicAppOrigin(getRequestOrigin(request)));
+  const redirectUrl = new URL(next, getAuthRedirectOrigin(getRequestOrigin(request)));
   redirectUrl.searchParams.set('integration_notice', notice);
   if (detail) redirectUrl.searchParams.set('integration_detail', detail);
   return NextResponse.redirect(redirectUrl);
@@ -31,7 +35,7 @@ function escapeHtml(value: string) {
 }
 
 function renderPostBridge(request: NextRequest) {
-  const postTarget = new URL(request.nextUrl.pathname, getPublicAppOrigin(getRequestOrigin(request)));
+  const postTarget = new URL(request.nextUrl.pathname, getAuthRedirectOrigin(getRequestOrigin(request)));
   const formAction = escapeHtml(postTarget.toString());
   const state = escapeHtml(request.nextUrl.searchParams.get('state') ?? '');
   const code = escapeHtml(request.nextUrl.searchParams.get('code') ?? '');
@@ -75,13 +79,14 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const origin = getPublicAppOrigin(getRequestOrigin(request));
-  const requestOrigin = request.headers.get('origin');
+  const requestOrigin = getRequestOrigin(request);
+  const origin = getAuthRedirectOrigin(requestOrigin);
+  const requestOriginHeader = request.headers.get('origin');
   const cookies = integrationOAuthCookieNames();
   const savedState = request.cookies.get(cookies.state)?.value;
   const next = request.cookies.get(cookies.next)?.value ?? '/app?tab=settings';
 
-  if (requestOrigin && requestOrigin !== origin) {
+  if (requestOriginHeader && requestOriginHeader !== origin) {
     return clearCookies(redirectWithNotice(request, next, 'invalid_state'));
   }
 

@@ -82,6 +82,11 @@ import {
 } from './request-guard.js';
 
 const app = new Hono<{ Bindings: AppEnv; Variables: { requestId: string } }>();
+const HEALTH_PATHS = new Set(['/', '/health', '/healthz', '/api/mcp/healthz']);
+
+function createHealthResponse(service: string) {
+  return Response.json({ ok: true, service });
+}
 
 app.use('*', async (c, next) => {
   const requestId = resolveRequestId(c.req.raw);
@@ -89,7 +94,7 @@ app.use('*', async (c, next) => {
   c.header('x-request-id', requestId);
 
   const pathname = new URL(c.req.url).pathname;
-  if (pathname !== '/health' && !(await checkRateLimit(rateLimitKey(c.req.raw, pathname), c.env))) {
+  if (!HEALTH_PATHS.has(pathname) && !(await checkRateLimit(rateLimitKey(c.req.raw, pathname), c.env))) {
     return attachRequestId(
       Response.json({ error: 'Rate limit exceeded. Retry shortly.', code: 'rate_limited', requestId }, { status: 429 }),
       requestId
@@ -211,7 +216,10 @@ app.post('/api/slack/events', (c) =>
   handleSlackEventsPost(c.req.raw, c.env, c.executionCtx as unknown as ExecutionContextLike)
 );
 app.all('/api/mcp', (c) => handleMcpRequest(c.req.raw, c.env));
+app.get('/api/mcp/healthz', () => createHealthResponse('premortem-mcp'));
+app.get('/', () => createHealthResponse('premortem-api'));
 app.get('/health', () => Response.json({ ok: true, service: 'premortem-api' }));
+app.get('/healthz', () => Response.json({ ok: true, service: 'premortem-api' }));
 app.notFound(() => Response.json({ error: 'Not found' }, { status: 404 }));
 
 async function routeRequest(request: Request, env: AppEnv = {}, _ctx?: ExecutionContextLike) {
@@ -222,7 +230,7 @@ async function routeRequest(request: Request, env: AppEnv = {}, _ctx?: Execution
     throw new Error('Missing RATE_LIMITER binding in production');
   }
 
-  if (url.pathname !== '/health' && !(await checkRateLimit(rateLimitKey(request, url.pathname), env))) {
+  if (!HEALTH_PATHS.has(url.pathname) && !(await checkRateLimit(rateLimitKey(request, url.pathname), env))) {
     return attachRequestId(
       Response.json({ error: 'Rate limit exceeded. Retry shortly.', code: 'rate_limited', requestId }, { status: 429 }),
       requestId
@@ -510,6 +518,14 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
 
   if (url.pathname === '/health') {
     return Response.json({ ok: true, service: 'premortem-api' });
+  }
+
+  if (url.pathname === '/' || url.pathname === '/healthz') {
+    return Response.json({ ok: true, service: 'premortem-api' });
+  }
+
+  if (url.pathname === '/api/mcp/healthz') {
+    return Response.json({ ok: true, service: 'premortem-mcp' });
   }
 
   return Response.json({ error: 'Not found' }, { status: 404 });

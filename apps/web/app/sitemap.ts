@@ -1,8 +1,9 @@
 import type { MetadataRoute } from 'next';
 
 import { marketingLinks } from '@/lib/marketing-links';
+import { getCanonicalSiteOrigin } from '@/lib/runtime-config';
 
-const siteUrl = new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'https://premortem.jstn.site');
+const siteUrl = new URL(getCanonicalSiteOrigin());
 
 const publicRoutes = [
   marketingLinks.home,

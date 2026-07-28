@@ -2,6 +2,7 @@ import path from 'node:path';
 import { withBotId } from 'botid/next/config';
 
 import { loadPremortemLocalEnv } from '../../scripts/load-local-env.ts';
+import { getBotIdEnabledFlag } from './src/lib/server/botid';
 
 if (process.env.NODE_ENV !== 'production') {
   loadPremortemLocalEnv(path.resolve(__dirname, '../..'));
@@ -40,4 +41,4 @@ const nextConfig = {
   },
 };
 
-export default withBotId(nextConfig);
+export default getBotIdEnabledFlag() ? withBotId(nextConfig) : nextConfig;

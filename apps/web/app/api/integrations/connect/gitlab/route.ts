@@ -7,7 +7,7 @@ import {
 } from '@/lib/gitlab-oauth';
 import {
   getCanonicalLoopbackOrigin,
-  getPublicAppOrigin,
+  getAuthRedirectOrigin,
   getRequestOrigin,
   gitlabOAuthRedirectUri
 } from '@/lib/runtime-config';
@@ -26,8 +26,9 @@ function safeNextPath(value: string | null, discover: boolean) {
 
 export async function GET(request: NextRequest) {
   const clientId = process.env.GITLAB_CLIENT_ID;
-  const origin = getPublicAppOrigin(getRequestOrigin(request));
-  const canonicalOrigin = getCanonicalLoopbackOrigin(getRequestOrigin(request));
+  const requestOrigin = getRequestOrigin(request);
+  const origin = getAuthRedirectOrigin(requestOrigin);
+  const canonicalOrigin = getCanonicalLoopbackOrigin(requestOrigin);
 
   if (canonicalOrigin && canonicalOrigin !== origin) {
     const canonicalUrl = new URL(request.nextUrl.pathname + request.nextUrl.search, canonicalOrigin);

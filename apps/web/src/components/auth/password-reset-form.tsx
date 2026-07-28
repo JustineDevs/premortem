@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-import { authLinks } from '@/lib/auth-links';
+import { authLinks, getCanonicalBrowserAppOrigin } from '@/lib/auth-links';
 import type { AuthProviderBootstrap } from '@/lib/auth/auth-provider-bootstrap';
 import { marketingLinks } from '@/lib/marketing-links';
 
@@ -32,16 +32,7 @@ function getSupabaseClient() {
 }
 
 function getCanonicalAppOrigin() {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (!configured) {
-    return window.location.origin;
-  }
-
-  try {
-    return new URL(configured).origin;
-  } catch {
-    return configured.replace(/\/$/, '');
-  }
+  return getCanonicalBrowserAppOrigin() ?? window.location.origin;
 }
 
 export function PasswordResetForm({
