@@ -1,5 +1,10 @@
 import type { AppRole } from '@premortem/db';
-
+export {
+  BILLING_ROLES,
+  ORG_ADMIN_ROLES,
+  ORG_WRITE_ROLES,
+  PROFILE_EDIT_ROLES
+} from '@premortem/mcp';
 import type { ApiActorContext } from './request-context.js';
 
 export class ApiForbiddenError extends Error {
@@ -8,11 +13,6 @@ export class ApiForbiddenError extends Error {
     this.name = 'ApiForbiddenError';
   }
 }
-
-export const ORG_WRITE_ROLES: AppRole[] = ['owner', 'admin', 'member'];
-export const ORG_ADMIN_ROLES: AppRole[] = ['owner', 'admin'];
-export const BILLING_ROLES: AppRole[] = ['owner', 'admin', 'billing'];
-export const PROFILE_EDIT_ROLES: AppRole[] = ['owner', 'admin', 'member', 'billing'];
 
 export function hasApiRole(context: Pick<ApiActorContext, 'role'>, allowedRoles: AppRole[]) {
   return allowedRoles.includes(context.role);

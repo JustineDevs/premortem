@@ -4,6 +4,10 @@
   "packageManager": "pnpm@9.12.0",
   "scripts": {
     "dev": "tsx --tsconfig tsconfig.base.json ./scripts/dev/run-local-stack.ts",
+    "mcp:dev": "pnpm --dir mcp dev",
+    "mcp:build": "pnpm --dir mcp build",
+    "mcp:start": "pnpm --dir mcp start",
+    "mcp:typecheck": "pnpm --dir mcp typecheck",
     "dev:ngrok-stripe": "tsx --tsconfig tsconfig.base.json ./scripts/dev/run-ngrok-stripe.ts",
     "dev:turbo": "turbo dev",
     "build": "turbo build",

@@ -23,6 +23,7 @@
     "@premortem/workflow": "workspace:*",
     "@premortem/observability": "workspace:*",
     "@premortem/security": "workspace:*",
+    "@premortem/mcp": "workspace:*",
     "stripe": "^22.2.0",
     "hono": "^4.12.25",
     "zod": "^4.4.3"

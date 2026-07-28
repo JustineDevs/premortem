@@ -97,6 +97,9 @@
       ],
       "@premortem/billing": [
         "packages/billing/src"
+      ],
+      "@premortem/mcp": [
+        "mcp/src"
       ]
     }
   }
