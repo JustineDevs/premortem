@@ -5,7 +5,8 @@ import {
   getApiBaseUrl,
   getAuthRedirectOrigin,
   getCanonicalLoopbackOrigin,
-  getMcpUpstreamUrl
+  getMcpUpstreamUrl,
+  getPublicAppOrigin
 } from './runtime-config';
 
 function withEnv<T>(values: Record<string, string | undefined>, fn: () => T): T {
@@ -43,11 +44,13 @@ test('production api and mcp config ignore localhost fallbacks', () => {
       VERCEL_ENV: 'production',
       PREMORTEM_API_BASE_URL: 'http://127.0.0.1:18787',
       MCP_UPSTREAM_URL: 'http://localhost:18787/api/mcp',
+      PREMORTEM_SITE_URL: 'https://premortem.jstn.site',
       NEXT_PUBLIC_APP_URL: 'https://premortem.jstn.site'
     },
     () => {
       assert.equal(getApiBaseUrl(), 'https://api.jstn.site');
       assert.equal(getMcpUpstreamUrl(), 'https://api.jstn.site/api/mcp');
+      assert.equal(getPublicAppOrigin('http://localhost:3000'), 'https://premortem.jstn.site');
       assert.equal(getAuthRedirectOrigin('http://127.0.0.1:3000'), 'https://premortem.jstn.site');
       assert.equal(getCanonicalLoopbackOrigin('http://127.0.0.1:3000'), null);
     }

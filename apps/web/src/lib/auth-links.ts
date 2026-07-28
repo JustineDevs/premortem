@@ -17,17 +17,19 @@ function isLoopbackHostname(hostname: string) {
 }
 
 export function getCanonicalBrowserAppOrigin(): string | null {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const configuredSiteUrl = process.env.PREMORTEM_SITE_URL?.trim();
+  const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
 
-  if (configured) {
+  for (const candidate of [configuredSiteUrl, configuredAppUrl]) {
+    if (!candidate) continue;
     try {
-      const url = new URL(configured);
+      const url = new URL(candidate);
       if (!isLoopbackHostname(url.hostname)) {
         return url.origin;
       }
     } catch {
-      if (process.env.NODE_ENV === 'development') {
-        return configured.replace(/\/$/, '');
+      if (process.env.NODE_ENV !== 'development' && !candidate.includes('localhost')) {
+        return candidate.replace(/\/$/, '');
       }
     }
   }
@@ -37,7 +39,7 @@ export function getCanonicalBrowserAppOrigin(): string | null {
       return window.location.origin;
     }
 
-    return configured ? configured.replace(/\/$/, '') : null;
+    return configuredAppUrl ? configuredAppUrl.replace(/\/$/, '') : null;
   }
 
   return 'https://premortem.jstn.site';

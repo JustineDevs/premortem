@@ -26,6 +26,29 @@ function isLoopbackOrigin(candidate: string | undefined | null): boolean {
   return Boolean(url && isLoopbackHostname(url.hostname));
 }
 
+function readCanonicalProductionOrigin(): string | null {
+  const candidates = [
+    process.env.PREMORTEM_SITE_URL?.trim(),
+    process.env.NEXT_PUBLIC_APP_URL?.trim()
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const url = new URL(candidate);
+      if (!isLoopbackHostname(url.hostname)) {
+        return url.origin;
+      }
+    } catch {
+      if (!candidate.includes('localhost') && !candidate.includes('127.0.0.1')) {
+        return candidate.replace(/\/$/, '');
+      }
+    }
+  }
+
+  return null;
+}
+
 export function getDeploymentEnvironment(): 'production' | 'preview' | 'development' {
   const vercelEnv = process.env.VERCEL_ENV?.trim();
   if (vercelEnv === 'production' || vercelEnv === 'preview' || vercelEnv === 'development') {
@@ -124,20 +147,12 @@ export function getApiBaseUrl() {
 
 /** Stable origin for browser-auth redirects. Prefer the live request origin to preserve session cookies. */
 export function getPublicAppOrigin(requestOrigin?: string): string {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
   const deploymentEnvironment = getDeploymentEnvironment();
 
   if (deploymentEnvironment !== 'development') {
-    if (requestOrigin && !isLoopbackOrigin(requestOrigin)) {
-      return requestOrigin;
-    }
-
-    if (configured && !isLoopbackOrigin(configured)) {
-      try {
-        return new URL(configured).origin;
-      } catch {
-        return configured.replace(/\/$/, '');
-      }
+    const canonicalProductionOrigin = readCanonicalProductionOrigin();
+    if (canonicalProductionOrigin) {
+      return canonicalProductionOrigin;
     }
 
     const vercelOrigin = getVercelDeploymentOrigin();
@@ -152,6 +167,7 @@ export function getPublicAppOrigin(requestOrigin?: string): string {
     return requestOrigin;
   }
 
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
   if (configured) {
     try {
       return new URL(configured).origin;
@@ -168,16 +184,9 @@ export function getPublicAppOrigin(requestOrigin?: string): string {
 }
 
 export function getCanonicalSiteOrigin(): string {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (configured) {
-    try {
-      const url = new URL(configured);
-      if (!isLoopbackHostname(url.hostname)) {
-        return url.origin;
-      }
-    } catch {
-      return configured.replace(/\/$/, '');
-    }
+  const canonicalProductionOrigin = readCanonicalProductionOrigin();
+  if (canonicalProductionOrigin) {
+    return canonicalProductionOrigin;
   }
 
   const vercelOrigin = getVercelDeploymentOrigin();

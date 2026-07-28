@@ -39,14 +39,18 @@ async function main() {
   }
 
   const previousAppUrl = process.env.NEXT_PUBLIC_APP_URL;
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousVercelEnv = process.env.VERCEL_ENV;
 
   try {
     process.env.NEXT_PUBLIC_APP_URL = 'https://example.com';
-    assert.equal(
-      getPublicAppOrigin(requestOrigin),
-      requestOrigin,
-      'live request origin should win over configured origin during auth flows'
-    );
+    const supabaseOrigin = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
+    assert.ok(supabaseOrigin, 'supabase origin must be configured for auth smoke');
+    process.env.NODE_ENV = 'production';
+    process.env.VERCEL_ENV = 'production';
+    assert.equal(getPublicAppOrigin(requestOrigin), 'https://example.com');
+    process.env.NODE_ENV = previousNodeEnv;
+    process.env.VERCEL_ENV = previousVercelEnv;
     assert.equal(
       getCanonicalLoopbackOrigin(requestOrigin),
       configuredOrigin,
@@ -80,7 +84,7 @@ async function main() {
         body: buildAuthFormData()
       }),
       (request) => startGitLabOAuth(request, { params: Promise.resolve({ provider: 'gitlab' }) }),
-      'https://yiemjguwvbnoglnzyptz.supabase.co/auth/v1/authorize?provider=gitlab',
+      `${supabaseOrigin.replace(/\/$/, '')}/auth/v1/authorize?provider=gitlab`,
       'canonical auth request should yield Supabase authorize URL'
     );
 
@@ -115,6 +119,16 @@ async function main() {
       delete process.env.NEXT_PUBLIC_APP_URL;
     } else {
       process.env.NEXT_PUBLIC_APP_URL = previousAppUrl;
+    }
+    if (previousNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+    if (previousVercelEnv === undefined) {
+      delete process.env.VERCEL_ENV;
+    } else {
+      process.env.VERCEL_ENV = previousVercelEnv;
     }
   }
 
