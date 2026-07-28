@@ -46,7 +46,7 @@ jobs:
           : "${ECS_USER:=root}"
           ECS_PORT="${ECS_PORT:-22}"
           ECS_APP_DIR="${ECS_APP_DIR:-/root/workspace/premortem}"
-          ECS_PUBLIC_URL="${ECS_PUBLIC_URL:-http://${ECS_HOST}:18787}"
+          ECS_PUBLIC_URL="${ECS_PUBLIC_URL:-https://api.jstn.site}"
           if [ -z "${ECS_PRIVATE_KEY:-}" ] && [ -z "${ECS_PASSWORD:-}" ]; then
             ECS_CAN_DEPLOY=false
             ECS_AUTH_MODE=verify-only
@@ -75,7 +75,7 @@ jobs:
 
       - name: Verify public API endpoint
         run: |
-          curl -fsS "${ECS_PUBLIC_URL}/health" | tee /tmp/premortem-api-public-health.json
+          curl --fail --show-error --silent --max-time 20 "${ECS_PUBLIC_URL}/health" | tee /tmp/premortem-api-public-health.json
 
   deploy-web:
     needs: deploy-api
