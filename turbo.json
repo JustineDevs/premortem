@@ -2,22 +2,88 @@
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**", "build/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        ".next/**",
+        "!.next/cache/**",
+        "build/**"
+      ]
     },
     "dev": {
       "cache": false,
       "persistent": true
     },
     "lint": {
-      "dependsOn": ["^build"]
+      "dependsOn": [
+        "^build"
+      ]
     },
     "test": {
-      "dependsOn": ["^test"],
-      "outputs": ["coverage/**"]
+      "dependsOn": [
+        "^test"
+      ],
+      "outputs": [
+        "coverage/**"
+      ]
     },
     "typecheck": {
-      "dependsOn": ["^build"]
+      "dependsOn": [
+        "^build"
+      ]
     }
-  }
+  },
+  "globalEnv": [
+    "CORS_ORIGIN",
+    "GEMINI_API_KEY",
+    "GITLAB_BASE_URL",
+    "GITLAB_CLIENT_ID",
+    "GITLAB_CLIENT_SECRET",
+    "GITLAB_EXTERNAL_PROJECT_ID",
+    "GITLAB_TOKEN",
+    "GITLAB_WEBHOOK_SECRET",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_SECRET",
+    "LANGFUSE_BASE_URL",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "LLM_MODEL",
+    "PHOENIX_API_KEY",
+    "PHOENIX_COLLECTOR_ENDPOINT",
+    "PHOENIX_LLM_EVAL",
+    "PHOENIX_MCP_BASE_URL",
+    "PHOENIX_PROJECT_NAME",
+    "PHOENIX_SYNC_DATASETS",
+    "PHOENIX_SYNC_PROMPTS",
+    "POSTHOG_API_KEY",
+    "POSTHOG_HOST",
+    "PREMORTEM_API_BASE_URL",
+    "PREMORTEM_SITE_URL",
+    "QWEN_API_KEY",
+    "SENTRY_DSN",
+    "SENTRY_TRACES_SAMPLE_RATE",
+    "SLACK_APP_ID",
+    "SLACK_CLIENT_ID",
+    "SLACK_CLIENT_SECRET",
+    "SLACK_SANDBOX",
+    "SLACK_SCOPE_TOKEN",
+    "SLACK_SIGNING_SECRET",
+    "SLACK_VERIFICATION_TOKEN",
+    "STRIPE_PAYMENT_LINK_PRO_ANNUAL",
+    "STRIPE_PAYMENT_LINK_PRO_MONTHLY",
+    "STRIPE_PAYMENT_LINK_SCALE_ANNUAL",
+    "STRIPE_PAYMENT_LINK_SCALE_MONTHLY",
+    "STRIPE_PAYMENT_LINK_TEAM_ANNUAL",
+    "STRIPE_PAYMENT_LINK_TEAM_MONTHLY",
+    "STRIPE_PRICE_PRO",
+    "STRIPE_PRICE_PRO_ANNUAL",
+    "STRIPE_PRICE_SCALE",
+    "STRIPE_PRICE_SCALE_ANNUAL",
+    "STRIPE_PRICE_TEAM",
+    "STRIPE_PRICE_TEAM_ANNUAL",
+    "STRIPE_SECRET_KEY",
+    "STRIPE_WEBHOOK_SECRET"
+  ]
 }
