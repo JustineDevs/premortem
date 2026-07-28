@@ -3,7 +3,6 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { isLocalAuthBypassEnabled } from '@premortem/domain';
 
 import { authLinks, type AuthMode, type AuthProvider } from '@/lib/auth-links';
-import { verifyBotId } from '@/lib/server/botid';
 import {
   getCanonicalLoopbackOrigin,
   getPublicAppOrigin,
@@ -153,11 +152,6 @@ export async function GET(
     return NextResponse.json({ error: 'Unsupported provider' }, { status: 400 });
   }
 
-  const verification = await verifyBotId(request);
-  if (verification.isBot) {
-    return NextResponse.json({ error: 'Access denied' }, { status: 403 });
-  }
-
   return startOAuth(request, provider);
 }
 
@@ -170,11 +164,6 @@ export async function POST(
 
   if (provider !== 'gitlab' && provider !== 'github') {
     return NextResponse.json({ error: 'Unsupported provider' }, { status: 400 });
-  }
-
-  const verification = await verifyBotId(request);
-  if (verification.isBot) {
-    return NextResponse.json({ error: 'Access denied' }, { status: 403 });
   }
 
   return startOAuth(request, provider);

@@ -7,8 +7,6 @@ export type BotIdProtectRoute = {
 };
 
 export const botIdProtectRoutes = [
-  { path: '/api/auth/*', method: 'GET' },
-  { path: '/api/auth/*', method: 'POST' },
   { path: '/api/billing/*', method: 'POST' },
   { path: '/api/audits', method: 'POST' },
   { path: '/api/audits/run', method: 'POST' },

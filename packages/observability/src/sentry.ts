@@ -1,20 +1,11 @@
-import type { SeverityLevel } from '@sentry/node';
-import type { NodeOptions } from '@sentry/node';
+import * as Sentry from '@sentry/node';
+import type { SeverityLevel, NodeOptions } from '@sentry/node';
 
 let sentryInitialized = false;
-let sentryModulePromise: Promise<typeof import('@sentry/node')> | undefined;
 let sentryInitPromise: Promise<void> | undefined;
 
 function shouldInitializeSentry() {
   return Boolean(process.env.SENTRY_DSN?.trim());
-}
-
-function loadSentryModule() {
-  const loader = new Function('specifier', 'return import(specifier)') as (
-    specifier: string
-  ) => Promise<typeof import('@sentry/node')>;
-  sentryModulePromise ??= loader('@sentry/node');
-  return sentryModulePromise;
 }
 
 function isWorkerLikeRuntime() {
@@ -50,7 +41,6 @@ export async function initServerObservability(serviceName: string) {
   if (sentryInitPromise) return sentryInitPromise;
 
   sentryInitPromise = (async () => {
-    const Sentry = await loadSentryModule();
     const options = getServerSentryInitOptions(serviceName);
     if (options.skipOpenTelemetrySetup) {
       options.integrations = (integrations) =>
@@ -81,33 +71,21 @@ export function captureServerException(error: unknown, context?: Record<string, 
     throw new Error('Sentry is required. Set SENTRY_DSN before capturing server exceptions.');
   }
 
-  void loadSentryModule()
-    .then((Sentry) => {
-      Sentry.withScope((scope) => {
-        if (context) {
-          for (const [key, value] of Object.entries(context)) {
-            scope.setExtra(key, value);
-          }
-        }
-        Sentry.captureException(error);
-      });
-    })
-    .catch((loadError) => {
-      throw loadError;
-    });
+  Sentry.withScope((scope) => {
+    if (context) {
+      for (const [key, value] of Object.entries(context)) {
+        scope.setExtra(key, value);
+      }
+    }
+    Sentry.captureException(error);
+  });
 }
 
 export function captureServerMessage(message: string, level: SeverityLevel = 'info') {
   if (!process.env.SENTRY_DSN || isWorkerLikeRuntime() || !shouldInitializeSentry()) {
     throw new Error('Sentry is required. Set SENTRY_DSN before capturing server messages.');
   }
-  void loadSentryModule()
-    .then((Sentry) => {
-      Sentry.captureMessage(message, level);
-    })
-    .catch((error) => {
-      throw error;
-    });
+  Sentry.captureMessage(message, level);
 }
 
 export async function probeSentryDelivery(
@@ -115,7 +93,6 @@ export async function probeSentryDelivery(
   message = 'premortem-observability-smoke'
 ) {
   await initServerObservability(serviceName);
-  const Sentry = await loadSentryModule();
   Sentry.captureMessage(message, 'info');
   await Sentry.flush(5000);
 }
