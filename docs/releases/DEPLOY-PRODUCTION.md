@@ -86,6 +86,8 @@ Recommended monorepo settings:
 
 The `pnpm run build:pages` wrapper loads repo-root `.env.production` before the Vercel build starts.
 
+If `VERCEL_TOKEN`, `VERCEL_ORG_ID`, or `VERCEL_PROJECT_ID` are missing from GitHub Actions secrets, the deploy workflow now falls back to verifying the live `premortem.jstn.site` entrypoint instead of failing the deployment record.
+
 Frontend environment variables (production):
 
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
