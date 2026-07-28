@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type MouseEvent } from 'react';
 import Image from 'next/image';
 
 import { authLinks, authProviderHref, type AuthMode } from '@/lib/auth-links';
@@ -221,6 +221,48 @@ export function AuthProviderForm({
     }
   }
 
+  async function handleGitLabSignIn(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    setAuthNotice(null);
+
+    if (!requireTermsIfNeeded()) {
+      return;
+    }
+
+    if (!supabase) {
+      router.replace(nextPath);
+      return;
+    }
+
+    setUiState((current) => ({ ...current, isSigningIn: true }));
+    try {
+      const form = event.currentTarget.closest('form');
+      const formData = form ? new FormData(form) : new FormData();
+      const response = await fetch(authProviderHref('gitlab', mode, nextPath), {
+        method: 'POST',
+        headers: { accept: 'application/json' },
+        body: formData
+      });
+
+      const payload = (await response.json().catch(() => null)) as { url?: string; error?: string } | null;
+      if (!response.ok || !payload?.url) {
+        throw new Error(
+          payload?.error === 'terms'
+            ? 'Accept the Privacy Policy and Terms of Service to continue.'
+            : 'Could not start social sign-in. Check your Supabase provider settings and the configured OAuth scopes.'
+        );
+      }
+
+      window.location.assign(payload.url);
+    } catch (error) {
+      setAuthNotice({
+        message: error instanceof Error ? error.message : 'Could not start social sign-in.',
+        tone: 'error'
+      });
+      setUiState((current) => ({ ...current, isSigningIn: false }));
+    }
+  }
+
   async function handleMagicLinkClick() {
     setAuthNotice(null);
 
@@ -281,16 +323,11 @@ export function AuthProviderForm({
 
         <section className="landing-auth-section" aria-label="Provider sign-in">
           <form className="landing-auth-form">
-            <input
-              type="hidden"
-              name="termsAccepted"
-              value={uiState.agreedToTerms ? '1' : '0'}
-            />
+            <input type="hidden" name="termsAccepted" value={uiState.agreedToTerms ? '1' : '0'} />
             <div className="landing-auth-card__providers">
               <button
-                type="submit"
-                formMethod="post"
-                formAction={authProviderHref('gitlab', mode, nextPath)}
+                type="button"
+                onClick={handleGitLabSignIn}
                 className="landing-auth-provider landing-auth-provider--gitlab"
                 data-border="true"
                 aria-disabled={uiState.isSigningIn || !uiState.agreedToTerms}
