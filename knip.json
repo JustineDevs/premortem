@@ -28,8 +28,6 @@
     ".omx/**",
     ".turbo/**",
     ".vscode/**",
-    ".wrangler/**",
-    "**/.wrangler/**",
     "packages/graphiti/.venv/**",
     "apps/web/.open-next/**",
     "apps/web/src/vendor/**",

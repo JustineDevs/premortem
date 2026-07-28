@@ -33,7 +33,6 @@ const MANIFEST_NAMES = [
   'pnpm-workspace.yaml',
   'turbo.json',
   'docker-compose.yml',
-  'wrangler.toml',
   'pnpm-lock.yaml',
   'package-lock.json',
   'yarn.lock',
@@ -264,7 +263,7 @@ export async function ingestGitLabProject(input: {
     }
   }
 
-  for (const configFile of ['mcp.local.json', 'mcp.json', 'wrangler.toml']) {
+  for (const configFile of ['mcp.local.json', 'mcp.json']) {
     if (!repo_tree.includes(configFile)) continue;
     try {
       const content = await fetchRepositoryFileRaw({

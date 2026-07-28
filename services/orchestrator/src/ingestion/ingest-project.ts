@@ -13,14 +13,14 @@ import type { GitLabMergeRequestDiffSummary } from '@premortem/integrations';
 import type { GitLabCiHistorySummary, GitLabIssueSummary } from '@premortem/integrations';
 
 const CI_FILE_NAMES = ['.gitlab-ci.yml', '.gitlab-ci.yaml'];
-const MANIFEST_NAMES = ['package.json', 'pnpm-workspace.yaml', 'turbo.json', 'docker-compose.yml', 'wrangler.toml'];
+const MANIFEST_NAMES = ['package.json', 'pnpm-workspace.yaml', 'turbo.json', 'docker-compose.yml'];
 const DEPENDENCY_FILES = ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock', 'bun.lockb'];
 const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.ts', '.cjs', '.mts', '.cts'];
 const SCHEMA_NAMES = ['schema.prisma', 'openapi.yaml', 'openapi.yml'];
 const OWNERSHIP_FILES = ['CODEOWNERS', '.github/CODEOWNERS'];
 const AGENT_PROMPT_DIR = '.agents/prompts';
 const AGENT_REGISTRY_PATH = '.agents/registry.yaml';
-const MCP_CONFIG_FILES = ['mcp.local.json', 'mcp.json', 'wrangler.toml'];
+const MCP_CONFIG_FILES = ['mcp.local.json', 'mcp.json'];
 const MAX_SOURCE_SAMPLE_LINES = 120;
 const MAX_SOURCE_FILES = 80;
 const MAX_PREVIEW_LINES = 120;

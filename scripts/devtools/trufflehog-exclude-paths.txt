@@ -4,7 +4,6 @@
 (^|/)\.next/
 (^|/)\.turbo/
 (^|/)\.open-next/
-(^|/)\.wrangler/
 (^|/)coverage/
 (^|/)dist/
 (^|/)packages/[^/]+/dist/

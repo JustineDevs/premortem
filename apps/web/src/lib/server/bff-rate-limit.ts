@@ -19,7 +19,6 @@ export function bffRateLimitKey(request: Request, path: string): string {
   const actor =
     request.headers.get('x-premortem-actor-id')?.trim() ||
     request.headers.get('x-user-id')?.trim() ||
-    request.headers.get('cf-connecting-ip')?.trim() ||
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
     'anonymous';
   return `${actor}:${path}`;

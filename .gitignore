@@ -4,17 +4,6 @@ node_modules
 .env.*
 !.env.example
 mcp.local.json
-**/.wrangler/
-!/.wrangler/
-!/.wrangler/deploy/
-!/.wrangler/deploy/config.json
-!apps/web/.wrangler/
-!apps/web/.wrangler/deploy/
-!apps/web/.wrangler/deploy/config.json
-apps/web/.wrangler/state/
-apps/web/.wrangler/tmp/
-/.wrangler/state/
-/.wrangler/tmp/
 .open-next
 .open-next/cache/
 .open-next/.build/

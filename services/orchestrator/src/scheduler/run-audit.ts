@@ -1773,7 +1773,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
 
     const sourceOfTruthRefs = uniqueStrings([
       ...ingestion.repo_tree.filter((filePath) =>
-        /(\.agents\/schemas\/|supabase\/migrations\/|prisma\/schema\.prisma$|package\.json$|wrangler(\.production)?\.toml$|next\.config\.(mjs|ts)$|\.env\.example$|SECURITY\.md$|README\.md$|docs\/.*\.md$)/.test(
+        /(\.agents\/schemas\/|supabase\/migrations\/|prisma\/schema\.prisma$|package\.json$|next\.config\.(mjs|ts)$|\.env\.example$|SECURITY\.md$|README\.md$|docs\/.*\.md$)/.test(
           filePath
         )
       ),
@@ -1808,12 +1808,12 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       attempt: sharedPayload.attempt,
       env_example_refs: ingestion.repo_tree.filter((filePath) => /\.env\.example$|\.env\.template$|\.env\.sample$/.test(filePath)).slice(0, 20),
       runtime_config_refs: ingestion.repo_tree.filter((filePath) =>
-        /(production-mode\.ts|feature-flags\.ts|use-canonical-feature-flag\.ts|next\.config\.(mjs|ts)|wrangler(\.production)?\.toml|docker-compose\.yml|workspace\.ts|production-boundaries\.md)/.test(
+        /(production-mode\.ts|feature-flags\.ts|use-canonical-feature-flag\.ts|next\.config\.(mjs|ts)|docker-compose\.yml|workspace\.ts|production-boundaries\.md)/.test(
           filePath
         )
       ).slice(0, 40),
       deployment_config_refs: ingestion.repo_tree.filter((filePath) =>
-        /(wrangler(\.production)?\.toml|docker-compose\.yml|kustomization\.ya?ml|helm\/|\.github\/workflows\/|\.gitlab-ci\.yml|package\.json|next\.config\.(mjs|ts))/.test(
+        /(docker-compose\.yml|kustomization\.ya?ml|helm\/|\.github\/workflows\/|\.gitlab-ci\.yml|package\.json|next\.config\.(mjs|ts))/.test(
           filePath
         )
       ).slice(0, 40),
@@ -1943,9 +1943,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       scheduler_refs: [
         'services/orchestrator/src/scheduler/run-audit.ts',
         'services/orchestrator/src/services/audit-persistence.ts',
-        'apps/api/src/index.ts',
-        'apps/api/wrangler.toml',
-        'apps/api/wrangler.production.toml'
+        'apps/api/src/index.ts'
       ],
       graph_grounding: sharedPayload.graph_grounding,
       validation_policy: sharedPayload.validation_policy
