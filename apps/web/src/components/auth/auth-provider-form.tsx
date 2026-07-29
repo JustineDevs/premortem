@@ -7,7 +7,6 @@ import Image from 'next/image';
 
 import {
   authLinks,
-  authProviderHref,
   getCanonicalBrowserAppOrigin,
   type AuthMode
 } from '@/lib/auth-links';
@@ -242,35 +241,20 @@ export function AuthProviderForm({
 
     setUiState((current) => ({ ...current, isSigningIn: true }));
     try {
-      const form = event.currentTarget.closest('form');
-      const formData = form ? new FormData(form) : new FormData();
-      const authUrl = authProviderHref('gitlab', mode, nextPath);
-      const currentOrigin = window.location.origin;
-      const targetOrigin = new URL(authUrl, currentOrigin).origin;
-
-      if (form && targetOrigin !== currentOrigin) {
-        form.setAttribute('action', authUrl);
-        form.setAttribute('method', 'post');
-        form.submit();
-        return;
-      }
-
-      const response = await fetch(authUrl, {
-        method: 'POST',
-        headers: { accept: 'application/json' },
-        body: formData
+      const redirectTo = getEmailRedirectUrl(nextPath, mode);
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'gitlab',
+        options: {
+          redirectTo,
+          scopes: 'read_user'
+        }
       });
 
-      const payload = (await response.json().catch(() => null)) as { url?: string; error?: string } | null;
-      if (!response.ok || !payload?.url) {
-        throw new Error(
-          payload?.error === 'terms'
-            ? 'Accept the Privacy Policy and Terms of Service to continue.'
-            : 'Could not start social sign-in. Check your Supabase provider settings and the configured OAuth scopes.'
-        );
+      if (error || !data.url) {
+        throw error ?? new Error('Could not start social sign-in. Check your Supabase provider settings and the configured OAuth scopes.');
       }
 
-      window.location.assign(payload.url);
+      window.location.assign(data.url);
     } catch (error) {
       setAuthNotice({
         message: error instanceof Error ? error.message : 'Could not start social sign-in.',

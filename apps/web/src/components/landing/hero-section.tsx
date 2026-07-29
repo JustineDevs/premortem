@@ -1,4 +1,4 @@
-import { authProviderHref } from '@/lib/auth-links';
+import { authLinks } from '@/lib/auth-links';
 import { GitLabLogo } from './icons/gitlab-logo';
 import { HeroInfoSection } from './hero-info-section';
 import { assets } from './assets';
@@ -64,7 +64,7 @@ export function HeroSection() {
       <HeroInfoSection />
 
       <a
-        href={authProviderHref('gitlab', 'signup')}
+        href={`${authLinks.signup}?next=${encodeURIComponent(authLinks.defaultNext)}`}
         className="framer-akk7mv"
         data-border="true"
         style={{

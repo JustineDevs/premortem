@@ -141,53 +141,66 @@ export async function GET(request: NextRequest) {
     return authClient.attachCookies(NextResponse.redirect(redirectUrl));
   }
 
-  let redirectTarget = new URL(next, origin);
+  try {
+    let redirectTarget = new URL(next, origin);
 
-  const signedInWithGitLab =
-    user?.app_metadata?.provider === 'gitlab' ||
-    user?.identities?.some((identity: UserIdentity) => identity.provider === 'gitlab');
+    const signedInWithGitLab =
+      user?.app_metadata?.provider === 'gitlab' ||
+      user?.identities?.some((identity: UserIdentity) => identity.provider === 'gitlab');
 
-  await markProfileOnboardingCompleted(user.id).catch((error: unknown) => {
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('[auth/callback] onboarding completion failed:', error instanceof Error ? error.message : error);
-    }
-  });
-
-  if (
-    user &&
-    signedInWithGitLab &&
-    process.env.GITLAB_CLIENT_ID &&
-    process.env.GITLAB_CLIENT_SECRET
-  ) {
-    const context = await actorContextFromUser(user, session?.access_token ?? null);
-    const hasGitLabIntegration = await hasActiveProviderConnection(
-      context.organizationId,
-      'gitlab'
-    );
-
-    if (!hasGitLabIntegration) {
-      const providerToken = session?.provider_token ?? null;
-
-      if (providerToken) {
-        const persisted = await persistGitLabConnection({
-          context,
-          accessToken: providerToken,
-          refreshToken: session?.provider_refresh_token
-        });
-
-        if (persisted.ok) {
-          redirectTarget = new URL(projectsDiscoverPath(next), origin);
-          redirectTarget.searchParams.set('integration_notice', 'gitlab_connected');
-          return authClient.attachCookies(NextResponse.redirect(redirectTarget));
-        }
+    await markProfileOnboardingCompleted(user.id).catch((error: unknown) => {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[auth/callback] onboarding completion failed:', error instanceof Error ? error.message : error);
       }
+    });
 
-      redirectTarget = new URL('/api/integrations/connect/gitlab', origin);
-      redirectTarget.searchParams.set('next', projectsDiscoverPath(next));
-      redirectTarget.searchParams.set('discover', '1');
-      return authClient.attachCookies(NextResponse.redirect(redirectTarget));
+    if (
+      user &&
+      signedInWithGitLab &&
+      process.env.GITLAB_CLIENT_ID &&
+      process.env.GITLAB_CLIENT_SECRET
+    ) {
+      const context = await actorContextFromUser(user, session?.access_token ?? null);
+      const hasGitLabIntegration = await hasActiveProviderConnection(
+        context.organizationId,
+        'gitlab'
+      );
+
+      if (!hasGitLabIntegration) {
+        const providerToken = session?.provider_token ?? null;
+
+        if (providerToken) {
+          const persisted = await persistGitLabConnection({
+            context,
+            accessToken: providerToken,
+            refreshToken: session?.provider_refresh_token
+          });
+
+          if (persisted.ok) {
+            redirectTarget = new URL(projectsDiscoverPath(next), origin);
+            redirectTarget.searchParams.set('integration_notice', 'gitlab_connected');
+            return authClient.attachCookies(NextResponse.redirect(redirectTarget));
+          }
+        }
+
+        redirectTarget = new URL('/api/integrations/connect/gitlab', origin);
+        redirectTarget.searchParams.set('next', projectsDiscoverPath(next));
+        redirectTarget.searchParams.set('discover', '1');
+        return authClient.attachCookies(NextResponse.redirect(redirectTarget));
+      }
     }
-  }
 
-  return authClient.attachCookies(NextResponse.redirect(redirectTarget));
+    return authClient.attachCookies(NextResponse.redirect(redirectTarget));
+  } catch (error) {
+    const description = error instanceof Error ? error.message : 'Unexpected auth callback failure.';
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('[auth/callback] unhandled failure:', description);
+    }
+
+    return authFailureRedirect(authClient, origin, fallbackPath, {
+      description,
+      code: 'callback_failure'
+    });
+  }
 }
