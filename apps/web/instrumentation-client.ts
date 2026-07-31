@@ -1,7 +1,1 @@
-import { initBotId } from 'botid/client/core';
-
-import { botIdProtectRoutes } from '@/lib/botid-protect';
-
-initBotId({
-  protect: botIdProtectRoutes
-});
+// BotID intentionally disabled for production smoke while we verify public access.
