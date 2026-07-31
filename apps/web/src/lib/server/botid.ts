@@ -5,6 +5,10 @@ function isLoopbackHost(hostname: string) {
 }
 
 export function getBotIdEnabledFlag() {
+  if (process.env.VERCEL_ENV === 'production') {
+    return false;
+  }
+
   return process.env.PREMORTEM_BOTID_ENABLED === '1';
 }
 
