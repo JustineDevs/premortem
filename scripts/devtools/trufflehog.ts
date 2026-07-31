@@ -95,9 +95,17 @@ function runWithDocker() {
   });
 }
 
-const binary = await ensureBinary();
-if (binary) {
-  runWithBinary(binary);
-} else {
+async function main() {
+  const binary = await ensureBinary();
+  if (binary) {
+    runWithBinary(binary);
+    return;
+  }
+
   runWithDocker();
 }
+
+main().catch((error) => {
+  console.error('[trufflehog] scan failed:', error);
+  process.exitCode = 1;
+});
