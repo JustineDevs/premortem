@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@premortem/agent-kit": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@premortem/graphiti": "workspace:*",
     "@premortem/graph-model": "workspace:*",
     "@nangohq/node": "^0.70.8",

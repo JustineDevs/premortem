@@ -36,6 +36,7 @@
     "@premortem/storage": "workspace:*",
     "@premortem/workflow": "workspace:*",
     "@premortem/observability": "workspace:*",
+    "@premortem/evals": "workspace:*",
     "@datastructures-js/disjoint-set": "workspace:*"
   },
   "devDependencies": {
