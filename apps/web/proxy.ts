@@ -1,9 +1,11 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { isLocalAuthBypassEnabled } from '@premortem/domain';
 import { NextResponse, type NextRequest } from 'next/server';
+import { buildSecurityHeaders } from '@premortem/security';
 
 // @ts-ignore Next/Vercel resolves this through the app webpack pipeline.
 import { resolveSupabaseRuntimeConfig } from './src/lib/supabase/server-config';
+import { ensureCsrfCookie } from './src/lib/csrf';
 
 function isProtectedRoute(pathname: string): boolean {
   return (
@@ -20,9 +22,17 @@ function loginRedirectUrl(request: NextRequest): URL {
   return url;
 }
 
+function applySecurityHeaders(response: NextResponse) {
+  for (const [key, value] of Object.entries(buildSecurityHeaders('web'))) {
+    response.headers.set(key, value);
+  }
+  response.headers.set('x-premortem-app', 'premortem-web');
+  return response;
+}
+
 export async function proxy(request: NextRequest) {
   if (isLocalAuthBypassEnabled() || !isProtectedRoute(request.nextUrl.pathname)) {
-    return NextResponse.next({ request });
+    return applySecurityHeaders(ensureCsrfCookie(NextResponse.next({ request }), request));
   }
 
   const config = await resolveSupabaseRuntimeConfig();
@@ -50,14 +60,14 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getSession();
 
   if (!session?.user) {
-    const response = NextResponse.redirect(loginRedirectUrl(request));
+    const response = applySecurityHeaders(ensureCsrfCookie(NextResponse.redirect(loginRedirectUrl(request)), request));
     for (const cookie of pendingCookies) {
       response.cookies.set(cookie.name, cookie.value, cookie.options);
     }
     return response;
   }
 
-  const response = NextResponse.next({ request });
+  const response = applySecurityHeaders(ensureCsrfCookie(NextResponse.next({ request }), request));
   for (const cookie of pendingCookies) {
     response.cookies.set(cookie.name, cookie.value, cookie.options);
   }

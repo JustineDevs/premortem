@@ -580,7 +580,11 @@ export async function getAuditRunDetails(auditRunId: string) {
           dedupeClusters: true,
           issueCandidates: true,
           rejectedIssueCandidateArtifacts: true,
-          events: true
+          events: true,
+          riskIntents: true,
+          policyDecisions: true,
+          fixVerifications: true,
+          evalRuns: true
         }
       },
       agentRuns: {
@@ -666,6 +670,68 @@ export async function getAuditRunDetails(auditRunId: string) {
       rejectedIssueCandidateArtifacts: {
         orderBy: { createdAt: 'asc' },
         take: 100
+      },
+      riskIntents: {
+        orderBy: { createdAt: 'asc' },
+        take: 200,
+        select: {
+          id: true,
+          type: true,
+          source: true,
+          status: true,
+          summary: true,
+          confidence: true,
+          expiresAt: true,
+          createdAt: true
+        }
+      },
+      policyDecisions: {
+        orderBy: { createdAt: 'asc' },
+        take: 200,
+        select: {
+          id: true,
+          outcome: true,
+          rationale: true,
+          score: true,
+          policyPackId: true,
+          issueCandidateId: true,
+          riskIntentId: true,
+          createdAt: true,
+          details: true
+        }
+      },
+      fixVerifications: {
+        orderBy: { createdAt: 'asc' },
+        take: 100,
+        select: {
+          id: true,
+          status: true,
+          summary: true,
+          sourceAuditRunId: true,
+          closingAuditRunId: true,
+          sourceGraphSnapshotId: true,
+          closingGraphSnapshotId: true,
+          publishedIssueId: true,
+          issueCandidateId: true,
+          createdAt: true,
+          verifiedAt: true,
+          observedChanges: true
+        }
+      },
+      evalRuns: {
+        orderBy: { createdAt: 'asc' },
+        take: 100,
+        select: {
+          id: true,
+          provider: true,
+          status: true,
+          name: true,
+          summary: true,
+          createdAt: true,
+          startedAt: true,
+          completedAt: true,
+          metrics: true
+        }
       },
       events: {
         orderBy: { createdAt: 'desc' },

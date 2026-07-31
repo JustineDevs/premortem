@@ -9,6 +9,7 @@ import {
 import { resolveActorOrganization } from '@premortem/db/actor-context';
 
 import { authLinks, type AuthMode } from '@/lib/auth-links';
+import { ensureCsrfCookie } from '@/lib/csrf';
 import {
   getCanonicalLoopbackOrigin,
   getAuthRedirectOrigin,
@@ -56,6 +57,7 @@ async function actorContextFromUser(
 
 function authFailureRedirect(
   authClient: RouteHandlerSupabase,
+  request: NextRequest,
   origin: string,
   fallbackPath: string,
   options?: { description?: string; code?: string }
@@ -68,7 +70,7 @@ function authFailureRedirect(
   if (options?.code) {
     failureUrl.searchParams.set('error_code', options.code);
   }
-  return authClient.attachCookies(NextResponse.redirect(failureUrl));
+  return authClient.attachCookies(ensureCsrfCookie(NextResponse.redirect(failureUrl), request));
 }
 
 export async function GET(request: NextRequest) {
@@ -107,7 +109,7 @@ export async function GET(request: NextRequest) {
     if (errorCode) {
       redirectUrl.searchParams.set('error_code', errorCode);
     }
-    return authClient.attachCookies(NextResponse.redirect(redirectUrl));
+    return authClient.attachCookies(ensureCsrfCookie(NextResponse.redirect(redirectUrl), request));
   }
 
   if (code) {
@@ -119,7 +121,7 @@ export async function GET(request: NextRequest) {
       const redirectUrl = new URL(fallbackPath, origin);
       redirectUrl.searchParams.set('error', 'callback');
       redirectUrl.searchParams.set('error_description', error.message);
-      return authClient.attachCookies(NextResponse.redirect(redirectUrl));
+      return authClient.attachCookies(ensureCsrfCookie(NextResponse.redirect(redirectUrl), request));
     }
   }
 
@@ -132,13 +134,13 @@ export async function GET(request: NextRequest) {
 
   if (!user || !session) {
     if (!code) {
-      return authFailureRedirect(authClient, origin, fallbackPath);
+      return authFailureRedirect(authClient, request, origin, fallbackPath);
     }
 
     const redirectUrl = new URL(fallbackPath, origin);
     redirectUrl.searchParams.set('error', 'callback');
     redirectUrl.searchParams.set('error_description', 'Session exchange did not produce a user session.');
-    return authClient.attachCookies(NextResponse.redirect(redirectUrl));
+    return authClient.attachCookies(ensureCsrfCookie(NextResponse.redirect(redirectUrl), request));
   }
 
   try {
@@ -179,18 +181,18 @@ export async function GET(request: NextRequest) {
           if (persisted.ok) {
             redirectTarget = new URL(projectsDiscoverPath(next), origin);
             redirectTarget.searchParams.set('integration_notice', 'gitlab_connected');
-            return authClient.attachCookies(NextResponse.redirect(redirectTarget));
+            return authClient.attachCookies(ensureCsrfCookie(NextResponse.redirect(redirectTarget), request));
           }
         }
 
         redirectTarget = new URL('/api/integrations/connect/gitlab', origin);
         redirectTarget.searchParams.set('next', projectsDiscoverPath(next));
         redirectTarget.searchParams.set('discover', '1');
-        return authClient.attachCookies(NextResponse.redirect(redirectTarget));
+        return authClient.attachCookies(ensureCsrfCookie(NextResponse.redirect(redirectTarget), request));
       }
     }
 
-    return authClient.attachCookies(NextResponse.redirect(redirectTarget));
+    return authClient.attachCookies(ensureCsrfCookie(NextResponse.redirect(redirectTarget), request));
   } catch (error) {
     const description = error instanceof Error ? error.message : 'Unexpected auth callback failure.';
 
@@ -198,7 +200,7 @@ export async function GET(request: NextRequest) {
       console.error('[auth/callback] unhandled failure:', description);
     }
 
-    return authFailureRedirect(authClient, origin, fallbackPath, {
+    return authFailureRedirect(authClient, request, origin, fallbackPath, {
       description,
       code: 'callback_failure'
     });

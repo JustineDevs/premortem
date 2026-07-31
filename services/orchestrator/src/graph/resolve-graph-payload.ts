@@ -64,6 +64,7 @@ export function rebuildGraphFromSnapshotMetadata(input: {
       source_code_samples: {},
       auth_patterns: [],
       prior_findings: [],
+      risk_intents: [],
       pipeline_files: [],
       source_files: [] as SourceFileSnapshot[],
       ownership_hints: [] as OwnershipHint[],

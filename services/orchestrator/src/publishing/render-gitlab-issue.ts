@@ -40,6 +40,13 @@ function formatConfidencePercent(value: number): string {
   return `${Math.round(bounded * 100)}%`;
 }
 
+function formatReviewState(status: string | undefined): string {
+  const normalized = sanitizeText(status ?? 'pending').toLowerCase();
+  if (normalized === 'approved') return 'Reviewer-approved publish artifact';
+  if (normalized === 'rejected') return 'Reviewer rejected, not publishable';
+  return 'Reviewer draft, raw AI evidence preserved below';
+}
+
 function buildGitLabHeader(
   issue: IssueCandidate,
   context: GitLabIssueRenderContext,
@@ -56,35 +63,49 @@ function buildGitLabHeader(
   const dueDate = context.dueDate ?? 'none';
   const timeEstimate = context.timeEstimate ?? 'none';
   const weight = context.weight != null ? String(context.weight) : 'none';
+  const reviewerStatus = sanitizeText(context.reviewerStatus ?? 'pending') || 'pending';
+  const confidence = formatConfidencePercent(Number(issue.confidence));
+  const reviewState = formatReviewState(context.reviewerStatus);
+  const consoleLink =
+    auditRunId !== 'unknown'
+      ? `[Open in Premortem console](${`${siteUrl.replace(/\/$/, '')}/app?tab=audits&audit=${encodeURIComponent(auditRunId)}`})`
+      : 'unavailable';
 
   return [
     '<table>',
     '<tr>',
-      `<td width="108" valign="top"><img src="${logoUrl}" alt="${PREMORTEM_PRODUCT_NAME}" width="80" /></td>`,
+    `<td width="108" valign="top"><img src="${logoUrl}" alt="${PREMORTEM_PRODUCT_NAME}" width="80" /></td>`,
     '<td>',
     `# ${issue.title}`,
     '',
-    `**${PREMORTEM_PRODUCT_NAME} published issue** · structured remediation brief for GitLab review and triage.`,
+    `> **${PREMORTEM_PRODUCT_NAME} publish artifact**: reviewer-approved remediation brief for GitLab triage.`,
+    `> Raw AI analysis remains visible below in the evidence and lineage sections.`,
     '',
-    `> ${sanitizeText(issue.predicted_failure_summary) || 'Published issue with grounded evidence and remediation guidance.'}`,
+    '| At a glance | Value |',
+    '| --- | --- |',
+    `| Severity | \`${sanitizeText(String(issue.severity))}\` |`,
+    `| Confidence | ${confidence} |`,
+    `| Priority | \`${sanitizeText(context.priority ?? 'normal')}\` |`,
+    `| Review state | \`${reviewerStatus}\` |`,
+    `| Evidence refs | ${sourceCount} |`,
     '',
-    '| Field | Value |',
+    '| Traceability | Value |',
     '| --- | --- |',
     `| Issue candidate | \`${issueCandidateId}\` |`,
     `| Audit run | \`${auditRunId}\` |`,
     `| Category | \`${sanitizeText(issue.category)}\` |`,
-    `| Severity | \`${sanitizeText(String(issue.severity))}\` |`,
-    `| Confidence | ${formatConfidencePercent(Number(issue.confidence))} |`,
     `| Branch | \`${branch}\` |`,
     `| Commit | \`${commitSha}\` |`,
-    `| Reviewer status | \`${sanitizeText(context.reviewerStatus ?? 'pending')}\` |`,
-    `| Priority | \`${sanitizeText(context.priority ?? 'normal')}\` |`,
     `| Assignee | ${assignee} |`,
     `| Milestone | ${sanitizeText(milestone)} |`,
     `| Due date | ${sanitizeText(dueDate)} |`,
     `| Time estimate | ${sanitizeText(timeEstimate)} |`,
     `| Weight | ${weight} |`,
-    `| Evidence refs | ${sourceCount} |`,
+    `| Console link | ${consoleLink} |`,
+    '',
+    `> ${sanitizeText(issue.predicted_failure_summary) || 'Published issue with grounded evidence and remediation guidance.'}`,
+    '',
+    `> ${reviewState}`,
     '</td>',
     '</tr>',
     '</table>',

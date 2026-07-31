@@ -129,7 +129,11 @@ async function main() {
 
   await runStep(['run', 'db:generate']);
   await runStep(['--filter', '@premortem/db', 'build']);
-  await runStep(['run', 'db:migrate']);
+  if (process.env.PREMORTEM_SKIP_DB_MIGRATE === '1') {
+    console.log(JSON.stringify({ service: 'local-stack', step: 'db:migrate', status: 'skipped' }));
+  } else {
+    await runStep(['run', 'db:migrate']);
+  }
 
   await runStep(['--filter', '@premortem/domain', 'build']);
 

@@ -3,6 +3,7 @@ import { ConsoleReviewAction } from '@premortem/domain';
 import { proxyPremortemApi, proxyPremortemApiRaw } from '@/lib/server/proxy-api';
 import { getApiBaseUrl } from '@/lib/runtime-config';
 import { verifyBotId } from '@/lib/server/botid';
+import { assertValidCsrfRequest } from '@/lib/csrf';
 
 const RAW_PROXY_PATHS = new Set([
   '/api/stripe/webhook',
@@ -43,7 +44,10 @@ async function proxy(request: Request) {
     const responseHeaders = new Headers();
     responseHeaders.set('vary', 'origin, access-control-request-method, access-control-request-headers');
     responseHeaders.set('access-control-allow-methods', 'GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS');
-    responseHeaders.set('access-control-allow-headers', requestHeaders ?? 'authorization,content-type,x-requested-with');
+    responseHeaders.set(
+      'access-control-allow-headers',
+      requestHeaders ?? 'authorization,content-type,x-requested-with,x-premortem-csrf'
+    );
     responseHeaders.set('access-control-allow-credentials', 'true');
     responseHeaders.set('access-control-max-age', '86400');
     responseHeaders.set('access-control-allow-origin', origin ?? '*');
@@ -144,6 +148,13 @@ async function proxy(request: Request) {
       : nestedIssueActionBody
         ? new TextEncoder().encode(JSON.stringify(nestedIssueActionBody))
         : await request.clone().arrayBuffer();
+
+  if (isUnsafeMethod(method) && !RAW_PROXY_PATHS.has(url.pathname)) {
+    const csrf = assertValidCsrfRequest(request);
+    if (!csrf.passed) {
+      return Response.json({ error: csrf.reason ?? 'Invalid CSRF token' }, { status: 403 });
+    }
+  }
 
   if (RAW_PROXY_PATHS.has(url.pathname)) {
     return proxyPremortemApiRaw(path, {

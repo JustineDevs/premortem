@@ -26,7 +26,10 @@ export async function createRouteHandlerSupabaseClient(
     config.anonKey,
     {
       cookieOptions: {
-        secure: process.env.NODE_ENV === 'production'
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        path: '/'
       },
       cookies: {
         getAll() {

@@ -7,6 +7,7 @@ import {
   resolveStripePriceId
 } from '../lib/stripe.js';
 import { resolveApiActorContext } from '../lib/request-context.js';
+import { resolvePremortemPublishSiteUrl } from '@premortem/domain';
 
 const BILLING_ROLES = ['owner', 'admin', 'billing', 'member'] as const;
 
@@ -71,10 +72,7 @@ export async function handleBillingCheckoutPost(request: Request) {
       });
     }
 
-    const origin = process.env.NEXT_PUBLIC_APP_URL?.trim();
-    if (!origin) {
-      throw new Error('NEXT_PUBLIC_APP_URL is required for Stripe Checkout redirect URLs.');
-    }
+    const origin = resolvePremortemPublishSiteUrl();
 
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',

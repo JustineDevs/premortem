@@ -3,6 +3,7 @@ export type { AuditRunSnapshot as RuntimeAuditSnapshot } from '@premortem/orches
 import type { AuditRunSnapshot } from '@premortem/orchestrator/read-model';
 import { z } from 'zod';
 import { getApiBaseUrl } from '@/lib/runtime-config';
+import { browserSecurityFetch } from '@/lib/csrf';
 import type { Project } from '@/lib/premortem-os/types';
 
 export type RuntimeApiHeaders = Record<string, string>;
@@ -20,7 +21,7 @@ export class RuntimeApiError extends Error {
 }
 
 async function apiFetch(path: string, init?: RequestInit, actorHeaders?: RuntimeApiHeaders) {
-  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+  const response = await browserSecurityFetch(`${getApiBaseUrl()}${path}`, {
     ...init,
     headers: {
       accept: 'application/json',
@@ -95,7 +96,7 @@ export async function submitRuntimeAudit(input: {
   triggeredById?: string;
   headers?: Record<string, string>;
 }) {
-  const response = await fetch(`${getApiBaseUrl()}/api/audits`, {
+  const response = await browserSecurityFetch(`${getApiBaseUrl()}/api/audits`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',

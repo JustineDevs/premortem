@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 
 import { captureServerException } from '@premortem/observability/server';
+import { buildSecurityHeaders } from '@premortem/security';
 
 import {
   handleAuditCancel,
@@ -83,6 +84,50 @@ import {
 
 const app = new Hono<{ Bindings: AppEnv; Variables: { requestId: string } }>();
 const HEALTH_PATHS = new Set(['/', '/health', '/healthz', '/api/mcp/healthz']);
+const API_V1_PREFIX = '/api/v1';
+
+function isVersionedApiPath(pathname: string) {
+  return pathname === API_V1_PREFIX || pathname.startsWith(`${API_V1_PREFIX}/`);
+}
+
+function normalizeApiVersionPath(pathname: string) {
+  if (pathname === API_V1_PREFIX) {
+    return '/api';
+  }
+
+  return pathname.replace(/^\/api\/v1(?=\/|$)/, '/api');
+}
+
+function buildSuccessorVersionLink(pathname: string, origin: string) {
+  if (!pathname.startsWith('/api/')) {
+    return null;
+  }
+
+  return `<${origin}${API_V1_PREFIX}${pathname.slice(4)}>; rel="successor-version"; type="application/json"`;
+}
+
+function applySecurityHeaders(
+  response: Response,
+  options: { deprecated?: boolean; requestUrl?: URL } = {}
+) {
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(buildSecurityHeaders('api'))) {
+    headers.set(key, value);
+  }
+  headers.set('x-premortem-api-version', 'v1');
+  if (options.deprecated && options.requestUrl) {
+    headers.set('Deprecation', 'true');
+    headers.set('x-premortem-api-deprecated', 'true');
+    const link = buildSuccessorVersionLink(options.requestUrl.pathname, options.requestUrl.origin);
+    if (link) {
+      headers.set('Link', link);
+    }
+  }
+  return new Response(response.body, {
+    status: response.status,
+    headers
+  });
+}
 
 function createHealthResponse(service: string) {
   return Response.json({ ok: true, service });
@@ -95,13 +140,14 @@ app.use('*', async (c, next) => {
 
   const pathname = new URL(c.req.url).pathname;
   if (!HEALTH_PATHS.has(pathname) && !(await checkRateLimit(rateLimitKey(c.req.raw, pathname), c.env))) {
-    return attachRequestId(
+    return applySecurityHeaders(attachRequestId(
       Response.json({ error: 'Rate limit exceeded. Retry shortly.', code: 'rate_limited', requestId }, { status: 429 }),
       requestId
-    );
+    ));
   }
 
   await next();
+  c.res = applySecurityHeaders(c.res);
 });
 
 app.onError((error, c) => {
@@ -109,16 +155,16 @@ app.onError((error, c) => {
   const pathname = new URL(c.req.url).pathname;
 
   if (error instanceof ApiUnauthorizedError) {
-    return attachRequestId(
+    return applySecurityHeaders(attachRequestId(
       Response.json({ error: 'Unauthorized', requestId }, { status: 401 }),
       requestId
-    );
+    ));
   }
   if (error instanceof ApiForbiddenError) {
-    return attachRequestId(
+    return applySecurityHeaders(attachRequestId(
       Response.json({ error: 'Forbidden', requestId }, { status: 403 }),
       requestId
-    );
+    ));
   }
 
   captureServerException(error, {
@@ -126,10 +172,10 @@ app.onError((error, c) => {
     method: c.req.method,
     requestId
   });
-  return attachRequestId(
+  return applySecurityHeaders(attachRequestId(
     Response.json({ error: 'Internal Server Error', requestId }, { status: 500 }),
     requestId
-  );
+  ));
 });
 
 app.get('/api/workspace', (c) => handleWorkspaceGet(c.req.raw));
@@ -224,41 +270,60 @@ app.notFound(() => Response.json({ error: 'Not found' }, { status: 404 }));
 
 async function routeRequest(request: Request, env: AppEnv = {}, _ctx?: ExecutionContextLike) {
   const requestId = resolveRequestId(request);
-  const url = new URL(request.url);
+  const originalUrl = new URL(request.url);
+  const versioned = isVersionedApiPath(originalUrl.pathname);
+  const requestUrl = versioned ? new URL(request.url) : originalUrl;
+  if (versioned) {
+    requestUrl.pathname = normalizeApiVersionPath(originalUrl.pathname);
+  }
+  const dispatchRequest = versioned ? new Request(requestUrl, request) : request;
+  const pathname = requestUrl.pathname;
 
   if (env.APP_ENV === 'production' && !env.RATE_LIMITER) {
     throw new Error('Missing RATE_LIMITER binding in production');
   }
 
-  if (!HEALTH_PATHS.has(url.pathname) && !(await checkRateLimit(rateLimitKey(request, url.pathname), env))) {
-    return attachRequestId(
-      Response.json({ error: 'Rate limit exceeded. Retry shortly.', code: 'rate_limited', requestId }, { status: 429 }),
-      requestId
+  if (!HEALTH_PATHS.has(pathname) && !(await checkRateLimit(rateLimitKey(dispatchRequest, pathname), env))) {
+    return applySecurityHeaders(
+      attachRequestId(
+        Response.json({ error: 'Rate limit exceeded. Retry shortly.', code: 'rate_limited', requestId }, { status: 429 }),
+        requestId
+      ),
+      { requestUrl: originalUrl, deprecated: !versioned && pathname.startsWith('/api/') && !HEALTH_PATHS.has(pathname) }
     );
   }
 
   try {
-    const response = await dispatchRoute(request, env, _ctx);
-    return attachRequestId(response, requestId);
+    const response = await dispatchRoute(dispatchRequest, env, _ctx);
+    return applySecurityHeaders(attachRequestId(response, requestId), {
+      requestUrl: originalUrl,
+      deprecated: !versioned && pathname.startsWith('/api/') && !HEALTH_PATHS.has(pathname)
+    });
   } catch (error) {
     if (error instanceof ApiUnauthorizedError) {
-      return attachRequestId(
-        Response.json({ error: 'Unauthorized', requestId }, { status: 401 }),
-        requestId
+      return applySecurityHeaders(
+        attachRequestId(Response.json({ error: 'Unauthorized', requestId }, { status: 401 }), requestId),
+        { requestUrl: originalUrl, deprecated: !versioned && pathname.startsWith('/api/') && !HEALTH_PATHS.has(pathname) }
       );
     }
     if (error instanceof ApiForbiddenError) {
-      return attachRequestId(
-        Response.json({ error: 'Forbidden', requestId }, { status: 403 }),
-        requestId
+      return applySecurityHeaders(
+        attachRequestId(Response.json({ error: 'Forbidden', requestId }, { status: 403 }), requestId),
+        { requestUrl: originalUrl, deprecated: !versioned && pathname.startsWith('/api/') && !HEALTH_PATHS.has(pathname) }
       );
     }
     captureServerException(error, {
-      route: url.pathname,
+      route: pathname,
       method: request.method,
       requestId
     });
-    throw error;
+    return applySecurityHeaders(
+      attachRequestId(
+        Response.json({ error: 'Internal Server Error', requestId }, { status: 500 }),
+        requestId
+      ),
+      { requestUrl: originalUrl, deprecated: !versioned && pathname.startsWith('/api/') && !HEALTH_PATHS.has(pathname) }
+    );
   }
 }
 
@@ -532,5 +597,5 @@ async function dispatchRoute(request: Request, env: AppEnv = {}, _ctx?: Executio
 }
 
 export async function appRouter(request: Request, env: AppEnv = {}, ctx?: ExecutionContextLike) {
-  return app.fetch(request, env, ctx as any);
+  return routeRequest(request, env, ctx);
 }

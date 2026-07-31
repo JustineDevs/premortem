@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { RuntimeAuditSnapshot } from '@/lib/premortem-api/client';
 import { buildOsQueryKey, type OsQueryScope } from '@/hooks/use-os-console-data';
 import { isUnauthorizedBffError, shouldRetryBffQuery } from '@/lib/bff-client';
+import { browserSecurityFetch } from '@/lib/csrf';
 import { premortemBrand } from '@/lib/premortem-os/branding';
 import {
   formatDateTime,
@@ -203,7 +204,7 @@ export function AuditsView({
       return shouldPollSnapshot ? 5000 : false;
     },
     queryFn: async (): Promise<RuntimeAuditSnapshot | null> => {
-      const response = await fetch(`/api/audits/${selectedAuditRecordId}?hydrate=1`, {
+      const response = await browserSecurityFetch(`/api/audits/${selectedAuditRecordId}?hydrate=1`, {
         cache: 'no-store'
       });
       if (!response.ok) {
@@ -418,7 +419,7 @@ export function AuditsView({
 
     setIsExportingSarif(true);
     try {
-      const response = await fetch(`/api/audits/${selectedAudit.id}/sarif`, {
+      const response = await browserSecurityFetch(`/api/audits/${selectedAudit.id}/sarif`, {
         headers: { accept: 'application/sarif+json' }
       });
       if (!response.ok) {
@@ -463,7 +464,7 @@ export function AuditsView({
         activeFinding.status !== ConsoleIssueStatus.RESOLVED &&
         activeFinding.status !== ConsoleIssueStatus.PUBLISHED
       ) {
-        const approveResponse = await fetch(
+        const approveResponse = await browserSecurityFetch(
           `/api/audits/${selectedAudit.id}/issues/${activeFinding.id}/action`,
           {
             method: 'POST',
@@ -480,7 +481,7 @@ export function AuditsView({
         onUpdateFindingStatus(selectedAudit.id, activeFinding.id, ConsoleReviewAction.CONFIRM);
       }
 
-      const publishResponse = await fetch(`/api/issues/${activeFinding.id}/publish`, { method: 'POST' });
+      const publishResponse = await browserSecurityFetch(`/api/issues/${activeFinding.id}/publish`, { method: 'POST' });
       if (!publishResponse.ok) {
         const errPayload = await publishResponse.json().catch(() => ({}));
         const message =
@@ -522,7 +523,7 @@ export function AuditsView({
         return;
       }
 
-      const publishRes = await fetch(`/api/audits/${selectedAudit.id}`);
+      const publishRes = await browserSecurityFetch(`/api/audits/${selectedAudit.id}`);
       if (!publishRes.ok) {
         throw new Error(`Publish succeeded but audit refresh failed (${publishRes.status}). Check GitLab for the new issue.`);
       }
@@ -556,7 +557,7 @@ export function AuditsView({
     const target = findings.find(f => f.id === mergeTargetId);
     if (!target) return;
 
-    const mergeResponse = await fetch(`/api/issues/${mergeTargetId}/merge`, {
+    const mergeResponse = await browserSecurityFetch(`/api/issues/${mergeTargetId}/merge`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mergedIntoIssueCandidateId: activeFinding.id })
@@ -585,7 +586,7 @@ export function AuditsView({
     const title = splitTitle.trim() || `${activeFinding.title} (Follow-up)`;
     setIsSplitting(true);
     try {
-      const splitResponse = await fetch(`/api/issues/${activeFinding.id}/split`, {
+      const splitResponse = await browserSecurityFetch(`/api/issues/${activeFinding.id}/split`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -598,7 +599,7 @@ export function AuditsView({
         throw new Error(errPayload.error || 'Split failed');
       }
 
-      const auditResponse = await fetch(`/api/audits/${selectedAudit.id}`);
+      const auditResponse = await browserSecurityFetch(`/api/audits/${selectedAudit.id}`);
       if (auditResponse.ok) {
         const auditPayload = await auditResponse.json();
         if (auditPayload.snapshot) {

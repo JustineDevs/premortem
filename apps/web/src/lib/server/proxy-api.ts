@@ -3,6 +3,19 @@ import { bffRateLimitKey, bffRateLimitResponse, checkBffRateLimit } from '@/lib/
 import { bffErrorResponse } from '@/lib/server/bff-errors';
 import { actorHeaders, resolveRequestActorContext } from '@/lib/server/request-context';
 import { trackServerEvent } from '@/lib/server/track-server-event';
+import { buildSecurityHeaders } from '@premortem/security';
+
+function applyApiSecurityHeaders(response: Response) {
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(buildSecurityHeaders('api'))) {
+    headers.set(key, value);
+  }
+  headers.set('x-premortem-api-version', 'v1');
+  return new Response(response.body, {
+    status: response.status,
+    headers
+  });
+}
 
 export async function proxyPremortemApi(path: string, init?: RequestInit, request?: Request) {
   if (request && !checkBffRateLimit(bffRateLimitKey(request, path))) {
@@ -43,10 +56,12 @@ export async function proxyPremortemApi(path: string, init?: RequestInit, reques
       headers.set('x-request-id', requestId);
     }
 
-    return new Response(response.body, {
-      status: response.status,
-      headers
-    });
+    return applyApiSecurityHeaders(
+      new Response(response.body, {
+        status: response.status,
+        headers
+      })
+    );
   } catch (error) {
     console.error(error);
     trackServerEvent(context.profileId, 'bff_proxy_exception', {
@@ -70,10 +85,12 @@ export async function proxyPremortemApiRaw(path: string, init?: RequestInit) {
       headers.set('x-request-id', requestId);
     }
 
-    return new Response(response.body, {
-      status: response.status,
-      headers
-    });
+    return applyApiSecurityHeaders(
+      new Response(response.body, {
+        status: response.status,
+        headers
+      })
+    );
   } catch (error) {
     console.error(error);
     return bffErrorResponse(error, 'Upstream API request failed');

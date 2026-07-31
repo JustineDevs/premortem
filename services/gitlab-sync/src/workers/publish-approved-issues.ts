@@ -9,7 +9,11 @@ export async function publishApprovedIssues() {
       publishedIssue: null
     },
     include: {
+      cluster: {
+        select: { id: true }
+      },
       project: true,
+      auditRun: { select: { branch: true, commitSha: true } },
       publishedIssue: true
     },
     take: 25
@@ -17,7 +21,10 @@ export async function publishApprovedIssues() {
 
   let publishedCount = 0;
   for (const issue of issues) {
-    await publishIssueCandidateToGitLab(issue);
+    await publishIssueCandidateToGitLab({
+      ...issue,
+      clusterId: issue.cluster?.id ?? null
+    });
     publishedCount += 1;
   }
 

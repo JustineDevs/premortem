@@ -100,6 +100,9 @@
       ],
       "@premortem/mcp": [
         "mcp/src"
+      ],
+      "@/*": [
+        "apps/web/src/*"
       ]
     }
   }

@@ -15,6 +15,8 @@ export * from './organization-api-keys';
 export * from './usage-metering';
 export * from './skills';
 export * from './stripe-invoices';
+export * from './smoke-stranger-workspace';
+export * from './governance';
 export type { AppRole } from '@prisma/client';
 export { applySupabaseDatabaseEnv } from './supabase-database-url';
 export * from './stripe-env';

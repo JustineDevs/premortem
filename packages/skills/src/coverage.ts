@@ -11,6 +11,16 @@ export interface SkillCoverageAgentSignal {
   reasons: string[];
 }
 
+export interface SkillCoverageGapSummary {
+  category: string;
+  coverageState: 'gap' | 'insufficient_context';
+  completed: boolean;
+  findingCount: number;
+  issueCandidateCount: number;
+  ownerAgents: string[];
+  reasons: string[];
+}
+
 export interface SkillCoverageReport {
   reportId: string;
   generatedAt: string;
@@ -25,6 +35,7 @@ export interface SkillCoverageReport {
   missingCategories: string[];
   zeroFindingCategories: string[];
   insufficientContextCategories: string[];
+  missingCoverage: SkillCoverageGapSummary[];
   agentCoverage: SkillCoverageAgentSignal[];
   coverageRatio: number;
   storageRef?: string | null;
@@ -102,6 +113,7 @@ export function buildSkillCoverageReport(input: SkillCoverageInput): SkillCovera
       completed: boolean;
       findingCount: number;
       issueCandidateCount: number;
+      ownerAgents: string[];
     }
   >();
 
@@ -123,7 +135,8 @@ export function buildSkillCoverageReport(input: SkillCoverageInput): SkillCovera
       covered: findingCount + issueCandidateCount > 0,
       completed,
       findingCount,
-      issueCandidateCount
+      issueCandidateCount,
+      ownerAgents: categoryAgents
     });
   }
 
@@ -179,6 +192,25 @@ export function buildSkillCoverageReport(input: SkillCoverageInput): SkillCovera
     ...zeroFindingCategories,
     ...insufficientContextCategories
   ]);
+  const missingCoverage = Array.from(categorySignals.entries())
+    .filter(([, signal]) => !signal.covered)
+    .map(([category, signal]) => ({
+      category,
+      coverageState: signal.completed ? 'gap' : 'insufficient_context',
+      completed: signal.completed,
+      findingCount: signal.findingCount,
+      issueCandidateCount: signal.issueCandidateCount,
+      ownerAgents: signal.ownerAgents,
+      reasons: signal.completed
+        ? [
+            'Agent completed but did not produce findings or issue candidates for this category.',
+            'This category needs explicit coverage improvements or new evidence.'
+          ]
+        : [
+            'No agent completed for this category in the current run.',
+            'This category needs context expansion before it can be considered covered.'
+          ]
+    })) satisfies SkillCoverageGapSummary[];
 
   return {
     reportId,
@@ -194,6 +226,7 @@ export function buildSkillCoverageReport(input: SkillCoverageInput): SkillCovera
     missingCategories,
     zeroFindingCategories,
     insufficientContextCategories,
+    missingCoverage,
     agentCoverage,
     coverageRatio: categoryOwners.size > 0 ? coveredCategories.length / categoryOwners.size : 1
   };

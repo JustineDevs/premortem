@@ -96,6 +96,31 @@ function decryptToken(ciphertext: string): string {
   return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
 }
 
+async function rewritePlaintextTokenIfNeeded(connectionId: string, value: string, field: 'encryptedAccessToken' | 'encryptedRefreshToken') {
+  if (!value.startsWith('plain:')) {
+    return;
+  }
+
+  const plaintext = decodePlainStoredToken(value);
+  if (!plaintext) {
+    return;
+  }
+
+  if (!encryptionKey()) {
+    if (isProductionMode()) {
+      throw new Error('ENCRYPTION_KEY is required to read plaintext provider tokens in production');
+    }
+    return;
+  }
+
+  await prisma.providerConnection.update({
+    where: { id: connectionId },
+    data: {
+      [field]: encodeStoredToken(plaintext)
+    }
+  });
+}
+
 export function decodeStoredToken(value: string) {
   if (value.startsWith(STORED_TOKEN_PREFIX)) {
     return decryptToken(value.slice(STORED_TOKEN_PREFIX.length));
@@ -227,6 +252,7 @@ export async function ensureGitLabAccessTokenForConnection(connectionId: string)
     );
   }
 
+  await rewritePlaintextTokenIfNeeded(connection.id, connection.encryptedAccessToken, 'encryptedAccessToken');
   const accessToken = decodeStoredToken(connection.encryptedAccessToken);
   const baseUrl = resolveGitLabApiBaseUrl(process.env.GITLAB_BASE_URL);
 
@@ -237,6 +263,9 @@ export async function ensureGitLabAccessTokenForConnection(connectionId: string)
   const refreshToken = connection.encryptedRefreshToken
     ? decodeStoredToken(connection.encryptedRefreshToken)
     : null;
+  if (connection.encryptedRefreshToken) {
+    await rewritePlaintextTokenIfNeeded(connection.id, connection.encryptedRefreshToken, 'encryptedRefreshToken');
+  }
 
   if (refreshToken) {
     try {

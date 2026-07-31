@@ -11,6 +11,7 @@ import {
 import { searchPriorFindings } from '@premortem/integrations';
 import type { GitLabMergeRequestDiffSummary } from '@premortem/integrations';
 import type { GitLabCiHistorySummary, GitLabIssueSummary } from '@premortem/integrations';
+import { extractRiskIntentCandidates } from '@premortem/db';
 
 const CI_FILE_NAMES = ['.gitlab-ci.yml', '.gitlab-ci.yaml'];
 const MANIFEST_NAMES = ['package.json', 'pnpm-workspace.yaml', 'turbo.json', 'docker-compose.yml'];
@@ -67,6 +68,15 @@ export interface IngestionBundle {
   source_code_samples: Record<string, string>;
   auth_patterns: string[];
   prior_findings: Array<{ fact: string; valid_at: string | null }>;
+  risk_intents: Array<{
+    type: string;
+    source: string;
+    summary: string;
+    evidence: unknown;
+    detectedFrom: unknown;
+    confidence: number;
+    expiresAt?: Date | null;
+  }>;
   merge_request?: {
     iid: number;
     title?: string;
@@ -209,6 +219,16 @@ export function buildSandboxIngestionBundle(input: {
     source_code_samples: sourceCodeSamples,
     auth_patterns: [],
     prior_findings: [],
+    risk_intents: extractRiskIntentCandidates({
+      repo_tree: [sourcePath],
+      source_files: sourceCode ? [buildSourceSnapshot(sourcePath, sourceCode, 'source')] : [],
+      source_code_samples: sourceCodeSamples,
+      agent_prompts: {},
+      existing_issues: [],
+      metadata: {
+        sandbox: true
+      }
+    }),
     agent_registry: undefined,
     agent_prompts: {},
     mcp_config: {},
@@ -622,6 +642,18 @@ export async function ingestProject(input: {
 
   const apps = await listChildDirs(path.join(repoRoot, 'apps'));
   const services = await listChildDirs(path.join(repoRoot, 'services'));
+  const risk_intents = extractRiskIntentCandidates({
+    repo_tree,
+    source_files,
+    source_code_samples,
+    agent_prompts,
+    existing_issues: [],
+    metadata: {
+      repoRoot,
+      branch: input.branch,
+      commitSha: input.commitSha ?? null
+    }
+  });
 
   return {
     repoRoot,
@@ -636,6 +668,7 @@ export async function ingestProject(input: {
     source_code_samples,
     auth_patterns,
     prior_findings,
+    risk_intents,
     agent_registry,
     agent_prompts,
     mcp_config,
@@ -656,6 +689,7 @@ export async function ingestProject(input: {
       lockfilePackageCount: lockfile_packages.length,
       vulnerabilityHitCount: vulnerability_context.hits.length,
       priorFindingCount: prior_findings.length,
+      riskIntentCount: risk_intents.length,
       sourceCodeSampleCount: Object.keys(source_code_samples).length,
       authPatternCount: auth_patterns.length,
       agentPromptCount: Object.keys(agent_prompts).length,

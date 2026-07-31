@@ -5,3 +5,5 @@ export * from './webhook-hmac';
 export * from './audit-trail';
 export * from './startup';
 export * from './prompt-sanitizer';
+export * from './headers';
+export * from './login-throttle';

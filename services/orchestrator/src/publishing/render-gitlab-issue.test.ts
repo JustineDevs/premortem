@@ -25,11 +25,19 @@ test('renderGitLabIssue strips GitLab quick actions from LLM content', () => {
     source_findings: ['finding-1']
   } as unknown as IssueCandidate;
 
-  const rendered = renderGitLabIssue(issue);
+  const rendered = renderGitLabIssue(issue, {
+    auditRunId: 'audit-123',
+    reviewerStatus: 'approved',
+    priority: 'high'
+  });
 
   assert.ok(rendered.includes('# Unsafe issue body'));
-  assert.ok(rendered.includes('Premortem published issue'));
+  assert.ok(rendered.includes('Premortem publish artifact'));
   assert.ok(rendered.includes('Evidence refs'));
+  assert.ok(rendered.includes('At a glance'));
+  assert.ok(rendered.includes('Traceability'));
+  assert.ok(rendered.includes('Open in Premortem console'));
+  assert.ok(rendered.includes('Raw AI analysis remains visible below'));
   assert.ok(rendered.includes('![Premortem]') || rendered.includes('<img src='));
   assert.ok(rendered.includes('First line'));
   assert.ok(rendered.includes('Second line'));

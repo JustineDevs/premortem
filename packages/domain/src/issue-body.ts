@@ -4,6 +4,7 @@ import {
   parseFileEvidenceRef,
   type EvidenceRefLike
 } from './evidence-projection';
+import { resolvePremortemPublishSiteUrl } from './branding';
 
 export interface PublishedIssueBodyInput {
   title: string;
@@ -87,6 +88,50 @@ function formatRawCodeAnchors(evidence: EvidenceRefLike[]): string {
     .join('\n\n');
 }
 
+function formatReviewPosture(issue: PublishedIssueBodyInput, context: PublishedIssueBodyContext): string {
+  const reviewerStatus = context.reviewerStatus?.trim() || 'pending';
+  const artifactMode = reviewerStatus.toLowerCase() === 'approved'
+    ? 'Reviewer-approved publish artifact'
+    : 'Review draft with raw AI evidence attached';
+  const evidenceCount = issue.evidence.length;
+  const severity = issue.severity.trim() || 'unknown';
+  const priority = context.priority?.trim() || 'normal';
+
+  return [
+    '## Review posture',
+    '',
+    `> **${artifactMode}**. The summary above is the reviewer-facing version; raw AI analysis, code anchors, and lineage remain below for auditability.`,
+    '',
+    '| Signal | Value |',
+    '| --- | --- |',
+    `| Severity | \`${severity}\` |`,
+    `| Confidence | ${issue.confidence.toFixed(3)} |`,
+    `| Priority | \`${priority}\` |`,
+    `| Reviewer status | \`${reviewerStatus}\` |`,
+    `| Evidence refs | ${evidenceCount} |`
+  ].join('\n');
+}
+
+function formatEvidenceIndexTable(evidence: EvidenceRefLike[]): string {
+  if (evidence.length === 0) {
+    return 'No structured evidence refs were attached to this issue.';
+  }
+
+  return [
+    '| # | Kind | Location | Snippet | Reason |',
+    '| --- | --- | --- | --- | --- |',
+    ...evidence.map((item, index) => {
+      const parsed = parseFileEvidenceRef(item.ref);
+      const location = parsed
+        ? `${parsed.filePath}:${parsed.startLine}${parsed.endLine > parsed.startLine ? `-${parsed.endLine}` : ''}`
+        : item.ref;
+      const snippetState = item.codeSnippet?.trim() ? 'present' : 'not attached';
+      const reason = item.reason ? item.reason.replace(/\|/g, '\\|') : 'none';
+      return `| ${index + 1} | \`${item.kind}\` | \`${location}\` | ${snippetState} | ${reason} |`;
+    })
+  ].join('\n');
+}
+
 function extractTargetSyntaxEntity(issue: PublishedIssueBodyInput, evidence: EvidenceRefLike[]): string {
   for (const item of evidence) {
     const snippet = item.codeSnippet?.trim();
@@ -133,6 +178,8 @@ function buildSystemGroundingManifest(
     `[[ACTIVE BRANCH / COMMIT]] ${context.branch ?? 'unknown'} @ ${context.commitSha ?? 'unknown'}`,
     `[[DOMAIN CATEGORY]] ${issue.category}`,
     `[[IDENTIFIED CRITICALITY]] ${issue.severity}`,
+    `[[REVIEW STATE]] ${context.reviewerStatus ?? 'pending'}`,
+    `[[ARTIFACT MODE]] ${(context.reviewerStatus ?? '').toLowerCase() === 'approved' ? 'reviewer-approved publish artifact' : 'review draft with raw AI evidence'}`,
     `[[FILE TARGET PATH]] ${primaryLocation.filepath}`,
     `[[TARGET OBJECT / METHOD NAME]] ${targetEntity}`,
     `[[EVIDENCE SUMMARY]] ${issue.predictedFailureSummary}`,
@@ -162,6 +209,14 @@ function formatEvidenceComparison(issue: PublishedIssueBodyInput, evidence: Evid
   ].join('\n');
 }
 
+function formatConsoleDeepLink(context: PublishedIssueBodyContext): string | undefined {
+  if (!context.auditRunId) return undefined;
+
+  const siteUrl = resolvePremortemPublishSiteUrl();
+  const consoleUrl = `${siteUrl.replace(/\/$/, '')}/app?tab=audits&audit=${encodeURIComponent(context.auditRunId)}`;
+  return `[Open in Premortem console](${consoleUrl})`;
+}
+
 /**
  * Render the canonical published issue body used by publish adapters and the reviewer console.
  *
@@ -176,6 +231,8 @@ export function renderPublishedIssueBodyMarkdown(
   const sections: string[] = [];
 
   sections.push(
+    formatReviewPosture(issue, context),
+    '',
     buildSystemGroundingManifest(issue, context, evidence),
     '',
     '## Predicted failure',
@@ -191,7 +248,8 @@ export function renderPublishedIssueBodyMarkdown(
       '## Repository context',
       `- **Project**: ${context.projectPath ?? 'unknown'}`,
       ...(context.branch ? [`- **Branch**: \`${context.branch}\``] : []),
-      ...(context.commitSha ? [`- **Commit**: \`${context.commitSha}\``] : [])
+      ...(context.commitSha ? [`- **Commit**: \`${context.commitSha}\``] : []),
+      ...(formatConsoleDeepLink(context) ? [`- **Console deep link**: ${formatConsoleDeepLink(context)}`] : [])
     );
   }
 
@@ -201,6 +259,9 @@ export function renderPublishedIssueBodyMarkdown(
     ...issue.triggerConditions.map((condition) => `- ${condition}`),
     '',
     '## Evidence',
+    '### Evidence index',
+    formatEvidenceIndexTable(evidence),
+    '',
     formatSourceCodeEvidence(evidence),
     '',
     formatEvidenceComparison(issue, evidence),

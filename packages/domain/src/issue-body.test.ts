@@ -39,12 +39,20 @@ test('published issue body includes snippet-shaped recommended code DNA', () => 
       projectPath: 'packages/db',
       branch: 'main',
       commitSha: 'abc1234',
+      reviewerStatus: 'approved',
+      priority: 'high',
       createdAt: '2026-07-09T00:00:00.000Z'
     }
   );
 
   assert.match(output, /### Recommended code DNA/);
   assert.match(output, /Evidence citation 1: packages\/db\/src\/audit-lifecycle\.ts:126-163/);
+  assert.match(output, /## Review posture/);
+  assert.match(output, /\| Severity \| `high` \|/);
+  assert.match(output, /\| Reviewer status \| `approved` \|/);
+  assert.match(output, /## Evidence/);
+  assert.match(output, /\| # \| Kind \| Location \| Snippet \| Reason \|/);
+  assert.match(output, /Open in Premortem console/);
   assert.match(output, /export function applyRecommendedChange\(\) \{/);
   assert.match(output, /Preserve surrounding behavior unless a step explicitly requires it\./);
 });

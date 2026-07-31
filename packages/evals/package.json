@@ -12,7 +12,8 @@
   },
   "scripts": {
     "build": "pnpm --filter @premortem/db build && tsc -p tsconfig.json",
-    "typecheck": "pnpm --filter @premortem/db build && tsc -p tsconfig.json --noEmit"
+    "typecheck": "pnpm --filter @premortem/db build && tsc -p tsconfig.json --noEmit",
+    "eval": "tsx --tsconfig ../../tsconfig.base.json ./src/runner.ts"
   },
   "dependencies": {
     "@premortem/agent-kit": "workspace:*",

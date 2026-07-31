@@ -5,6 +5,7 @@ import { useMemo } from 'react';
 
 import type { WorkflowGraphEdge, WorkflowGraphNode } from './workflow-graph.types';
 import { buildOsQueryKey, type OsQueryScope } from '@/hooks/use-os-console-data';
+import { browserSecurityFetch } from '@/lib/csrf';
 import { shouldRetryBffQuery } from '@/lib/bff-client';
 
 interface GraphArtifactPayload {
@@ -68,7 +69,7 @@ export function useWorkflowGraphArtifact(
     refetchOnWindowFocus: false,
     retry: shouldRetryBffQuery,
     queryFn: async () => {
-      const response = await fetch(`/api/audits/${auditRunId}/graph`);
+      const response = await browserSecurityFetch(`/api/audits/${auditRunId}/graph`);
       if (!response.ok) {
         return { nodes: [] as WorkflowGraphNode[], edges: [] as WorkflowGraphEdge[] };
       }

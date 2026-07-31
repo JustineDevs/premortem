@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { isLocalAuthBypassEnabled } from '@premortem/domain';
+import { checkLoginThrottle } from '@premortem/security';
 
 import { authLinks, type AuthMode, type AuthProvider } from '@/lib/auth-links';
+import { assertValidCsrfRequest, ensureCsrfCookie } from '@/lib/csrf';
 import {
   getCanonicalLoopbackOrigin,
   getAuthRedirectOrigin,
@@ -29,16 +31,20 @@ function buildAuthPageRedirect(origin: string, mode: AuthMode, next: string, not
   return NextResponse.redirect(redirectUrl, 303);
 }
 
+function withCsrfCookie(request: NextRequest, response: NextResponse) {
+  return ensureCsrfCookie(response, request);
+}
+
 function wantsJsonResponse(request: NextRequest) {
   return request.headers.get('accept')?.includes('application/json') ?? false;
 }
 
 function providerResponse(request: NextRequest, url: URL | string, status = 200) {
   if (wantsJsonResponse(request)) {
-    return NextResponse.json({ url: url.toString() }, { status });
+    return withCsrfCookie(request, NextResponse.json({ url: url.toString() }, { status }));
   }
 
-  return NextResponse.redirect(url, 303);
+  return withCsrfCookie(request, NextResponse.redirect(url, 303));
 }
 
 async function readTermsAccepted(request: NextRequest): Promise<boolean> {
@@ -87,10 +93,34 @@ async function startOAuth(request: NextRequest, provider: AuthProvider) {
     return providerResponse(request, canonicalUrl, 200);
   }
 
+  if (request.method.toUpperCase() === 'POST') {
+    const csrf = assertValidCsrfRequest(request);
+    if (!csrf.passed) {
+      return wantsJsonResponse(request)
+        ? withCsrfCookie(request, NextResponse.json({ error: 'csrf' }, { status: 403 }))
+        : withCsrfCookie(request, buildAuthPageRedirect(origin, mode, next, 'callback'));
+    }
+
+    const throttleKey = `${provider}:${request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? request.headers.get('x-real-ip') ?? 'unknown'}`;
+    const throttle = checkLoginThrottle(throttleKey, { limit: 6, windowMs: 10 * 60_000 });
+    if (!throttle.allowed) {
+      const redirect = wantsJsonResponse(request)
+        ? NextResponse.json(
+            {
+              error: 'rate_limited',
+              resetAt: throttle.resetAt
+            },
+            { status: 429 }
+          )
+        : buildAuthPageRedirect(origin, mode, next, 'callback');
+      return withCsrfCookie(request, redirect);
+    }
+  }
+
   if (!(await readTermsAccepted(request))) {
     return wantsJsonResponse(request)
-      ? NextResponse.json({ error: 'terms' }, { status: 400 })
-      : buildAuthPageRedirect(origin, mode, next, 'terms');
+      ? withCsrfCookie(request, NextResponse.json({ error: 'terms' }, { status: 400 }))
+      : withCsrfCookie(request, buildAuthPageRedirect(origin, mode, next, 'terms'));
   }
 
   if (isLocalAuthBypassEnabled()) {
@@ -101,8 +131,8 @@ async function startOAuth(request: NextRequest, provider: AuthProvider) {
 
   if (provider === 'github') {
     return wantsJsonResponse(request)
-      ? NextResponse.json({ error: 'coming_soon' }, { status: 200 })
-      : buildAuthPageRedirect(origin, mode, next, 'coming_soon');
+      ? withCsrfCookie(request, NextResponse.json({ error: 'coming_soon' }, { status: 200 }))
+      : withCsrfCookie(request, buildAuthPageRedirect(origin, mode, next, 'coming_soon'));
   }
 
   const authClient = await createRouteHandlerSupabaseClient(request);
@@ -110,8 +140,8 @@ async function startOAuth(request: NextRequest, provider: AuthProvider) {
     const redirectUrl = new URL(fallbackPath, origin);
     redirectUrl.searchParams.set('error', 'config');
     return wantsJsonResponse(request)
-      ? NextResponse.json({ error: 'config' }, { status: 503 })
-      : NextResponse.redirect(redirectUrl, 303);
+      ? withCsrfCookie(request, NextResponse.json({ error: 'config' }, { status: 503 }))
+      : withCsrfCookie(request, NextResponse.redirect(redirectUrl, 303));
   }
 
   const callbackParams = new URLSearchParams({ next, mode });
@@ -132,14 +162,14 @@ async function startOAuth(request: NextRequest, provider: AuthProvider) {
     const response = wantsJsonResponse(request)
       ? NextResponse.json({ error: 'oauth' }, { status: 500 })
       : NextResponse.redirect(redirectUrl, 303);
-    return authClient.attachCookies(response);
+    return withCsrfCookie(request, authClient.attachCookies(response));
   }
 
   if (wantsJsonResponse(request)) {
-    return authClient.attachCookies(NextResponse.json({ url: data.url }, { status: 200 }));
+    return withCsrfCookie(request, authClient.attachCookies(NextResponse.json({ url: data.url }, { status: 200 })));
   }
 
-  return authClient.attachCookies(NextResponse.redirect(data.url, 303));
+  return withCsrfCookie(request, authClient.attachCookies(NextResponse.redirect(data.url, 303)));
 }
 
 export async function GET(

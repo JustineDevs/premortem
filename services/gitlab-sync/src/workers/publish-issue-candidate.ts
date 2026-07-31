@@ -7,6 +7,9 @@ export async function publishIssueCandidate(issueCandidateId: string) {
   const issue = await prisma.issueCandidate.findUnique({
     where: { id: issueCandidateId },
     include: {
+      cluster: {
+        select: { id: true }
+      },
       project: true,
       auditRun: { select: { branch: true, commitSha: true } },
       publishedIssue: true
@@ -21,5 +24,8 @@ export async function publishIssueCandidate(issueCandidateId: string) {
     return publishIssueCandidateToGitHub(issue);
   }
 
-  return publishIssueCandidateToGitLab(issue);
+  return publishIssueCandidateToGitLab({
+    ...issue,
+    clusterId: issue.cluster?.id ?? null
+  });
 }

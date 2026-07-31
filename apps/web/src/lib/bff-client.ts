@@ -1,4 +1,5 @@
 import { parseBffErrorMessage } from '@/lib/bff-messages';
+import { browserSecurityFetch } from '@/lib/csrf';
 import { z } from 'zod';
 
 export class BffRequestError extends Error {
@@ -17,7 +18,7 @@ export async function readBffErrorMessage(response: Response, fallback: string):
 }
 
 export async function bffFetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  const response = await browserSecurityFetch(url, init);
   if (!response.ok) {
     throw new BffRequestError(
       await readBffErrorMessage(response, `Request failed (${response.status})`),
@@ -28,7 +29,7 @@ export async function bffFetchJson<T>(url: string, init?: RequestInit): Promise<
 }
 
 export async function bffFetchOk(url: string, init?: RequestInit): Promise<unknown> {
-  const response = await fetch(url, init);
+  const response = await browserSecurityFetch(url, init);
   if (!response.ok) {
     throw new BffRequestError(
       await readBffErrorMessage(response, `Request failed (${response.status})`),

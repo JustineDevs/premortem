@@ -402,11 +402,17 @@ if (process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY) {
 
 if (process.env.PHOENIX_API_KEY && (process.env.PHOENIX_COLLECTOR_ENDPOINT || process.env.PHOENIX_BASE_URL)) {
   const probe = await probePhoenixEndpoint();
-  if (!probe.ok) {
+  const phoenixEndpointHealthy = probe.ok || probe.status === 405;
+  if (!phoenixEndpointHealthy) {
     throw new Error(`Phoenix endpoint probe failed: ${probe.error ?? probe.status}`);
   }
   await probePhoenixTracing('premortem-production-readiness');
-  pass('observability', 'Phoenix endpoint and tracing verified');
+  pass(
+    'observability',
+    probe.ok
+      ? 'Phoenix endpoint and tracing verified'
+      : 'Phoenix endpoint returned 405 on GET and tracing verified'
+  );
 } else {
   skip('observability', 'Phoenix configured', 'PHOENIX_API_KEY / PHOENIX_COLLECTOR_ENDPOINT unset locally');
 }
@@ -455,8 +461,16 @@ console.log(
 );
 
 if (strangerWorkspace) {
-  await cleanupStrangerSmokeWorkspace(strangerWorkspace);
-  await deleteSupabaseSmokeUser(strangerWorkspace.profileId);
+  await cleanupStrangerSmokeWorkspace(strangerWorkspace).catch((error) => {
+    console.warn(
+      `best-effort stranger workspace cleanup failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  });
+  await deleteSupabaseSmokeUser(strangerWorkspace.profileId).catch((error) => {
+    console.warn(
+      `best-effort Supabase smoke user cleanup failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  });
 }
 
 await prisma.$disconnect();

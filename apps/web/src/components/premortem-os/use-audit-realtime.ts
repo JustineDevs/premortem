@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { buildOsQueryKey, type OsQueryScope } from '@/hooks/use-os-console-data';
+import { browserSecurityFetch } from '@/lib/csrf';
 import { shouldRetryBffQuery } from '@/lib/bff-client';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { isSupabaseAuthConfigured, resolveSupabaseRuntimeConfig } from '@/lib/supabase/config';
@@ -21,7 +22,9 @@ export interface UseAuditRealtimeResult {
 }
 
 async function fetchAuditSnapshot(auditRunId: string): Promise<WorkflowAuditSnapshot | null> {
-  const response = await fetch(`/api/audits/${auditRunId}?hydrate=0`, { cache: 'no-store' });
+  const response = await browserSecurityFetch(`/api/audits/${auditRunId}?hydrate=0`, {
+    cache: 'no-store'
+  });
   if (!response.ok) {
     throw new Error(`Failed to load audit snapshot: ${response.status} ${response.statusText}`);
   }

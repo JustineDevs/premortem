@@ -116,30 +116,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Validate Vercel deploy inputs
-        run: |
-          if [ -z "${VERCEL_TOKEN:-}" ] || [ -z "${VERCEL_ORG_ID:-}" ] || [ -z "${VERCEL_PROJECT_ID:-}" ]; then
-            VERCEL_CAN_DEPLOY=false
-            VERCEL_DEPLOY_MODE=verify-only
-          else
-            VERCEL_CAN_DEPLOY=true
-            VERCEL_DEPLOY_MODE=deploy
-          fi
-          echo "VERCEL_CAN_DEPLOY=$VERCEL_CAN_DEPLOY" >>"$GITHUB_ENV"
-          echo "VERCEL_DEPLOY_MODE=$VERCEL_DEPLOY_MODE" >>"$GITHUB_ENV"
-          echo "VERCEL_CAN_DEPLOY=$VERCEL_CAN_DEPLOY"
-          echo "VERCEL_DEPLOY_MODE=$VERCEL_DEPLOY_MODE"
-
-      - name: Deploy Web to Vercel
-        run: |
-          if [ "${VERCEL_CAN_DEPLOY:-false}" = "true" ]; then
-            pnpm dlx vercel@latest deploy \
-              --prod \
-              --yes \
-              --token "$VERCEL_TOKEN"
-          else
-            echo "Skipping Vercel deploy because production deploy credentials are unavailable; verifying the live web entrypoint instead."
-          fi
+      - name: Release preflight and Vercel deploy
+        run: pnpm run release:vercel
 
       - name: Smoke the production web entrypoint
         run: |

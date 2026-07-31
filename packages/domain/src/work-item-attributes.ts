@@ -323,7 +323,20 @@ export function buildWorkItemAttributes(
       ]
     : [];
 
-  const metadataFooter = ['', '---', ...attributeTable, '', publishAttribution].join('\n');
+  const metadataFooter = [
+    '',
+    '---',
+    '<details>',
+    '<summary>Premortem work item attributes and scheduling</summary>',
+    '',
+    ...attributeTable,
+    '',
+    '</details>',
+    '',
+    '> Premortem publishes the reviewer-approved work item metadata above. Raw AI analysis stays in the issue body for auditability.',
+    '',
+    publishAttribution
+  ].join('\n');
 
   return {
     labels: config.autoApply ? [...labels] : [prefix],

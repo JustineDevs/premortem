@@ -148,6 +148,69 @@ enum InvitationStatus {
   revoked
 }
 
+enum RiskIntentType {
+  accepted_debt
+  deliberate_shortcut
+  temporary_workaround
+  known_limitation
+  migration_in_progress
+}
+
+enum RiskIntentSource {
+  code_comment
+  adr
+  issue_label
+  commit_message
+  manual_review
+  todo_fixme
+}
+
+enum RiskIntentStatus {
+  active
+  expired
+  resolved
+}
+
+enum PolicyPackStatus {
+  active
+  inactive
+  archived
+}
+
+enum PolicyDecisionOutcome {
+  show_now
+  batch_later
+  suppress
+}
+
+enum FixVerificationStatus {
+  resolved
+  partial
+  regressed
+  stale
+}
+
+enum EvalRunStatus {
+  queued
+  running
+  completed
+  failed
+}
+
+enum EvalProvider {
+  promptfoo
+  assertion
+  langfuse
+}
+
+enum PublishedIssueLinkRelationType {
+  supersedes
+  regressed_by
+  resolved_by
+  related_to
+  mitigated_by
+}
+
 model Profile {
   id                  String                    @id @db.Uuid
   email               String?                   @unique @db.Citext
@@ -177,6 +240,11 @@ model Profile {
   activityEvents      ActivityEvent[]
   apiKeys             OrganizationApiKey[]
   projectMemberships  ProjectMembership[]
+  riskIntents         RiskIntent[]
+  policyPacks         PolicyPack[]
+  policyDecisions     PolicyDecision[]
+  fixVerifications    FixVerification[]
+  evalRuns            EvalRun[]
 
   @@map("profiles")
 }
@@ -213,6 +281,11 @@ model Organization {
   activityEvents   ActivityEvent[]
   apiKeys          OrganizationApiKey[]
   usageEvents      UsageEvent[]
+  riskIntents      RiskIntent[]
+  policyPacks      PolicyPack[]
+  policyDecisions  PolicyDecision[]
+  fixVerifications FixVerification[]
+  evalRuns         EvalRun[]
 
   @@map("organizations")
 }
@@ -367,6 +440,10 @@ model Project {
   notifications    Notification[]
   activityEvents   ActivityEvent[]
   usageEvents      UsageEvent[]
+  riskIntents      RiskIntent[]
+  policyDecisions  PolicyDecision[]
+  fixVerifications FixVerification[]
+  evalRuns         EvalRun[]
 
   @@unique([provider, externalProjectId])
   @@unique([organizationId, slug])
@@ -441,6 +518,11 @@ model AuditRun {
   rejectedIssueCandidateArtifacts RejectedIssueCandidateArtifact[]
   events           AuditRunEvent[]
   usageEvents      UsageEvent[]
+  riskIntents      RiskIntent[]
+  policyDecisions  PolicyDecision[]
+  fixVerifications FixVerification[] @relation("FixVerificationSourceAuditRun")
+  closingFixVerifications FixVerification[] @relation("FixVerificationClosingAuditRun")
+  evalRuns         EvalRun[]
 
   @@index([organizationId])
   @@index([organizationId, createdAt(sort: Desc)])
@@ -483,6 +565,8 @@ model GraphSnapshot {
   organizationId String     @db.Uuid
   projectId      String     @db.Uuid
   auditRunId     String     @unique @db.Uuid
+  branch         String?
+  commitSha      String?
   graphVersion   String?
   nodeCount      Int        @default(0)
   edgeCount      Int        @default(0)
@@ -495,6 +579,182 @@ model GraphSnapshot {
   auditRun       AuditRun     @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
 
   @@map("graph_snapshots")
+}
+
+model RiskIntent {
+  id               String             @id @default(uuid()) @db.Uuid
+  organizationId   String             @db.Uuid
+  projectId        String?            @db.Uuid
+  auditRunId       String?            @db.Uuid
+  issueCandidateId String?            @db.Uuid
+  profileId        String?            @db.Uuid
+  type             RiskIntentType
+  source           RiskIntentSource
+  status           RiskIntentStatus   @default(active)
+  summary          String
+  evidence         Json               @default("[]")
+  detectedFrom     Json               @default("{}")
+  confidence       Decimal            @default(0.5) @db.Decimal(4, 3)
+  expiresAt        DateTime?          @db.Timestamptz(6)
+  createdAt        DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime           @updatedAt @db.Timestamptz(6)
+
+  organization     Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project          Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  auditRun         AuditRun?          @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  issueCandidate   IssueCandidate?    @relation(fields: [issueCandidateId], references: [id], onDelete: SetNull)
+  profile          Profile?           @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  policyDecisions  PolicyDecision[]
+
+  @@index([organizationId])
+  @@index([projectId])
+  @@index([auditRunId])
+  @@index([type])
+  @@index([status])
+  @@map("risk_intents")
+}
+
+model PolicyPack {
+  id                String             @id @default(uuid()) @db.Uuid
+  organizationId    String             @db.Uuid
+  name              String
+  description       String?
+  scope             String             @default("organization")
+  status            PolicyPackStatus   @default(active)
+  version           Int                @default(1)
+  rules             Json               @default("[]")
+  decisionCriteria   Json               @default("{}")
+  metadata          Json               @default("{}")
+  createdById       String?            @db.Uuid
+  createdAt         DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @db.Timestamptz(6)
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy         Profile?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  policyDecisions   PolicyDecision[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, name])
+  @@map("policy_packs")
+}
+
+model PolicyDecision {
+  id               String                  @id @default(uuid()) @db.Uuid
+  organizationId   String                  @db.Uuid
+  projectId        String?                 @db.Uuid
+  auditRunId       String?                 @db.Uuid
+  issueCandidateId String?                 @db.Uuid
+  riskIntentId     String?                 @db.Uuid
+  policyPackId     String?                 @db.Uuid
+  outcome          PolicyDecisionOutcome
+  rationale        String
+  details          Json                    @default("{}")
+  score            Decimal?                @db.Decimal(4, 3)
+  createdById      String?                 @db.Uuid
+  createdAt        DateTime                @default(now()) @db.Timestamptz(6)
+
+  organization     Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project          Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  auditRun         AuditRun?               @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  issueCandidate   IssueCandidate?         @relation(fields: [issueCandidateId], references: [id], onDelete: Cascade)
+  riskIntent       RiskIntent?              @relation(fields: [riskIntentId], references: [id], onDelete: SetNull)
+  policyPack       PolicyPack?              @relation(fields: [policyPackId], references: [id], onDelete: SetNull)
+  createdBy        Profile?                 @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([projectId])
+  @@index([auditRunId])
+  @@index([issueCandidateId])
+  @@index([riskIntentId])
+  @@index([policyPackId])
+  @@index([outcome])
+  @@map("policy_decisions")
+}
+
+model FixVerification {
+  id                    String                 @id @default(uuid()) @db.Uuid
+  organizationId        String                 @db.Uuid
+  projectId             String                 @db.Uuid
+  issueCandidateId      String                 @db.Uuid
+  publishedIssueId      String                 @db.Uuid
+  sourceAuditRunId      String?                @db.Uuid
+  closingAuditRunId     String?                @db.Uuid
+  sourceGraphSnapshotId String?
+  closingGraphSnapshotId String?
+  status                FixVerificationStatus
+  summary               String
+  evidence              Json                   @default("[]")
+  observedChanges       Json                   @default("{}")
+  verifiedById          String?                @db.Uuid
+  verifiedAt            DateTime?              @db.Timestamptz(6)
+  createdAt             DateTime               @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime               @updatedAt @db.Timestamptz(6)
+
+  organization          Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project               Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  issueCandidate        IssueCandidate         @relation(fields: [issueCandidateId], references: [id], onDelete: Cascade)
+  publishedIssue        PublishedIssue         @relation(fields: [publishedIssueId], references: [id], onDelete: Cascade)
+  sourceAuditRun        AuditRun?              @relation("FixVerificationSourceAuditRun", fields: [sourceAuditRunId], references: [id], onDelete: SetNull)
+  closingAuditRun       AuditRun?              @relation("FixVerificationClosingAuditRun", fields: [closingAuditRunId], references: [id], onDelete: SetNull)
+  verifiedBy            Profile?               @relation(fields: [verifiedById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([projectId])
+  @@index([issueCandidateId])
+  @@index([publishedIssueId])
+  @@index([sourceAuditRunId])
+  @@index([closingAuditRunId])
+  @@index([status])
+  @@map("fix_verifications")
+}
+
+model EvalRun {
+  id               String           @id @default(uuid()) @db.Uuid
+  organizationId   String           @db.Uuid
+  projectId        String?          @db.Uuid
+  auditRunId       String?          @db.Uuid
+  provider         EvalProvider
+  status           EvalRunStatus    @default(queued)
+  name             String
+  summary          String?
+  metrics          Json             @default("{}")
+  input            Json             @default("{}")
+  output           Json             @default("{}")
+  errorMessage     String?
+  createdById      String?          @db.Uuid
+  startedAt        DateTime?        @db.Timestamptz(6)
+  completedAt      DateTime?        @db.Timestamptz(6)
+  createdAt        DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime         @updatedAt @db.Timestamptz(6)
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project          Project?         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  auditRun         AuditRun?        @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+  createdBy        Profile?         @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  assertionResults EvalAssertionResult[]
+
+  @@index([organizationId])
+  @@index([projectId])
+  @@index([auditRunId])
+  @@index([provider])
+  @@index([status])
+  @@map("eval_runs")
+}
+
+model EvalAssertionResult {
+  id           String      @id @default(uuid()) @db.Uuid
+  evalRunId    String      @db.Uuid
+  assertionKey String
+  status       String
+  score        Decimal?    @db.Decimal(4, 3)
+  details      Json        @default("{}")
+  createdAt    DateTime    @default(now()) @db.Timestamptz(6)
+
+  evalRun      EvalRun     @relation(fields: [evalRunId], references: [id], onDelete: Cascade)
+
+  @@index([evalRunId])
+  @@index([assertionKey])
+  @@map("eval_assertion_results")
 }
 
 model VulnerabilityAdvisoryCache {
@@ -654,6 +914,9 @@ model IssueCandidate {
   validationResults         IssueValidationResult[]
   publishedIssue            PublishedIssue?
   reviewActions             ReviewAction[]
+  policyDecisions           PolicyDecision[]
+  riskIntents               RiskIntent[]
+  fixVerifications          FixVerification[]
 
   @@index([projectId])
   @@index([auditRunId])
@@ -757,6 +1020,7 @@ model PublishedIssue {
   issueCandidate   IssueCandidate    @relation(fields: [issueCandidateId], references: [id], onDelete: Cascade)
   links            PublishedIssueLink[] @relation("PublishedIssueLinksCurrent")
   priorLinks       PublishedIssueLink[] @relation("PublishedIssueLinksPrior")
+  fixVerifications FixVerification[]
   syncLogs         IssueSyncLog[]
   reconciliationEvents ReconciliationEvent[]
 
@@ -773,7 +1037,7 @@ model PublishedIssueLink {
   id                    String          @id @default(uuid()) @db.Uuid
   publishedIssueId      String          @db.Uuid
   priorPublishedIssueId String?         @db.Uuid
-  relationType          String
+  relationType          PublishedIssueLinkRelationType
   createdAt             DateTime        @default(now()) @db.Timestamptz(6)
 
   publishedIssue        PublishedIssue  @relation("PublishedIssueLinksCurrent", fields: [publishedIssueId], references: [id], onDelete: Cascade)

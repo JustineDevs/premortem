@@ -72,7 +72,7 @@ export function readWorkspaceSkillState(metadata: unknown): WorkspaceSkillState 
     generatedAt: typeof row.generatedAt === 'string' ? row.generatedAt : null,
     auditRunId: typeof row.auditRunId === 'string' ? row.auditRunId : null,
     registryVersion: typeof row.registryVersion === 'number' ? row.registryVersion : 0,
-    coverageReport:
+  coverageReport:
       row.coverageReport && typeof row.coverageReport === 'object' && !Array.isArray(row.coverageReport)
         ? (row.coverageReport as SkillCoverageReport)
         : null,

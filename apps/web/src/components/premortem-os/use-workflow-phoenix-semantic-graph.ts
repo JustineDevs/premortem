@@ -6,6 +6,7 @@ import { useMemo } from 'react';
 import type { WorkflowGraphEdge, WorkflowGraphNode } from './workflow-graph.types';
 import { buildOsQueryKey, type OsQueryScope } from '@/hooks/use-os-console-data';
 import { shouldRetryBffQuery } from '@/lib/bff-client';
+import { browserSecurityFetch } from '@/lib/csrf';
 
 interface PhoenixSemanticGraphResponse {
   configured?: boolean;
@@ -81,7 +82,7 @@ export function useWorkflowPhoenixSemanticGraph(
     refetchOnWindowFocus: false,
     retry: shouldRetryBffQuery,
     queryFn: async () => {
-      const response = await fetch(`/api/audits/${auditRunId}/semantic-graph`);
+      const response = await browserSecurityFetch(`/api/audits/${auditRunId}/semantic-graph`);
       if (!response.ok) {
         const message = await response.text();
         throw new Error(

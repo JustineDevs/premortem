@@ -12,6 +12,11 @@ import {
   getPublicAppOrigin,
   gitlabOAuthRedirectUri
 } from '../../apps/web/src/lib/runtime-config.ts';
+import {
+  CSRF_COOKIE_NAME,
+  CSRF_HEADER_NAME,
+  createCsrfToken
+} from '../../apps/web/src/lib/csrf.ts';
 
 loadPremortemLocalEnv();
 
@@ -24,6 +29,13 @@ async function main() {
     const headers = new Headers(init.headers ?? {});
     headers.set('host', requestUrl.host);
     return new NextRequest(url, { ...init, headers });
+  }
+
+  function withCsrf(request) {
+    const csrfToken = createCsrfToken();
+    request.headers.set('cookie', `${CSRF_COOKIE_NAME}=${csrfToken}`);
+    request.headers.set(CSRF_HEADER_NAME, csrfToken);
+    return request;
   }
 
   async function assertRedirect(request, handler, expectedPrefix, message) {
@@ -69,30 +81,30 @@ async function main() {
     };
 
     const canonicalAuthRedirect = await assertRedirect(
-      makeRequest(`${requestOrigin}/api/auth/gitlab?mode=login&next=%2Fapp`, {
+      withCsrf(makeRequest(`${requestOrigin}/api/auth/gitlab?mode=login&next=%2Fapp`, {
         method: 'POST',
         body: buildAuthFormData()
-      }),
+      })),
       (request) => startGitLabOAuth(request, { params: Promise.resolve({ provider: 'gitlab' }) }),
       `${configuredOrigin}/api/auth/gitlab?mode=login&next=%2Fapp`,
       'start auth should canonicalize loopback host before OAuth handoff'
     );
 
     await assertRedirect(
-      makeRequest(canonicalAuthRedirect, {
+      withCsrf(makeRequest(canonicalAuthRedirect, {
         method: 'POST',
         body: buildAuthFormData()
-      }),
+      })),
       (request) => startGitLabOAuth(request, { params: Promise.resolve({ provider: 'gitlab' }) }),
       `${supabaseOrigin.replace(/\/$/, '')}/auth/v1/authorize?provider=gitlab`,
       'canonical auth request should yield Supabase authorize URL'
     );
 
     const authLocation = await startGitLabOAuth(
-      makeRequest(canonicalAuthRedirect, {
+      withCsrf(makeRequest(canonicalAuthRedirect, {
         method: 'POST',
         body: buildAuthFormData()
-      }),
+      })),
       { params: Promise.resolve({ provider: 'gitlab' }) }
     ).then((response) => response.headers.get('location'));
     const authUrl = new URL(authLocation ?? '');
@@ -132,13 +144,13 @@ async function main() {
     }
   }
 
-  await assertRedirect(
-    makeRequest(`${requestOrigin}/api/auth/logout`, {
-      method: 'POST'
-    }),
-    logout,
-    `${requestOrigin}/login`,
-    'logout should preserve public origin on redirect'
+    await assertRedirect(
+      withCsrf(makeRequest(`${requestOrigin}/api/auth/logout`, {
+        method: 'POST'
+      })),
+      logout,
+      `${requestOrigin}/login`,
+      'logout should preserve public origin on redirect'
   );
 
   console.log('auth loopback regression passed');

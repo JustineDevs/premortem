@@ -1,4 +1,9 @@
-import { createReconciliationEvent, prisma, resolveGitLabCredentialsForProject } from '@premortem/db';
+import {
+  createReconciliationEvent,
+  prisma,
+  recordFixVerification,
+  resolveGitLabCredentialsForProject
+} from '@premortem/db';
 import { fetchGitLabIssue } from '@premortem/integrations';
 
 function detectDrift(
@@ -29,6 +34,17 @@ type PublishedIssueWithProject = {
   labels: unknown;
   syncStatus: string;
   url: string | null;
+  issueCandidate?: {
+    id: string;
+    clusterId: string;
+    auditRunId: string;
+    title: string;
+    auditRun?: {
+      id: string;
+      completedAt: Date | null;
+      graphSnapshotId: string | null;
+    } | null;
+  } | null;
   project: { externalProjectId: string };
 };
 
@@ -82,6 +98,95 @@ async function reconcilePublishedIssueRecord(item: PublishedIssueWithProject) {
       }
     });
 
+    if (state === 'closed' && item.issueCandidate) {
+      const sourceAuditRun = item.issueCandidate.auditRun;
+      const closingAuditRun = await prisma.auditRun.findFirst({
+        where: {
+          projectId: item.projectId,
+          runStatus: 'completed',
+          ...(sourceAuditRun?.completedAt
+            ? { completedAt: { gt: sourceAuditRun.completedAt } }
+            : {})
+        },
+        orderBy: [{ completedAt: 'desc' }, { createdAt: 'desc' }],
+        select: {
+          id: true,
+          completedAt: true,
+          graphSnapshotId: true,
+          issueCandidates: {
+            select: {
+              clusterId: true,
+              title: true
+            }
+          }
+        }
+      });
+
+      const sameClusterStillPresent =
+        closingAuditRun?.issueCandidates.some((candidate) => candidate.clusterId === item.issueCandidate?.clusterId) ??
+        false;
+      const sourceCompletedAt = sourceAuditRun?.completedAt ?? null;
+      const closingCompletedAt = closingAuditRun?.completedAt ?? null;
+      const verifiedStatus =
+        !closingAuditRun
+          ? 'partial'
+          : sameClusterStillPresent
+            ? 'regressed'
+            : 'resolved';
+      const summary =
+        verifiedStatus === 'resolved'
+          ? 'Closed GitLab issue no longer appears in the next completed audit for the same cluster.'
+          : verifiedStatus === 'regressed'
+            ? 'Closed GitLab issue still appears in a later completed audit for the same cluster.'
+            : 'GitLab issue closed, but no later completed audit confirmed the fix yet.';
+
+      const existingVerification = await prisma.fixVerification.findFirst({
+        where: {
+          publishedIssueId: item.id,
+          closingAuditRunId: closingAuditRun?.id ?? null
+        },
+        select: { id: true }
+      });
+
+      if (!existingVerification) {
+        await recordFixVerification({
+          organizationId: item.organizationId,
+          projectId: item.projectId,
+          issueCandidateId: item.issueCandidate.id,
+          publishedIssueId: item.id,
+          sourceAuditRunId: item.issueCandidate.auditRunId,
+          closingAuditRunId: closingAuditRun?.id ?? null,
+          sourceGraphSnapshotId: sourceAuditRun?.graphSnapshotId ?? null,
+          closingGraphSnapshotId: closingAuditRun?.graphSnapshotId ?? null,
+          status: verifiedStatus,
+          summary,
+          evidence: [
+            {
+              kind: 'issue',
+              ref: item.url ?? item.externalIssueIid,
+              reason: 'Published GitLab issue reached a closed state and was rechecked during reconciliation.'
+            },
+            {
+              kind: 'audit',
+              ref: closingAuditRun?.id ?? item.issueCandidate.auditRunId,
+              reason: 'Later completed audit used to verify whether the failure mode remained present.'
+            }
+          ],
+          observedChanges: {
+            sourceAuditRunId: sourceAuditRun?.id ?? item.issueCandidate.auditRunId,
+            sourceCompletedAt: sourceCompletedAt ? sourceCompletedAt.toISOString() : null,
+            closingAuditRunId: closingAuditRun?.id ?? null,
+            closingCompletedAt: closingCompletedAt ? closingCompletedAt.toISOString() : null,
+            sameClusterStillPresent,
+            remoteState: state,
+            remoteTitle: remote.title ?? null,
+            remoteLabels: remote.labels ?? [],
+            verifiedStatus
+          }
+        });
+      }
+    }
+
     await createReconciliationEvent({
       organizationId: item.organizationId,
       publishedIssueId: item.id,
@@ -132,6 +237,21 @@ export async function reconcilePublishedIssues(input?: { organizationId?: string
         labels: true,
         syncStatus: true,
         url: true,
+        issueCandidate: {
+          select: {
+            id: true,
+            clusterId: true,
+            auditRunId: true,
+            title: true,
+            auditRun: {
+              select: {
+                id: true,
+                completedAt: true,
+                graphSnapshotId: true
+              }
+            }
+          }
+        },
         project: {
           select: {
             externalProjectId: true
@@ -193,6 +313,21 @@ export async function reconcilePublishedIssuesByGitLabRef(input: {
       labels: true,
       syncStatus: true,
       url: true,
+      issueCandidate: {
+        select: {
+          id: true,
+          clusterId: true,
+          auditRunId: true,
+          title: true,
+          auditRun: {
+            select: {
+              id: true,
+              completedAt: true,
+              graphSnapshotId: true
+            }
+          }
+        }
+      },
       project: {
         select: {
           externalProjectId: true

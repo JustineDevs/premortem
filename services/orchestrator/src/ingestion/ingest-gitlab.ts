@@ -26,6 +26,7 @@ import {
   type IngestionBundle,
   summarizeTextPreview
 } from './ingest-project';
+import { extractRiskIntentCandidates } from '@premortem/db';
 
 const CI_FILE_NAMES = ['.gitlab-ci.yml', '.gitlab-ci.yaml'];
 const MANIFEST_NAMES = [
@@ -369,6 +370,19 @@ export async function ingestGitLabProject(input: {
 
   const apps = uniqueTopLevelDirs(repo_tree, 'apps');
   const services = uniqueTopLevelDirs(repo_tree, 'services');
+  const risk_intents = extractRiskIntentCandidates({
+    repo_tree,
+    source_files,
+    source_code_samples,
+    agent_prompts,
+    existing_issues,
+    metadata: {
+      source: 'gitlab',
+      externalProjectId: input.externalProjectId,
+      branch: input.branch,
+      commitSha: input.commitSha ?? null
+    }
+  });
 
   return {
     repoRoot: `gitlab://${input.externalProjectId}`,
@@ -383,6 +397,7 @@ export async function ingestGitLabProject(input: {
     source_code_samples,
     auth_patterns,
     prior_findings,
+    risk_intents,
     agent_registry,
     agent_prompts,
     mcp_config,
@@ -406,6 +421,7 @@ export async function ingestGitLabProject(input: {
       lockfilePackageCount: lockfile_packages.length,
       vulnerabilityHitCount: vulnerability_context.hits.length,
       priorFindingCount: prior_findings.length,
+      riskIntentCount: risk_intents.length,
       sourceCodeSampleCount: Object.keys(source_code_samples).length,
       authPatternCount: auth_patterns.length,
       agentPromptCount: Object.keys(agent_prompts).length,

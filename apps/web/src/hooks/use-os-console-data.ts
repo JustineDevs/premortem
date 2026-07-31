@@ -11,6 +11,7 @@ import {
   readBffErrorMessage,
   shouldRetryBffQuery
 } from '@/lib/bff-client';
+import { browserSecurityFetch } from '@/lib/csrf';
 import type { AuditRun, Project, ProviderType } from '@/lib/premortem-os/types';
 import { mergeConsoleProjects } from '@/lib/premortem-os/merge-console-projects';
 import { normalizeVendorRouting } from '@/lib/premortem-os/vendor-pool';
@@ -473,7 +474,7 @@ export function useOsConsoleData(options: { authStatusQuery: OsAuthStatusQuerySt
   const { data: healthData } = useQuery({
     queryKey: buildOsQueryKey(null, 'health'),
     queryFn: async () => {
-      const response = await fetch('/api/health', { cache: 'no-store' });
+      const response = await browserSecurityFetch('/api/health', { cache: 'no-store' });
       if (response.status === 401 || response.status === 403) {
         return { apiHealthy: false, unauthorized: true } satisfies HealthState;
       }
@@ -603,7 +604,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
   }, [auditsQueryKey, invalidateWorkspace, projectsQueryKey, queryClient, reconciliationQueryKey]);
 
   const patch = useCallback(async (path: string, body: unknown) => {
-    const response = await fetch(path, {
+    const response = await browserSecurityFetch(path, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body)
@@ -618,7 +619,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
   }, [invalidateConsole, queryClient, workspaceQueryKey]);
 
   const post = useCallback(async (path: string, body: unknown) => {
-    const response = await fetch(path, {
+    const response = await browserSecurityFetch(path, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body)
@@ -646,7 +647,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
     patchBillingPlan: (plan: 'free' | 'pro' | 'team' | 'scale' | 'enterprise') =>
       patch('/api/workspace/billing', { plan }),
     createApiKey: async (label: string) => {
-      const response = await fetch('/api/workspace/api-keys', {
+      const response = await browserSecurityFetch('/api/workspace/api-keys', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ label })
@@ -660,7 +661,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
       );
     },
     revokeApiKey: async (keyId: string) => {
-      const response = await fetch(`/api/workspace/api-keys/${keyId}`, {
+      const response = await browserSecurityFetch(`/api/workspace/api-keys/${keyId}`, {
         method: 'DELETE'
       });
       if (!response.ok) {
@@ -675,7 +676,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
       externalAccountId?: string;
       accessScope?: Record<string, unknown>;
     }) => {
-      const response = await fetch('/api/workspace/integrations', {
+      const response = await browserSecurityFetch('/api/workspace/integrations', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(input)
@@ -687,7 +688,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
       invalidateConsole();
     },
     syncIntegration: async (integrationId: string) => {
-      const response = await fetch(`/api/workspace/integrations/${integrationId}/sync`, { method: 'POST' });
+      const response = await browserSecurityFetch(`/api/workspace/integrations/${integrationId}/sync`, { method: 'POST' });
       if (!response.ok) {
         throw new Error(await readBffErrorMessage(response, 'Failed to sync integration.'));
       }
@@ -712,7 +713,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
     },
     startCheckout: async (plan: 'pro' | 'team' | 'scale', interval: 'monthly' | 'yearly' = 'monthly') => {
       trackOsEvent(CanonicalEvents.checkoutStarted, { plan, interval });
-      const response = await fetch('/api/billing/checkout', {
+      const response = await browserSecurityFetch('/api/billing/checkout', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ plan, interval })
@@ -729,7 +730,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
       }
     },
     startBillingPortal: async () => {
-      const response = await fetch('/api/billing/portal', {
+      const response = await browserSecurityFetch('/api/billing/portal', {
         method: 'POST'
       });
       if (!response.ok) {
@@ -749,7 +750,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
         refund?: boolean;
         reason?: string;
       }) => {
-        const response = await fetch('/api/billing/subscription', {
+        const response = await browserSecurityFetch('/api/billing/subscription', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(input)
@@ -773,7 +774,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
     }),
     reconcileIssues: useMutation({
       mutationFn: async () => {
-        const response = await fetch('/api/issues/reconcile', { method: 'POST' });
+        const response = await browserSecurityFetch('/api/issues/reconcile', { method: 'POST' });
         if (!response.ok) {
           throw new Error(await readBffErrorMessage(response, 'Reconciliation failed.'));
         }
@@ -790,7 +791,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
     }),
     cancelAudit: useMutation({
       mutationFn: async (auditRunId: string) => {
-        const response = await fetch(`/api/audits/${auditRunId}/cancel`, { method: 'POST' });
+        const response = await browserSecurityFetch(`/api/audits/${auditRunId}/cancel`, { method: 'POST' });
         if (!response.ok) {
           throw new Error(await readBffErrorMessage(response, 'Failed to cancel audit.'));
         }
@@ -805,7 +806,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
     }),
     pauseAudit: useMutation({
       mutationFn: async (auditRunId: string) => {
-        const response = await fetch(`/api/audits/${auditRunId}/pause`, { method: 'POST' });
+        const response = await browserSecurityFetch(`/api/audits/${auditRunId}/pause`, { method: 'POST' });
         if (!response.ok) {
           throw new Error(await readBffErrorMessage(response, 'Failed to pause audit.'));
         }
@@ -820,7 +821,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
     }),
     resumeAudit: useMutation({
       mutationFn: async (auditRunId: string) => {
-        const response = await fetch(`/api/audits/${auditRunId}/resume`, { method: 'POST' });
+        const response = await browserSecurityFetch(`/api/audits/${auditRunId}/resume`, { method: 'POST' });
         if (!response.ok) {
           throw new Error(await readBffErrorMessage(response, 'Failed to resume audit.'));
         }
@@ -835,7 +836,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
     }),
     stopAllRuntime: useMutation({
       mutationFn: async () => {
-        const response = await fetch('/api/workspace/runtime/stop-all', { method: 'POST' });
+        const response = await browserSecurityFetch('/api/workspace/runtime/stop-all', { method: 'POST' });
         if (!response.ok) {
           throw new Error(await readBffErrorMessage(response, 'Failed to stop runtime.'));
         }
@@ -882,7 +883,7 @@ export function useWorkspaceMutations(options?: { authStatusQuery?: OsAuthStatus
     }),
     installSkill: useMutation({
       mutationFn: async (skillId: string) => {
-        const response = await fetch('/api/workspace/skills/install', {
+        const response = await browserSecurityFetch('/api/workspace/skills/install', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ skillId })
@@ -947,7 +948,7 @@ export function useRepositoryDiscoveryMutations(options?: { queryScope?: OsQuery
   return {
     discoverRepositories: useMutation({
       mutationFn: async (integrationId: string) => {
-        const response = await fetch(`/api/workspace/integrations/${integrationId}/repositories`);
+        const response = await browserSecurityFetch(`/api/workspace/integrations/${integrationId}/repositories`);
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}));
           throw new Error(payload.error || 'Failed to discover repositories.');
@@ -974,7 +975,7 @@ export function useRepositoryDiscoveryMutations(options?: { queryScope?: OsQuery
     }),
     enableRepositories: useMutation({
       mutationFn: async (input: { integrationId: string; externalProjectIds: string[] }) => {
-        const response = await fetch(
+        const response = await browserSecurityFetch(
           `/api/workspace/integrations/${input.integrationId}/repositories/enable`,
           {
             method: 'POST',
@@ -1006,7 +1007,7 @@ export function useRepositoryDiscoveryMutations(options?: { queryScope?: OsQuery
     }),
     disableRepository: useMutation({
       mutationFn: async (input: { integrationId: string; projectId: string }) => {
-        const response = await fetch(
+        const response = await browserSecurityFetch(
           `/api/workspace/integrations/${input.integrationId}/repositories/disable`,
           {
             method: 'POST',
@@ -1028,7 +1029,7 @@ export function useRepositoryDiscoveryMutations(options?: { queryScope?: OsQuery
     }),
     registerPublicRepository: useMutation({
       mutationFn: async (reference: string) => {
-        const response = await fetch('/api/projects/public', {
+        const response = await browserSecurityFetch('/api/projects/public', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ reference })
@@ -1071,7 +1072,7 @@ export function useAuditMutations(options?: { authStatusQuery?: OsAuthStatusQuer
       return queryClient.fetchQuery<AuditRun | null>({
         queryKey: buildOsQueryKey(authStatus, 'audit-detail', auditId),
         queryFn: async () => {
-          const response = await fetch(`/api/audits/${auditId}`);
+          const response = await browserSecurityFetch(`/api/audits/${auditId}`);
           if (!response.ok) return null;
           return parseJsonObject<AuditRun>(await response.json());
         },
@@ -1090,7 +1091,7 @@ export function useAuditMutations(options?: { authStatusQuery?: OsAuthStatusQuer
         provider: ProviderType;
         scanCodeSnippet?: string;
       }) => {
-        const response = await fetch('/api/projects', {
+        const response = await browserSecurityFetch('/api/projects', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(input)
@@ -1111,7 +1112,7 @@ export function useAuditMutations(options?: { authStatusQuery?: OsAuthStatusQuer
     }),
     triggerAudit: useMutation({
       mutationFn: async (input: { projectId?: string; branch?: string }) => {
-        const response = await fetch('/api/audits', {
+        const response = await browserSecurityFetch('/api/audits', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(input)
@@ -1137,7 +1138,7 @@ export function useAuditMutations(options?: { authStatusQuery?: OsAuthStatusQuer
         issueId: string;
         action: ConsoleReviewActionValue;
       }) => {
-        const response = await fetch(`/api/audits/${input.auditId}/issues/${input.issueId}/action`, {
+        const response = await browserSecurityFetch(`/api/audits/${input.auditId}/issues/${input.issueId}/action`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: input.action })
@@ -1173,7 +1174,7 @@ export function useAuditMutations(options?: { authStatusQuery?: OsAuthStatusQuer
           description: input.fields.description,
           recommendedActionSummary: input.fields.recommendation
         };
-        const response = await fetch(`/api/audits/${input.auditId}/issues/${input.findingId}/edit`, {
+        const response = await browserSecurityFetch(`/api/audits/${input.auditId}/issues/${input.findingId}/edit`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -1193,7 +1194,7 @@ export function useAuditMutations(options?: { authStatusQuery?: OsAuthStatusQuer
     }),
     deployPatch: useMutation({
       mutationFn: async (input: { auditId: string; issueId: string }) => {
-        const response = await fetch(`/api/audits/${input.auditId}/patch`, {
+        const response = await browserSecurityFetch(`/api/audits/${input.auditId}/patch`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ issueId: input.issueId })

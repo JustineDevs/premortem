@@ -8,6 +8,7 @@ import {
   assertAuditReadiness,
   extendAuditLease,
   findActiveAuditRun,
+  ensureDefaultPolicyPack,
   prisma,
   createAuditRun,
   createAuditRunEvent,
@@ -19,6 +20,11 @@ import {
   persistGraphSnapshot,
   persistIssueCandidates,
   persistRejectedIssueCandidateArtifacts,
+  persistRiskIntents,
+  classifyPolicyDecision,
+  recordPolicyDecision,
+  recordEvalRun,
+  type RiskIntentCandidate,
   getAuditRunDetails,
   listRecentAuditRunsForOrganization,
   markAuditRunning,
@@ -40,6 +46,7 @@ import {
   type RegisteredAgent
 } from '@premortem/agent-kit';
 import type { CanonicalFinding, IssueCandidate } from '@premortem/agent-kit';
+import { evaluateSynthesizedIssueGroundingGate } from '@premortem/evals';
 import type { GraphSnapshotPayload } from '@premortem/graph-model';
 import { buildAuditJob, type AuditJob } from '@premortem/workflow';
 import {
@@ -112,6 +119,72 @@ const SEVERITY_RANK: Record<CanonicalFinding['severity'], number> = {
   high: 2,
   critical: 3
 };
+
+function normalizePolicySignatureValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizePolicySignatureValue(entry)).join('\u001f');
+  }
+
+  if (value && typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+
+  return String(value ?? '');
+}
+
+function buildIssuePolicySignature(issue: {
+  title: string;
+  category: string;
+  severity: string;
+  confidence: number;
+  predictedFailureSummary: string;
+  whyItMatters: string;
+  triggerConditions: unknown;
+  evidence: unknown;
+  recommendedActionSummary: string;
+  implementationSteps: unknown;
+  doneCriteria: unknown;
+  affectedAssets: unknown;
+  sourceAgents: unknown;
+  sourceFindings: unknown;
+}) {
+  return [
+    issue.title,
+    issue.category,
+    issue.severity,
+    issue.confidence,
+    issue.predictedFailureSummary,
+    issue.whyItMatters,
+    normalizePolicySignatureValue(issue.triggerConditions),
+    normalizePolicySignatureValue(issue.evidence),
+    issue.recommendedActionSummary,
+    normalizePolicySignatureValue(issue.implementationSteps),
+    normalizePolicySignatureValue(issue.doneCriteria),
+    normalizePolicySignatureValue(issue.affectedAssets),
+    normalizePolicySignatureValue(issue.sourceAgents),
+    normalizePolicySignatureValue(issue.sourceFindings)
+  ].join('|');
+}
+
+function toPolicyPackSnapshot(policyPack: {
+  id: string;
+  name: string;
+  scope: string;
+  status: string;
+  rules: unknown;
+  decisionCriteria: unknown;
+  metadata: unknown;
+}) {
+  return {
+    id: policyPack.id,
+    name: policyPack.name,
+    scope: policyPack.scope,
+    status: policyPack.status,
+    rules: policyPack.rules,
+    decisionCriteria: policyPack.decisionCriteria,
+    metadata: policyPack.metadata
+  };
+}
 
 async function beginAudit(auditRunId: string) {
   await markAuditRunning(auditRunId);
@@ -1606,6 +1679,8 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       ingestion_metadata: ingestion.metadata,
       ingestion_source: prepared.ingestionSource,
       workflow_contract: AUDIT_WORKFLOW_CONTRACT,
+      policy_pack: null as ReturnType<typeof toPolicyPackSnapshot> | null,
+      risk_intents: [] as typeof ingestion.risk_intents,
       validation_policy: {
         dedupe: dedupePolicy,
         severity: severityPolicy
@@ -1622,6 +1697,8 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       validation_policy: sharedPayload.validation_policy,
       graph_grounding: sharedPayload.graph_grounding,
       workflow_contract: sharedPayload.workflow_contract,
+      policy_pack: sharedPayload.policy_pack,
+      risk_intents: sharedPayload.risk_intents,
       orbit_context: prepared.orbitContext
         ? {
             status: prepared.orbitContext.status,
@@ -1679,6 +1756,8 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       apps: ingestion.apps,
       source_files: ingestion.source_files,
       source_code_samples: ingestion.source_code_samples,
+      policy_pack: sharedPayload.policy_pack,
+      risk_intents: sharedPayload.risk_intents,
       ownership_hints: ingestion.ownership_hints.slice(0, 80),
       ci_history: {
         pipelines: ingestion.ci_history.pipelines.slice(0, 10),
@@ -1712,6 +1791,8 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
         edges: graphPayload.edges.slice(0, 220)
       },
       graph_grounding: sharedPayload.graph_grounding,
+      policy_pack: sharedPayload.policy_pack,
+      risk_intents: sharedPayload.risk_intents,
       ownership_hints: ingestion.ownership_hints.slice(0, 120),
       git_history: {
         pipelines: ingestion.ci_history.pipelines.slice(0, 8),
@@ -1742,6 +1823,8 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
         .filter((filePath) => /(^|\/)(README|readme|docs)\b/.test(filePath))
         .slice(0, 30),
       graph_grounding: sharedPayload.graph_grounding,
+      policy_pack: sharedPayload.policy_pack,
+      risk_intents: sharedPayload.risk_intents,
       orbit_context: prepared.orbitContext
         ? {
             status: prepared.orbitContext.status,
@@ -1869,6 +1952,36 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       ],
       validation_policy: sharedPayload.validation_policy
     };
+
+    const policyPack = await ensureDefaultPolicyPack({
+      organizationId: input.job.organizationId
+    });
+    const policyPackSnapshot = toPolicyPackSnapshot(policyPack);
+    sharedPayload.policy_pack = policyPackSnapshot;
+    synthesisPayload.policy_pack = policyPackSnapshot;
+    analysisPayload.policy_pack = policyPackSnapshot;
+    topologyPayload.policy_pack = policyPackSnapshot;
+    crossRepoPayload.policy_pack = policyPackSnapshot;
+
+    const persistedRiskIntents =
+      ingestion.risk_intents.length > 0
+        ? await persistRiskIntents({
+            organizationId: input.job.organizationId,
+            projectId: input.job.projectId,
+            auditRunId: input.job.id,
+            intents: ingestion.risk_intents as RiskIntentCandidate[]
+          })
+        : [];
+    const policyIntents = persistedRiskIntents.map((intent, index) => ({
+      ...intent,
+      summary: ingestion.risk_intents[index]?.summary ?? '',
+      status: 'active' as const
+    }));
+    sharedPayload.risk_intents = ingestion.risk_intents;
+    synthesisPayload.risk_intents = ingestion.risk_intents;
+    analysisPayload.risk_intents = ingestion.risk_intents;
+    topologyPayload.risk_intents = ingestion.risk_intents;
+    crossRepoPayload.risk_intents = ingestion.risk_intents;
 
     const agentsThatNeedTheFullPayload = new Set([
       'repo_topology_agent',
@@ -2160,6 +2273,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
     }
 
     let rawIssues: IssueCandidate[] = [];
+    let gateRejectedIssues: IssueValidationDecision[] = [];
 
     if (shouldSkipPhase(checkpoint, AuditCheckpointPhase.VALIDATION)) {
       rawIssues = [];
@@ -2209,6 +2323,66 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
           });
         }
       }
+
+      const groundingChecks = await Promise.all(
+        rawIssues.map(async (issue) => ({
+          issue,
+          groundingErrors: await validateEvidenceGrounding({
+            evidence: issue.evidence,
+            indexes: evidenceGroundingIndexes,
+            sourceContext: evidenceSourceContext
+          })
+        }))
+      );
+      const evalGate = evaluateSynthesizedIssueGroundingGate(groundingChecks);
+      gateRejectedIssues = evalGate.rejectedIssues.map(
+        ({ issue, groundingErrors }) => ({
+          issue,
+          errors: groundingErrors,
+          warnings: ['Rejected by the synthesized issue grounding eval gate.'],
+          validatorName: 'eval_gate'
+        })
+      );
+      rawIssues = evalGate.passedIssues;
+      const evalGateAssertionsForRecord = evalGate.assertions.map((assertion) => ({
+        ...assertion,
+        details: assertion.details as never
+      }));
+      const evalGateOutputPayload = {
+        assertions: evalGateAssertionsForRecord,
+        passedIssueTitles: evalGate.passedIssues.map((issue) => issue.title),
+        rejectedIssueTitles: evalGate.rejectedIssues.map(({ issue }) => issue.title)
+      } as never;
+
+      await recordEvalRun({
+        organizationId: input.job.organizationId,
+        projectId: input.job.projectId,
+        auditRunId: input.job.id,
+        provider: 'promptfoo',
+        name: 'finding_synthesizer_grounding_gate',
+        status: evalGate.metrics.rejectedCount > 0 ? 'failed' : 'completed',
+        summary: `Grounding gate passed ${evalGate.metrics.passedCount}/${evalGate.metrics.issueCount} synthesized issues`,
+        metrics: {
+          issueCount: evalGate.metrics.issueCount,
+          passedCount: evalGate.metrics.passedCount,
+          rejectedCount: evalGate.metrics.rejectedCount,
+          passRate: evalGate.metrics.passRate
+        },
+        inputPayload: {
+          issueTitles: groundingChecks.map((check) => check.issue.title),
+          issueCount: groundingChecks.length
+        },
+        outputPayload: evalGateOutputPayload,
+        assertions: evalGateAssertionsForRecord
+      });
+
+      if (gateRejectedIssues.length > 0) {
+        await recordAuditEvent(input.job.id, 'eval_gate_grounding_rejected', {
+          rejectedCount: gateRejectedIssues.length,
+          titles: gateRejectedIssues.map((decision) => decision.issue.title)
+        });
+      }
+
       completedSpecialists.add(synthesizer.name);
 
       await persistPhaseCheckpoint(input.job.id, AuditCheckpointPhase.SYNTHESIS, {
@@ -2221,6 +2395,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
 
     let reviewableIssues: IssueValidationDecision[] = [];
     let rejectedIssues: IssueValidationDecision[] = [];
+    let policyDecisionCount = 0;
 
     const persistedRun = await getPersistedAuditRun(input.job.id);
     const hasPersistedIssues =
@@ -2310,18 +2485,50 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
         })
       );
 
-      reviewableIssues = validationDecisions
-        .filter((decision) => decision.errors.length === 0)
-        .map((decision) => ({
+      const policyAwareDecisions = validationDecisions.map((decision) => {
+        const policyDecision = classifyPolicyDecision({
+          issue: {
+            title: decision.issue.title,
+            category: decision.issue.category,
+            severity: decision.issue.severity,
+            predictedFailureSummary: decision.issue.predicted_failure_summary,
+            whyItMatters: decision.issue.why_it_matters,
+            affectedAssets: decision.issue.affected_assets,
+            sourceAgents: decision.issue.source_agents,
+            sourceFindings: decision.issue.source_findings
+          },
+          riskIntents: policyIntents,
+          policyPack: policyPackSnapshot
+        });
+
+        return {
+          ...decision,
+          policyDecision,
+          warnings:
+            policyDecision.outcome === 'batch_later' || policyDecision.outcome === 'suppress'
+              ? [...decision.warnings, policyDecision.rationale]
+              : decision.warnings
+        };
+      });
+
+      const reviewablePolicyDecisions = policyAwareDecisions.filter(
+        (decision) => decision.errors.length === 0 && decision.policyDecision.outcome !== 'suppress'
+      );
+      const rejectedPolicyDecisions = policyAwareDecisions.filter(
+        (decision) => decision.errors.length > 0 || decision.policyDecision.outcome === 'suppress'
+      );
+
+      reviewableIssues = reviewablePolicyDecisions.map((decision) => ({
+        ...decision,
+        issue: downgradeSeverityForConfidence(decision.issue, severityPolicy)
+      }));
+      rejectedIssues = [
+        ...gateRejectedIssues,
+        ...rejectedPolicyDecisions.map((decision) => ({
           ...decision,
           issue: downgradeSeverityForConfidence(decision.issue, severityPolicy)
-        }));
-      rejectedIssues = validationDecisions
-        .filter((decision) => decision.errors.length > 0)
-        .map((decision) => ({
-          ...decision,
-          issue: downgradeSeverityForConfidence(decision.issue, severityPolicy)
-        }));
+        }))
+      ];
 
       if (reviewableIssues.length === 0 && findingsForClustering.length > 0) {
         const fallbackIssues = synthesizeFallbackIssueCandidates(findingsForClustering);
@@ -2368,10 +2575,15 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
               ...decision,
               issue: downgradeSeverityForConfidence(decision.issue, severityPolicy)
             }));
-            rejectedIssues = validationDecisions.filter((decision) => decision.errors.length > 0).map((decision) => ({
-              ...decision,
-              issue: downgradeSeverityForConfidence(decision.issue, severityPolicy)
-            }));
+            rejectedIssues = [
+              ...gateRejectedIssues,
+              ...validationDecisions
+                .filter((decision) => decision.errors.length > 0)
+                .map((decision) => ({
+                  ...decision,
+                  issue: downgradeSeverityForConfidence(decision.issue, severityPolicy)
+                }))
+            ];
           }
         }
       }
@@ -2398,7 +2610,7 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       }
 
       if (reviewableIssues.length > 0) {
-        await saveIssueCandidates({
+        const persistedIssueCandidates = await saveIssueCandidates({
           organizationId: input.job.organizationId,
           projectId: input.job.projectId,
           auditRunId: input.job.id,
@@ -2411,6 +2623,98 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
             validatorName: decision.validatorName
           }))
         });
+
+        await Promise.all(
+          reviewableIssues.map(async (decision, index) => {
+            const policyDecision = classifyPolicyDecision({
+              issue: {
+                title: decision.issue.title,
+                category: decision.issue.category,
+                severity: decision.issue.severity,
+                predictedFailureSummary: decision.issue.predicted_failure_summary,
+                whyItMatters: decision.issue.why_it_matters,
+                affectedAssets: decision.issue.affected_assets,
+                sourceAgents: decision.issue.source_agents,
+                sourceFindings: decision.issue.source_findings
+              },
+              riskIntents: policyIntents,
+              policyPack: policyPackSnapshot
+            });
+            const matchingRiskIntentId =
+              (policyDecision.details as { matchingRiskIntentIds?: unknown } | undefined)
+                ?.matchingRiskIntentIds;
+            const riskIntentId = Array.isArray(matchingRiskIntentId)
+              ? matchingRiskIntentId.find((value): value is string => typeof value === 'string' && value.length > 0)
+              : undefined;
+
+            await recordPolicyDecision({
+              organizationId: input.job.organizationId,
+              projectId: input.job.projectId,
+              auditRunId: input.job.id,
+              issueCandidateId: persistedIssueCandidates[index]?.id ?? null,
+              riskIntentId,
+              policyPackId: policyPack.id,
+              outcome: policyDecision.outcome,
+              rationale: policyDecision.rationale,
+              details: {
+                ...policyDecision.details,
+                validationErrors: decision.errors,
+                validationWarnings: decision.warnings,
+                validatorName: decision.validatorName
+              },
+              score: policyDecision.score
+            });
+          })
+        );
+        policyDecisionCount += persistedIssueCandidates.length;
+      }
+
+      if (rejectedIssues.length > 0) {
+        await Promise.all(
+          rejectedIssues.map(async (decision) => {
+            const policyDecision = classifyPolicyDecision({
+              issue: {
+                title: decision.issue.title,
+                category: decision.issue.category,
+                severity: decision.issue.severity,
+                predictedFailureSummary: decision.issue.predicted_failure_summary,
+                whyItMatters: decision.issue.why_it_matters,
+                affectedAssets: decision.issue.affected_assets,
+                sourceAgents: decision.issue.source_agents,
+                sourceFindings: decision.issue.source_findings
+              },
+              riskIntents: policyIntents,
+              policyPack: policyPackSnapshot
+            });
+            const matchingRiskIntentId =
+              (policyDecision.details as { matchingRiskIntentIds?: unknown } | undefined)
+                ?.matchingRiskIntentIds;
+            const riskIntentId = Array.isArray(matchingRiskIntentId)
+              ? matchingRiskIntentId.find(
+                  (value): value is string => typeof value === 'string' && value.length > 0
+                )
+              : undefined;
+
+            await recordPolicyDecision({
+              organizationId: input.job.organizationId,
+              projectId: input.job.projectId,
+              auditRunId: input.job.id,
+              issueCandidateId: null,
+              riskIntentId,
+              policyPackId: policyPack.id,
+              outcome: policyDecision.outcome,
+              rationale: policyDecision.rationale,
+              details: {
+                ...policyDecision.details,
+                validationErrors: decision.errors,
+                validationWarnings: decision.warnings,
+                validatorName: decision.validatorName
+              },
+              score: policyDecision.score
+            });
+          })
+        );
+        policyDecisionCount += rejectedIssues.length;
       }
 
       await persistPhaseCheckpoint(input.job.id, AuditCheckpointPhase.VALIDATION, {
@@ -2425,6 +2729,9 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
     const issueCandidateCount = finalRun?.issueCandidates.length ?? reviewableIssues.length;
     const rejectedIssueCount =
       finalRun?.rejectedIssueCandidateArtifacts.length ?? rejectedIssues.length;
+    const riskIntentCount = finalRun?.riskIntents.length ?? 0;
+    const fixVerificationCount = finalRun?.fixVerifications.length ?? 0;
+    const evalRunCount = finalRun?.evalRuns.length ?? 0;
 
     const auditSummary = {
       findingCount: findingIdMap.size,
@@ -2432,6 +2739,10 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
       clusterCount: persistedClusters.length,
       issueCandidateCount,
       rejectedIssueCount,
+      policyDecisionCount,
+      riskIntentCount,
+      fixVerificationCount,
+      evalRunCount,
       registryAgentCount: agents.length,
       graphNodeCount: graphPayload.nodes.length,
       graphEdgeCount: graphPayload.edges.length,
@@ -2486,10 +2797,10 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
     }
 
     try {
-    const findingConfidenceAvg =
-      findings.length > 0
-        ? findings.reduce((total, finding) => total + finding.confidence, 0) / findings.length
-        : undefined;
+      const findingConfidenceAvg =
+        findings.length > 0
+          ? findings.reduce((total, finding) => total + finding.confidence, 0) / findings.length
+          : undefined;
       const evidenceCountMin =
         findings.length > 0
           ? Math.min(...findings.map((finding) => finding.evidence.length))
@@ -2542,6 +2853,45 @@ async function executeAuditJobCore(input: ExecuteAuditJobInput): Promise<AuditEx
         findingsCount: findingIdMap.size,
         phoenixEval,
         phoenixLlmEval
+      });
+
+      await recordEvalRun({
+        organizationId: input.job.organizationId,
+        projectId: input.job.projectId,
+        auditRunId: input.job.id,
+        provider: 'langfuse',
+        name: 'audit_mission_quality',
+        status: phoenixLlmEval?.passed === false ? 'failed' : 'completed',
+        summary: `Phoenix ${phoenixEval.label}; LLM ${phoenixLlmEval?.label ?? 'not-run'}`,
+        metrics: {
+          findingCount: findingIdMap.size,
+          issueCandidateCount,
+          phoenixScore: phoenixEval.score,
+          phoenixPassed: phoenixEval.passed,
+          llmScore: phoenixLlmEval?.score ?? null,
+          llmPassed: phoenixLlmEval?.passed ?? null,
+          refusalRate: refusalRate ?? null
+        },
+        inputPayload: {
+          auditRunId: input.job.id,
+          findingCount: findingIdMap.size,
+          issueCandidateCount,
+          sampleFindingTitles: reviewableIssues.slice(0, 8).map((decision) => decision.issue.title)
+        },
+        outputPayload: {
+          phoenixEval,
+          phoenixLlmEval: phoenixLlmEval ? JSON.parse(JSON.stringify(phoenixLlmEval)) : null
+        },
+        assertions: phoenixEval.checks.map((check) => ({
+          assertionKey: check.name,
+          status: check.pass ? 'passed' : 'failed',
+          score: check.score,
+          details: {
+            name: check.name,
+            pass: check.pass,
+            score: check.score
+          }
+        }))
       });
 
       await createLangfuseScore({

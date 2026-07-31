@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { premortemBrand } from '@/lib/premortem-os/branding';
 import { buildOsQueryKey, type OsQueryScope } from '@/hooks/use-os-console-data';
 import { isUnauthorizedBffError, shouldRetryBffQuery } from '@/lib/bff-client';
+import { browserSecurityFetch } from '@/lib/csrf';
 import {
   formatDate,
   getAuditRowKey,
@@ -194,7 +195,7 @@ export function DashboardView({
       return shouldPollMonitor ? 5000 : false;
     },
     queryFn: async () => {
-      const response = await fetch(`/api/audits/${monitorAuditId}?hydrate=0`);
+      const response = await browserSecurityFetch(`/api/audits/${monitorAuditId}?hydrate=0`);
       if (!response.ok) {
         throw new Error('Failed to load dashboard monitor snapshot.');
       }
@@ -230,7 +231,7 @@ export function DashboardView({
 
     setIsExportingSarif(true);
     try {
-      const response = await fetch(`/api/audits/${targetAudit.id}/sarif`, {
+      const response = await browserSecurityFetch(`/api/audits/${targetAudit.id}/sarif`, {
         headers: { accept: 'application/sarif+json' }
       });
       if (!response.ok) {

@@ -4,7 +4,11 @@
  * This module formats reviewer-approved issue data into GitLab issue bodies,
  * applies work-item metadata, creates the remote issue, and records the publish result.
  */
-import { prisma, resolveGitLabCredentialsForProject } from '@premortem/db';
+import {
+  linkPublishedIssueLineage,
+  prisma,
+  resolveGitLabCredentialsForProject
+} from '@premortem/db';
 import { createOrganizationNotifications } from '@premortem/db/notifications';
 import { recordUsageEvent } from '@premortem/db';
 import { resolvePremortemPublishSiteUrl } from '@premortem/domain';
@@ -44,6 +48,7 @@ interface PublishableIssue {
   affectedAssets: unknown;
   sourceAgents: unknown;
   sourceFindings: unknown;
+  clusterId?: string | null;
   project: { externalProjectId: string; provider: string; repoUrl?: string | null };
   publishedIssue: { id: string; url: string | null } | null;
   auditRun?: { branch: string; commitSha: string | null } | null;
@@ -51,6 +56,12 @@ interface PublishableIssue {
 }
 
 type PublishableEvidence = EvidenceRefLike;
+type PublishedIssueLinkRelationType =
+  | 'supersedes'
+  | 'regressed_by'
+  | 'resolved_by'
+  | 'related_to'
+  | 'mitigated_by';
 
 /**
  * Publish one approved issue candidate to GitLab and persist the resulting
@@ -192,6 +203,39 @@ export async function publishIssueCandidateToGitLab(issue: PublishableIssue) {
       lastSyncedAt: new Date()
     }
   });
+
+  if (issue.clusterId) {
+    const priorPublishedIssue = await prisma.publishedIssue.findFirst({
+      where: {
+        projectId: issue.projectId,
+        issueCandidate: {
+          clusterId: issue.clusterId
+        },
+        id: {
+          not: publishedIssue.id
+        }
+      },
+      orderBy: [
+        {
+          publishedAt: 'desc'
+        },
+        {
+          createdAt: 'desc'
+        }
+      ],
+      select: {
+        id: true
+      }
+    });
+
+    if (priorPublishedIssue?.id) {
+      await linkPublishedIssueLineage({
+        publishedIssueId: publishedIssue.id,
+        priorPublishedIssueId: priorPublishedIssue.id,
+        relationType: 'supersedes' as PublishedIssueLinkRelationType
+      });
+    }
+  }
 
   await createOrganizationNotifications({
     organizationId: issue.organizationId,

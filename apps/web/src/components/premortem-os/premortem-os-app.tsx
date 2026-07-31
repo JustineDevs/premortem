@@ -25,6 +25,7 @@ import { OsToast } from './os-toast';
 import { OsDiagnosticBanner } from './os-diagnostic-banner';
 import { resolveGitLabAccessState } from '@/lib/provider-access';
 import { bffFetchJson } from '@/lib/bff-client';
+import { browserSecurityFetch } from '@/lib/csrf';
 import { formatIntegrationNotice } from '@/lib/integration-notices';
 import { buildOsDiagnostic } from '@/lib/diagnostics';
 import { mapSnapshotToAuditRun } from '@/lib/premortem-api/map-runtime-to-console';
@@ -388,7 +389,7 @@ export function PremortemOsApp() {
         queryKey: buildOsQueryKey(osQueryScope, 'audit-detail', auditId),
         staleTime: 60_000,
         queryFn: async () => {
-          const res = await fetch(`/api/audits/${auditId}?hydrate=0`, { cache: 'no-store' });
+          const res = await browserSecurityFetch(`/api/audits/${auditId}?hydrate=0`, { cache: 'no-store' });
           if (!res.ok) {
             const { readBffErrorMessage } = await import('@/lib/bff-client');
             throw new Error(await readBffErrorMessage(res, 'Failed to load audit detail.'));
@@ -645,7 +646,7 @@ export function PremortemOsApp() {
         projectId ??
         pickDefaultWorkflowProjectId(projects, audits) ??
         selectRealProject(projects)?.id;
-      const response = await fetch('/api/audits/sandbox', {
+      const response = await browserSecurityFetch('/api/audits/sandbox', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

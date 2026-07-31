@@ -502,7 +502,7 @@ export const runAuditGuideDoc = {
       heading: 'Runtime controls',
       bullets: [
         'Operations Runtime shows pipeline progress, agent count, and terminal logs.',
-        'Stop all: POST /api/workspace/runtime/stop-all disables continuous audit and cancels queued/running/paused runs.',
+        'Stop all control in Runtime disables continuous audit and cancels queued, running, and paused runs.',
         'POST /api/audits/:id/pause saves a checkpoint and sets runStatus paused (orchestrator cooperative stop).',
         'POST /api/audits/:id/resume re-enqueues from the last checkpoint phase.'
       ]
@@ -570,6 +570,51 @@ export const reviewPublishGuideDoc = {
   ]
 } as const;
 
+export const internalApiOperationsDoc = {
+  title: 'API operations (internal)',
+  lead: 'Internal operator-only API reference for runtime controls, worker routes, and service-to-service calls. This reference is intentionally not linked from the public docs hub.',
+  audience: 'Operators, backend maintainers, and service automation.',
+  expectedResult: 'You know which routes are reserved for internal tooling and how they map to the worker surfaces.',
+  toc: [
+    { id: 'auth', label: 'Authentication' },
+    { id: 'runtime', label: 'Runtime controls' },
+    { id: 'services', label: 'Worker and webhook routes' }
+  ],
+  sections: [
+    {
+      id: 'auth',
+      heading: 'Authentication',
+      bullets: [
+        'Browser traffic should use the BFF, not the worker API directly.',
+        'Direct worker callers may use Bearer service auth in production.',
+        'Local verification can still use PREMORTEM_AUTH_DISABLED=1 with verification-only scripts.'
+      ]
+    },
+    {
+      id: 'runtime',
+      heading: 'Runtime controls',
+      bullets: [
+        'POST /api/workspace/runtime/stop-all disables continuous audit and cancels queued, running, and paused runs.',
+        'POST /api/audits/:id/pause stores a checkpoint for cooperative stop.',
+        'POST /api/audits/:id/resume restarts from the last checkpoint phase.'
+      ]
+    },
+    {
+      id: 'services',
+      heading: 'Worker and webhook routes',
+      bullets: [
+        'POST /api/mcp and /api/mcp/healthz are worker surfaces for MCP transport.',
+        'POST /api/webhooks/gitlab and POST /api/stripe/webhook are server-to-server delivery surfaces.',
+        'POST /api/slack/events and POST /api/slack/premortem are internal integration entry points.'
+      ]
+    }
+  ],
+  relatedLinks: [
+    { href: marketingLinks.docsReferenceApi, label: 'Public API routes' },
+    { href: marketingLinks.docsGuidesRunAudit, label: 'Run an audit' }
+  ]
+} as const;
+
 export const apiReferenceDoc = {
   title: 'API routes',
   lead: 'HTTP endpoints exposed by the Premortem API worker: use the same routes from /app BFF proxies locally.',
@@ -589,7 +634,7 @@ export const apiReferenceDoc = {
       heading: 'Authentication',
       bullets: [
         'Browser: Supabase session cookie on BFF routes (/api/* on web).',
-        'Direct API worker: Bearer token or internal service auth in production.',
+        'Production API: service-to-service callers only; browsers should stay on the BFF path.',
         'Local verification: PREMORTEM_AUTH_DISABLED=1 with local verification org/project IDs.'
       ],
       codeBlocks: [
@@ -623,7 +668,7 @@ export const apiReferenceDoc = {
       bullets: [
         'GET /api/workspace · org, billing, usage, runtime, integrations bundle.',
         'PATCH /api/workspace/runtime · continuousAuditEnabled boolean (OFF = no automatic audits).',
-        'POST /api/workspace/runtime/stop-all · disable continuous audit and cancel active runs.',
+        'Runtime controls live in /app; see the internal API operations reference for operator-only endpoints.',
         'PATCH /api/workspace/llm · /work-item-attributes · /policies · /notifications.',
         'POST /api/projects · register repository resource.'
       ]

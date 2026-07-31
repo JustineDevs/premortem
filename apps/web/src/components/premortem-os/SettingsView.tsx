@@ -71,6 +71,7 @@ import { resolveSettingsAccess } from "./settings-access";
 import { useWorkspace } from "@/hooks/use-workspace";
 import { buildOsQueryKey, useReconciliationEvents, type OsQueryScope } from "@/hooks/use-os-console-data";
 import { shouldRetryBffQuery } from "@/lib/bff-client";
+import { browserSecurityFetch } from "@/lib/csrf";
 
 type NotificationInboxItem = {
   id: string;
@@ -436,7 +437,7 @@ export function SettingsView({
     refetchOnWindowFocus: false,
     retry: shouldRetryBffQuery,
     queryFn: async () => {
-      const response = await fetch('/api/workspace/notifications?limit=25');
+      const response = await browserSecurityFetch('/api/workspace/notifications?limit=25');
       if (!response.ok) {
         throw new Error('Failed to load notifications.');
       }
@@ -675,7 +676,7 @@ export function SettingsView({
     }
 
     try {
-      const response = await fetch(
+      const response = await browserSecurityFetch(
         `/api/projects/${selectedProject.id}/settings`,
         {
           method: "PATCH",
@@ -725,7 +726,7 @@ export function SettingsView({
 
   const markNotificationsRead = async (notificationIds?: string[]) => {
     try {
-      const response = await fetch("/api/workspace/notifications/read", {
+      const response = await browserSecurityFetch("/api/workspace/notifications/read", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ notificationIds }),
